@@ -89,7 +89,9 @@ of the turn.
 In Codex, `auto-context` is not on PATH: the hooks suggest commands with an absolute path
 (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`; a path with spaces
 or other unusual characters is in single quotes), and the skills run them the same way; if a hook did not
-supply a path, the skill finds the binary in the Codex plugin cache by itself. The plugin binary at an absolute path usually runs without a prompt; if
+supply a path, the skill looks only under the `auto-context` marketplace of the Codex plugin cache
+(`~/.codex/plugins/cache/auto-context/auto-context/<version>/bin/auto-context`, highest version), shows you
+the path before the first run and always runs it quoted; if it finds none, it asks you. The plugin binary at an absolute path usually runs without a prompt; if
 Codex is about to ask anyway, the `PermissionRequest` hook approves the plugin's CLI calls by that absolute path only (`ack`,
 `status`, `units`, `changes`, `version`; `ack --exclude` always asks).
 

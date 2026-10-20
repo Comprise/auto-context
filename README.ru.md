@@ -89,7 +89,9 @@ codex plugin marketplace add Comprise/auto-context --ref release
 В Codex `auto-context` не в PATH: хуки предлагают команды с абсолютным путём
 (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`; путь с пробелами
 или другими необычными символами — в одинарных кавычках), и навыки выполняют их так же; если хук пути
-не дал, навык находит бинарник в кэше плагинов Codex сам. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
+не дал, навык ищет только в маркетплейсе `auto-context` кэша плагинов Codex
+(`~/.codex/plugins/cache/auto-context/auto-context/<version>/bin/auto-context`, старшая версия), показывает
+вам путь перед первым запуском и всегда запускает его в кавычках; если не нашёл — спрашивает вас. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
 Codex всё же собрался спросить, хук `PermissionRequest` одобряет вызовы CLI плагина только по этому абсолютному пути (`ack`,
 `status`, `units`, `changes`, `version`; `ack --exclude` всегда спрашивает).
 

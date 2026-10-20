@@ -4,7 +4,7 @@ description: This skill should be used when creating or updating a unit's index 
 ---
 # auto-context docs
 
-In Codex, `auto-context` is not on PATH. Run it exactly as a hook message wrote it (an absolute path, single-quoted if it has unusual characters). If no hook message gave the path, find it with `ls -td "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/auto-context/*/bin/auto-context | head -n 1` and run that path; if nothing is found, ask the user.
+In Codex, `auto-context` is not on PATH. If a hook message gave the binary's path, run it exactly as the message wrote it (an absolute path, single-quoted if it has unusual characters). Otherwise find it with `ls -d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/auto-context/auto-context/*/bin/auto-context 2>/dev/null | sort -V | tail -n 1`, tell the user the path you found before running it the first time, and always run it quoted (`'<path>' status`); if nothing is found, ask the user.
 
 Each unit has two docs (for `_root`: the root index file and `context/_root.md`):
 - `<unit>/<index file>` — a short index. The index file is `CLAUDE.md` by default; `index_file:
