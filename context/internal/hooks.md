@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:dcf88d9cd45108e5f74cd997ee967b04727b154a6a4f92113c45fb9f88e7adb6
+source_hash: sha256:ad9d9dcdcfc2c53d885565b2a3135c243e3974ca07192bc3a6cf608c937cf985
 updated: "2026-10-20"
 ---
 # internal/hooks
@@ -42,7 +42,7 @@ updated: "2026-10-20"
 - Текст конфига и логов в контекст Claude не попадает — только числа и фиксированные категории; исключение — `language`, проверенный код языка (`LanguageNote`). Причина неудачного авто-ack или отказа SessionStart — фиксированная категория (`errCategory`; для `units.ErrGitTimeout`/`ErrListTooLarge` — совет про `.gitignore`), полный текст ошибки — только в логе.
 - При заданном `language` SessionStart выводит `LanguageNote` всегда, даже когда доки актуальны. Stop добавляет его к напоминаниям о коде и новых юнитах.
 - `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
-- `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context`, а при пустой переменной или пути вне `A-Za-z0-9_./-` — `auto-context`. Путь склеивается через `/` (`path.Join`) на любой ОС: это текст для POSIX-shell, а не путь для файловой системы. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту абсолютную форму (ровно свой путь, остальные правила те же), без проверки `shadowed`.
+- `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context` (чистая `codexCLI(root)`; при символах вне `A-Za-z0-9_./-` путь целиком в одинарных кавычках, `'` как `'\''`), а при пустой переменной, неабсолютном пути, невалидном UTF-8 или управляющих символах — `auto-context`. Путь склеивается через `/` (`path.Join`) на любой ОС: это текст для POSIX-shell, а не путь для файловой системы. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту форму (литеральный префикс `Codex.CLI()+" "`, в том числе в кавычках; остальные правила те же), без проверки `shadowed`.
 
 ## Связи
 Зависит от: `internal/config`, `internal/docstate`, `internal/fsutil`, `internal/logx`, `internal/project`, `internal/rootindex`, `internal/session`, `internal/units`.

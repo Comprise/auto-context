@@ -1133,3 +1133,11 @@ func TestStopSubdirBecomesUnitFlagsParent(t *testing.T) {
 		t.Errorf("svc/sub state = %v, want OK", got)
 	}
 }
+
+func TestStopReasonCodexQuotedCLI(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/home/my user/p")
+	got := StopReason(Feedback{Agent: Codex, Changed: []string{"svc"}})
+	if want := "`'/home/my user/p/bin/auto-context' ack svc`"; !strings.Contains(got, want) {
+		t.Errorf("reason lacks %s:\n%s", want, got)
+	}
+}

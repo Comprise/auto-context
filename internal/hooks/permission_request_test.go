@@ -75,3 +75,26 @@ func TestPermissionRequestAbsolutePath(t *testing.T) {
 		t.Errorf("claude approved the absolute form: out=%q err=%v", out, err)
 	}
 }
+
+func TestPermissionRequestQuotedRoot(t *testing.T) {
+	root := "/home/o'neil/.codex/plugins/cache/m/auto-context/1.0.0"
+	t.Setenv("CLAUDE_PLUGIN_ROOT", root)
+	cli := codexCLI(root)
+	allow := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+	codex := testEnv(t.TempDir())
+	codex.Agent = Codex
+	if out, err := PermissionRequest(codex, preInput("Bash", cli+" ack src/auth")); err != nil || string(out) != allow {
+		t.Errorf("quoted path: got %s, %v", out, err)
+	}
+	for _, cmd := range []string{
+		cli + " ack x; rm -rf /",
+		cli + " ack --exclude x",
+		root + "/bin/auto-context ack x",
+		`"` + root + `/bin/auto-context" ack x`,
+		cli + "  status",
+	} {
+		if out, err := PermissionRequest(codex, preInput("Bash", cmd)); err != nil || out != nil {
+			t.Errorf("%q: out=%q err=%v, want nothing", cmd, out, err)
+		}
+	}
+}

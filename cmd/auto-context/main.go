@@ -82,6 +82,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string) i
 			logHook(config.FindRoot(cwd), "hook: bad arguments")
 			return 0
 		}
+		if rest[0] == "permission-request" && agent != hooks.Codex {
+			logHook(config.FindRoot(cwd), "hook: bad arguments")
+			return 0
+		}
 		return runHook(rest[0], agent, stdin, stdout, cwd)
 	case "ack":
 		return runAck(rest, stdout, stderr, cwd)

@@ -130,10 +130,30 @@ func TestCodexCLIPath(t *testing.T) {
 	}
 
 	f.Agent = Codex
-	for _, bad := range []string{"", "/home/u/my plugin", "relative/path", "/x;rm"} {
+	for _, bad := range []string{"", "relative/path", "/x\n"} {
 		t.Setenv("CLAUDE_PLUGIN_ROOT", bad)
 		if got := StopReason(f); !strings.Contains(got, "`auto-context ack src/auth`") {
 			t.Errorf("root %q: want the bare name: %s", bad, got)
+		}
+	}
+}
+
+func TestCodexCLI(t *testing.T) {
+	for _, c := range []struct{ root, want string }{
+		{"", "auto-context"},
+		{"rel/p", "auto-context"},
+		{`C:\Users\u\p`, "auto-context"},
+		{"/home/u/p", "/home/u/p/bin/auto-context"},
+		{"/c/Users/u/p", "/c/Users/u/p/bin/auto-context"},
+		{"/home/my user/p", "'/home/my user/p/bin/auto-context'"},
+		{"/home/o'neil/p", `'/home/o'\''neil/p/bin/auto-context'`},
+		{"/home/ü/p", "'/home/ü/p/bin/auto-context'"},
+		{"/home/u/p\n", "auto-context"},
+		{"/home/u\x7f", "auto-context"},
+		{"/home/\xff", "auto-context"},
+	} {
+		if got := codexCLI(c.root); got != c.want {
+			t.Errorf("codexCLI(%q) = %q, want %q", c.root, got, c.want)
 		}
 	}
 }

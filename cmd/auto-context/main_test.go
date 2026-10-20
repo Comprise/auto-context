@@ -1263,3 +1263,25 @@ func TestAckExcludeAgentsIndex(t *testing.T) {
 		t.Error("CLAUDE.md was created")
 	}
 }
+
+func TestHookPermissionRequestNeedsCodex(t *testing.T) {
+	root := repo(t)
+	in := `{"tool_name":"Bash","tool_input":{"command":"auto-context status"},"cwd":` + quote(root) + `}`
+	for _, args := range [][]string{
+		{"hook", "permission-request"},
+		{"hook", "permission-request", "--agent", "claude"},
+	} {
+		if c, out, _ := do(root, in, args...); c != 0 || out != "" {
+			t.Fatalf("%v: code=%d out=%q", args, c, out)
+		}
+		data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "log"))
+		if !strings.Contains(string(data), "hook: bad arguments") {
+			t.Errorf("%v: log = %q", args, data)
+		}
+		os.Remove(filepath.Join(root, ".auto-context", "log"))
+	}
+	want := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` + "\n"
+	if c, out, _ := do(root, in, "hook", "permission-request", "--agent", "codex"); c != 0 || out != want {
+		t.Fatalf("codex: code=%d out=%q", c, out)
+	}
+}

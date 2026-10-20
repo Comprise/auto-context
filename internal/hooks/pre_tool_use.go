@@ -37,8 +37,9 @@ func PreToolUse(env Env, in Input) ([]byte, error) {
 
 // approvable reports whether the tool call is a Bash run of the plugin's own
 // CLI that both agents' hooks may approve. Codex runs it by absolute path (its
-// shell has no plugin bin/ on PATH); that path points at the plugin's binary
-// itself, so PATH shadowing does not matter for it.
+// shell has no plugin bin/ on PATH); only the literal Codex.CLI() text (quoted
+// as it suggests, if needed) is accepted as that prefix, and it points at the
+// plugin's binary itself, so PATH shadowing does not matter for it.
 func approvable(env Env, in Input) bool {
 	if in.ToolName != "Bash" {
 		return false
