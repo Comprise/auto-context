@@ -4,10 +4,10 @@ Skills плагина. Claude Code и Codex находят каждый по `sk
 
 | Skill | Вызов (Claude Code) | Вызов (Codex) | Назначение |
 |---|---|---|---|
-| `auto-context-docs` | Claude сам | агент сам, `$auto-context-docs` | правила ведения `<unit>/CLAUDE.md` и `context/<unit>.md`: когда обновлять, когда только `ack`, формат, язык |
-| `init` | `/auto-context:init` | `$init` (не встроенный `/init` Codex) | первичная разметка: юниты, язык доков, создание доков |
-| `sync` | `/auto-context:sync` | `$sync` | обновить устаревшие и недостающие доки |
-| `status` | `/auto-context:status`, Claude сам | `$status` | сводка состояния доков |
+| `auto-context-docs` | Claude сам | агент сам, `$auto-context:auto-context-docs` | правила ведения `<unit>/CLAUDE.md` и `context/<unit>.md`: когда обновлять, когда только `ack`, формат, язык |
+| `init` | `/auto-context:init` | `$auto-context:init` (не встроенный `/init` Codex) | первичная разметка: юниты, язык доков, создание доков |
+| `sync` | `/auto-context:sync` | `$auto-context:sync` | обновить устаревшие и недостающие доки |
+| `status` | `/auto-context:status`, Claude сам | `$auto-context:status` | сводка состояния доков |
 
 - `disable-model-invocation: true` у `init` и `sync`: они меняют файлы проекта и запускаются только пользователем.
 - `allowed-tools` есть только у `sync` (`Bash(auto-context status --stale)` для `!`-вставки). Другие разрешения skills не выдают: `ack --exclude` правит конфиг и должен спрашивать.

@@ -1020,7 +1020,7 @@ func TestHookAgentFlag(t *testing.T) {
 	}
 	write(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
 	code, out, _ := do(t.TempDir(), in, "hook", "stop", "--agent", "codex")
-	if code != 0 || !strings.Contains(out, "$auto-context-docs") {
+	if code != 0 || !strings.Contains(out, "$auto-context:auto-context-docs") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }

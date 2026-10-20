@@ -1,10 +1,10 @@
 ---
 name: sync
-description: This skill should be used when the user runs /auto-context:sync (or $sync in Codex) to check auto-context docs now and bring stale or missing unit docs up to date (after git pull, branch switches or manual edits between sessions).
+description: This skill should be used when the user runs /auto-context:sync (or $auto-context:sync in Codex) to check auto-context docs now and bring stale or missing unit docs up to date (after git pull, branch switches or manual edits between sessions).
 disable-model-invocation: true
 allowed-tools: Bash(auto-context status --stale)
 ---
-# /auto-context:sync (Codex: $sync)
+# /auto-context:sync (Codex: $auto-context:sync)
 
 In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
 
@@ -20,7 +20,7 @@ Current state (`auto-context status --stale`):
      be read or parsed, and
      `ack` refuses. Tell the user to fix `.auto-context/config.yaml` and stop.
    - `all docs up to date` and no `belongs to no unit` note: say so and stop.
-2. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context-docs`); follow it for every doc.
+2. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context:auto-context-docs`); follow it for every doc.
 3. `missing` units: ask the user once, listing them all, which to document (step "1. Decide"). `_root` cannot be
    excluded: if it is missing, create `context/_root.md` (and the root index file purpose line).
 4. `note: … belongs to no unit`: apply the "Unit removed" rule of the docs skill (it asks the user first).

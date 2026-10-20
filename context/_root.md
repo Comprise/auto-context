@@ -1,6 +1,6 @@
 ---
 unit: _root
-source_hash: sha256:3fc92eb084d5acd92968126b6409478dc6af812eef9ca021ef1070b0eb9e5c89
+source_hash: sha256:e2eb6f50f51409009215e3af5c28959b36b7a85097ce7a3c0c518c123fb1b2dd
 updated: "2026-10-20"
 ---
 # _root
@@ -11,7 +11,7 @@ updated: "2026-10-20"
 `AGENTS.md`, ключ `index_file`; оглавление, агент подгружает его лениво при работе с файлами каталога) и подробный `context/<unit>.md` (читается явно).
 Плагин после каждого хода Claude замечает, что код юнита изменился, а документы нет, и просит
 обновить их или подтвердить несущественность правки (`auto-context ack`). Текст документов пишет
-сама сессия Claude по навыку `auto-context:auto-context-docs` (в Codex `$auto-context-docs`); бинарник только следит и ведёт хэши.
+сама сессия Claude по навыку `auto-context:auto-context-docs` (в Codex `$auto-context:auto-context-docs`); бинарник только следит и ведёт хэши.
 
 ## Устройство
 - `cmd/auto-context` — единственный бинарник: подкоманды `hook <event> [--agent codex]`, `ack`, `status`, `changes`, `units`, `version`.

@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:47e3e499a17876968627fed3d4f6ca3a65699b570197eb5d107da9dc1d050efa
+source_hash: sha256:1ebe8e08d9dea6546c3551ea75fde63e685b977a7cf5141a7c97cf47bb1e4d13
 updated: "2026-10-20"
 ---
 # internal/hooks
@@ -16,10 +16,10 @@ updated: "2026-10-20"
 - `Stop` — diff со снимком, журнал, авто-ack, обратная связь (`Feedback`, `StopReason`).
 - `PreToolUse` — `allow` для безопасных вызовов `auto-context`.
 - `PermissionRequest` (Codex) — `behavior: allow` для тех же вызовов, только когда Codex сам собрался спросить разрешение; иначе без вывода.
-- `SessionEnd` — удаляет снимок и журнал сессии без открытия проекта.
+- `SessionEnd` — удаляет снимок и журнал сессии без открытия проекта. В Codex не срабатывает при выходе из TUI; уборка старых файлов сессии держится на SessionStart (`session.RemoveStale`).
 
 ## Агент
-`Env.Agent` (`Claude`, нулевое значение; `Codex`; `ParseAgent` для `--agent`) решает, как тексты называют навыки и команды: `Agent.Skill(name)` — `auto-context:<name>` или `$<name>`, `Agent.Command(name)` — `/auto-context:<name>` или `$<name>`. Имя индексного файла берётся из `Project.IndexFile()`. Stop у Codex отвечает `{"decision":"block","reason":…}` (только так Codex продолжает ход), у Claude — `additionalContext`. `Input.ToolInput` — сырой JSON; `Input.Command()` возвращает строку-команду или "", если `tool_input` другой формы (у Codex может быть массив): разбор не падает.
+`Env.Agent` (`Claude`, нулевое значение; `Codex`; `ParseAgent` для `--agent`) решает, как тексты называют навыки и команды: `Agent.Skill(name)` — `auto-context:<name>` или `$auto-context:<name>`, `Agent.Command(name)` — `/auto-context:<name>`XИмя индексного файла берётся из `Project.IndexFile()`. Stop у Codex отвечает `{"decision":"block","reason":…}` (только так Codex продолжает ход), у Claude — `additionalContext`. `Input.ToolInput` — сырой JSON; `Input.Command()` возвращает строку-команду или "", если `tool_input` другой формы (у Codex может быть массив): разбор не падает.
 
 ## Устройство Stop
 `Stop` — ввод-вывод вокруг чистых шагов `recordTurn` → авто-ack (`Project.AckTouched`) → `pendingUnits` → `buildFeedback`.

@@ -52,7 +52,7 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 Не подтверждено документацией (проверяется в шаге 0 плана): читает ли Codex поле `hooks` в
 `.codex-plugin/plugin.json`; принимает ли источник `github` из нашего `marketplace.json`;
 попадает ли `bin/` плагина в PATH shell-инструмента; точный stdin `PermissionRequest`; под
-каким именем виден навык плагина (`$sync` или с префиксом плагина) — от этого зависят тексты §6.
+каким именем виден навык плагина (`$auto-context:sync`; подтверждено шагом 0) — от этого зависят тексты §6.
 
 ## 3. Принятые решения
 
@@ -72,7 +72,7 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   корневой `CLAUDE.md` (`rootindex.Update` создаёт файл). При сломанном конфиге `status` не
   проверяет корневой индекс.
 - Хуки активны по-прежнему при `.auto-context/config.yaml` или `context/_root.md`; без конфига
-  `index_file` = `CLAUDE.md`, поэтому Codex-репозиторию конфиг нужен (его создаёт `$init`).
+  `index_file` = `CLAUDE.md`, поэтому Codex-репозиторию конфиг нужен (его создаёт `$auto-context:init`).
 - Имя берётся из конфига везде, где сейчас зашит `CLAUDE.md`:
   - `units`: `Classify` (`KindIndexDoc`), `interesting`/`addFile` (индексный файл отслеживается;
     юнитом каталог он не делает — ни сейчас, ни после), `DocPaths` заменяется на `ContextPath`;
@@ -162,7 +162,7 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   остальные); тексты `stop`/`session-start` для обоих агентов и обоих имён (golden-строки);
   разбор `--agent` в `main.go`.
 - `make test` на Linux/macOS/Windows в CI.
-- Ручной прогон в Codex 0.163: установка из маркетплейса, доверие хукам, `$init`, ход с правкой
+- Ручной прогон в Codex 0.163: установка из маркетплейса, доверие хукам, `$auto-context:init`, ход с правкой
   кода → напоминание `Stop`, `auto-context ack` без запроса, `SessionEnd` чистит файлы сессии.
 
 ## Поправки по шагу 0 (2026-10-20)
@@ -184,6 +184,10 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   при этом не приходит.
 - Вложенный `<unit>/AGENTS.md` Codex подгружает при работе с файлами юнита.
 - Навык виден как `probe (ac-probe)`, вызывается `$probe`; Claude-only поля frontmatter не мешают.
+- Ручной прогон 0.163: навыки плагина показываются и вызываются с префиксом плагина (`$auto-context:init`;
+  внутреннее имя `auto-context:init`).
+- `SessionEnd` при выходе из TUI не срабатывает (сессию держит фоновый app-server): ни в пробном
+  плагине, ни в auto-context записи нет; файлы сессии в `.auto-context/state` остаются.
 
 Следствия:
 
@@ -193,6 +197,10 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   `CLAUDE_PLUGIN_ROOT`, прочие правила прежние); `shadowed()` для неё не нужен.
 - `PermissionRequest` обычно не нужен; оставлен на режимы, где Codex спрашивает. Фикстура — по документации.
 - Вложенный `AGENTS.md` работает как рассчитано; вызов `$name` подтверждён.
+- Полные имена навыков: `$auto-context:init`, `$auto-context:sync`, `$auto-context:status`,
+  `$auto-context:auto-context-docs` (`codexSkillPrefix = "$auto-context:"`).
+- `SessionEnd` в Codex не надёжен: уборка старых файлов сессии держится на SessionStart; хук
+  SessionEnd оставлен на случай, если Codex начнёт его вызывать.
 - Маркетплейс: Codex принимает `.claude-plugin/marketplace.json`, но молча игнорирует запись плагина
   с `"source": "github"`. Поэтому в ветке `release` рядом лежит `.agents/plugins/marketplace.json`
   с источником `local`, `./`. Установка: `codex plugin marketplace add Comprise/auto-context --ref release`,

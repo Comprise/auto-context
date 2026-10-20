@@ -16,7 +16,7 @@ const (
 
 // codexSkillPrefix is how Codex addresses a skill, and a skill-backed command,
 // in text.
-const codexSkillPrefix = "$"
+const codexSkillPrefix = "$auto-context:"
 
 // ParseAgent maps a --agent value to an Agent; ok is false for anything else.
 func ParseAgent(s string) (Agent, bool) {

@@ -11,13 +11,13 @@ func TestAgentRefs(t *testing.T) {
 	if got := Claude.Skill("auto-context-docs"); got != "auto-context:auto-context-docs" {
 		t.Errorf("Claude.Skill = %q", got)
 	}
-	if got := Codex.Skill("auto-context-docs"); got != "$auto-context-docs" {
+	if got := Codex.Skill("auto-context-docs"); got != "$auto-context:auto-context-docs" {
 		t.Errorf("Codex.Skill = %q", got)
 	}
 	if got := Claude.Command("status"); got != "/auto-context:status" {
 		t.Errorf("Claude.Command = %q", got)
 	}
-	if got := Codex.Command("status"); got != "$status" {
+	if got := Codex.Command("status"); got != "$auto-context:status" {
 		t.Errorf("Codex.Command = %q", got)
 	}
 	if a, ok := ParseAgent("codex"); a != Codex || !ok {
@@ -32,7 +32,7 @@ func TestAgentRefs(t *testing.T) {
 
 func TestStopReasonCodex(t *testing.T) {
 	r := StopReason(Feedback{Agent: Codex, IndexFile: "AGENTS.md", Changed: []string{"src/auth"}})
-	if !strings.Contains(r, "(and <unit>/AGENTS.md if its purpose or key files changed) per skill $auto-context-docs.") || strings.Contains(r, "CLAUDE.md") {
+	if !strings.Contains(r, "(and <unit>/AGENTS.md if its purpose or key files changed) per skill $auto-context:auto-context-docs.") || strings.Contains(r, "CLAUDE.md") {
 		t.Errorf("reason = %q", r)
 	}
 	r = StopReason(Feedback{Agent: Codex, IndexFile: "AGENTS.md", New: []string{"_root"}})
@@ -50,7 +50,7 @@ func TestLanguageNoteIndex(t *testing.T) {
 
 func TestSessionNoticeCodex(t *testing.T) {
 	got := SessionNotice([]string{"a"}, nil, 10, Codex)
-	if !strings.HasSuffix(got, "(skill $auto-context-docs) or run $status.") {
+	if !strings.HasSuffix(got, "(skill $auto-context:auto-context-docs) or run $auto-context:status.") {
 		t.Errorf("got %q", got)
 	}
 }

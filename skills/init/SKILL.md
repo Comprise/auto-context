@@ -1,9 +1,9 @@
 ---
 name: init
-description: This skill should be used when the user runs /auto-context:init (or $init in Codex) to set up auto-context in a project — find units, confirm them and the docs language with the user, and create the index files (CLAUDE.md, or AGENTS.md in Codex) and context/ docs for each.
+description: This skill should be used when the user runs /auto-context:init (or $auto-context:init in Codex) to set up auto-context in a project — find units, confirm them and the docs language with the user, and create the index files (CLAUDE.md, or AGENTS.md in Codex) and context/ docs for each.
 disable-model-invocation: true
 ---
-# /auto-context:init (Codex: $init)
+# /auto-context:init (Codex: $auto-context:init)
 
 In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
 
@@ -31,7 +31,7 @@ In Codex, `auto-context` is not on PATH: run the commands below by the path the 
      include:
        - path/to/dir
      ```
-3. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context-docs`), then run `auto-context status --stale` and
+3. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context:auto-context-docs`), then run `auto-context status --stale` and
    document each listed unit from its code, as that skill says:
    - `missing` → create `context/<unit>.md` and `<unit>/<index file>` (edit an existing index file in
      place, as the docs skill says — the root one usually holds the user's own content);
