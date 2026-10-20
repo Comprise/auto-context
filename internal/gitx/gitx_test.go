@@ -125,3 +125,20 @@ func TestRunPastDeadline(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestBrief(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{errors.New("x"), "failed"},
+		{&Error{TimedOut: true}, "timed out"},
+		{&Error{NotRun: true}, "could not be run"},
+		{&Error{Code: 3}, "exit 3"},
+		{&Error{Code: -1}, "killed"},
+	} {
+		if got := Brief(c.err); got != c.want {
+			t.Errorf("Brief(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}

@@ -188,7 +188,9 @@ func TestSaveOnlyWhenDirty(t *testing.T) {
 	}
 	p := filepath.Join(r, ".auto-context", "cache.json")
 	past := time.Now().Add(-time.Hour)
-	os.Chtimes(p, past, past)
+	if err := os.Chtimes(p, past, past); err != nil {
+		t.Fatal(err)
+	}
 	c2, _ := LoadCache(r)
 	mustHash(t, r, []string{"a.go"}, c2)
 	if err := c2.Save(r); err != nil {

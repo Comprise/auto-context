@@ -11,9 +11,12 @@ import (
 
 func TestPermissionRequestAllows(t *testing.T) {
 	want := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
-	out, err := PermissionRequest(testEnv(t.TempDir()), preInput("Bash", "auto-context status --stale"))
-	if err != nil || string(out) != want {
-		t.Fatalf("got %s, %v\nwant %s", out, err, want)
+	env := testEnv(t.TempDir())
+	for _, c := range allowedCLICalls {
+		out, err := PermissionRequest(env, preInput("Bash", c))
+		if err != nil || string(out) != want {
+			t.Errorf("%q: got %s, %v\nwant %s", c, out, err, want)
+		}
 	}
 }
 

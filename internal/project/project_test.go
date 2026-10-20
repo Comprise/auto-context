@@ -1,11 +1,15 @@
 package project
 
 import (
+	"auto-context/internal/frontmatter"
+	"auto-context/internal/fsutil"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -326,5 +330,111 @@ func TestUpdateIndexInactiveWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
 		t.Error("CLAUDE.md was created in an inactive project")
+	}
+}
+
+func TestOrphans(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n")
+	testutil.WriteFile(t, root, "context/gone.md", "# gone\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Orphans(); !slices.Equal(got, []string{"context/gone.md"}) {
+		t.Errorf("Orphans = %v", got)
+	}
+}
+
+func TestAckTouchedMixed(t *testing.T) {
+	root := t.TempDir()
+	for _, u := range []string{"svc", "lib", "big"} {
+		testutil.WriteFile(t, root, u+"/go.mod", "module "+u+"\n")
+		testutil.WriteFile(t, root, u+"/main.go", "package "+u+"\n")
+	}
+	testutil.WriteFile(t, root, "nounit/readme.txt", "x\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	testutil.WriteFile(t, root, "context/big.md", strings.Repeat("x", frontmatter.MaxSize+1))
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acked, failed, indexErr := p.AckTouched([]string{"svc", "lib", "nounit", "big"}, time.Now())
+	if !slices.Equal(acked, []string{"svc"}) {
+		t.Errorf("acked = %v", acked)
+	}
+	if len(failed) != 1 || !errors.Is(failed["big"], fsutil.ErrTooLarge) {
+		t.Errorf("failed = %v", failed)
+	}
+	if indexErr != nil {
+		t.Errorf("indexErr = %v", indexErr)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md")); !strings.Contains(string(data), "`svc`") {
+		t.Errorf("index:\n%s", data)
+	}
+}
+
+func TestAckTouchedEmptyKeepsIndex(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.AckTouched(nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("index file created: %v", err)
+	}
+}
+
+func TestUpToDateAfterSourceEdit(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Ack("svc", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if !p.UpToDate("svc") {
+		t.Fatal("not up to date after Ack")
+	}
+	testutil.WriteFile(t, root, "svc/main.go", "package svc\n\nvar changed = 1\n")
+	p, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.UpToDate("svc") {
+		t.Error("up to date after a source edit")
+	}
+}
+
+func TestWarnings(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := p.Warnings(); w != nil {
+		t.Errorf("clean repo: %v", w)
+	}
+	testutil.WriteFile(t, root, ".gitignore", "*"+strings.Repeat("a", 599)+"\n")
+	p, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Warnings()) == 0 {
+		t.Error("no warning for an over-long .gitignore line")
 	}
 }

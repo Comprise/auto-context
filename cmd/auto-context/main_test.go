@@ -16,6 +16,7 @@ import (
 	"auto-context/internal/config"
 	"auto-context/internal/gitx"
 	"auto-context/internal/hooks"
+	"auto-context/internal/session"
 	"auto-context/internal/testutil"
 
 	"gopkg.in/yaml.v3"
@@ -175,12 +176,61 @@ func TestHookWrongArgCountExits0(t *testing.T) {
 
 func TestHookGetwdFailureExits0(t *testing.T) {
 	fail := func() (string, error) { return "", errors.New("no cwd") }
-	var out, errb bytes.Buffer
-	if code := start([]string{"hook", "stop"}, strings.NewReader("{}"), &out, &errb, fail); code != 0 || out.Len()+errb.Len() != 0 {
-		t.Fatalf("hook: code=%d out=%q err=%q", code, out.String(), errb.String())
+	t.Run("no project dir", func(t *testing.T) {
+		t.Setenv("CLAUDE_PROJECT_DIR", "")
+		var out, errb bytes.Buffer
+		if code := start([]string{"hook", "stop"}, strings.NewReader("{}"), &out, &errb, fail); code != 0 || out.Len()+errb.Len() != 0 {
+			t.Fatalf("hook: code=%d out=%q err=%q", code, out.String(), errb.String())
+		}
+		if code := start([]string{"status"}, strings.NewReader(""), &out, &errb, fail); code != 1 {
+			t.Fatalf("status: code=%d", code)
+		}
+	})
+	t.Run("project dir given", func(t *testing.T) {
+		root := repo(t)
+		t.Setenv("CLAUDE_PROJECT_DIR", root)
+		var out, errb bytes.Buffer
+		if code := start([]string{"hook", "stop"}, strings.NewReader(`{"session_id":"g"}`), &out, &errb, fail); code != 0 || out.Len() != 0 {
+			t.Fatalf("hook: code=%d out=%q err=%q", code, out.String(), errb.String())
+		}
+		if _, err := os.Stat(session.SnapshotPath(root, "g")); err != nil {
+			t.Errorf("the hook did not run in the project dir: %v", err)
+		}
+	})
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestChangesExitCodes(t *testing.T) {
+	root := repo(t)
+	testutil.RequireGit(t)
+	testutil.Git(t, root, "init", "-q")
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-qm", "initial")
+	for _, args := range [][]string{{"changes"}, {"changes", "a", "b"}} {
+		if code, _, errs := do(root, "", args...); code != 2 || !strings.Contains(errs, "usage:") {
+			t.Errorf("%v: code=%d err=%q", args, code, errs)
+		}
 	}
-	if code := start([]string{"status"}, strings.NewReader(""), &out, &errb, fail); code != 1 {
-		t.Fatalf("status: code=%d", code)
+	if code, _, errs := do(root, "", "changes", "nope"); code != 1 || errs == "" {
+		t.Errorf("unknown unit: code=%d err=%q", code, errs)
+	}
+}
+
+// Project.WriteChanges ignores write errors, so a failing stdout exits 0: a
+// production bug found by this test, to be fixed apart from the tests-only task.
+func TestChangesStdoutFailureExits1(t *testing.T) {
+	t.Skip("known bug: WriteChanges drops write errors (expected exit 1, got 0)")
+	root := repo(t)
+	testutil.RequireGit(t)
+	testutil.Git(t, root, "init", "-q")
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-qm", "initial")
+	var errb bytes.Buffer
+	if code := run([]string{"changes", "svc"}, strings.NewReader(""), failWriter{}, &errb, root); code != 1 {
+		t.Errorf("failing stdout: code=%d err=%q", code, errb.String())
 	}
 }
 

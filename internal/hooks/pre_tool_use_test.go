@@ -18,20 +18,22 @@ func preInput(tool, cmd string) Input {
 	return in
 }
 
+// allowedCLICalls are the commands both PreToolUse and PermissionRequest approve.
+var allowedCLICalls = []string{
+	"auto-context ack svc",
+	"auto-context ack _root src/auth cmd/api",
+	"auto-context ack .",
+	"auto-context status",
+	"auto-context changes svc",
+	"auto-context status --stale",
+	"auto-context units",
+	"auto-context version",
+}
+
 func TestPreToolUseAllowsOwnCLI(t *testing.T) {
 	root := t.TempDir()
 	env := testEnv(root)
-	allowed := []string{
-		"auto-context ack svc",
-		"auto-context ack _root src/auth cmd/api",
-		"auto-context ack .",
-		"auto-context status",
-		"auto-context changes svc",
-		"auto-context status --stale",
-		"auto-context units",
-		"auto-context version",
-	}
-	for _, c := range allowed {
+	for _, c := range allowedCLICalls {
 		out, err := PreToolUse(env, preInput("Bash", c))
 		if err != nil {
 			t.Fatalf("%q: %v", c, err)

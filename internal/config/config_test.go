@@ -460,3 +460,28 @@ func TestIndexFile(t *testing.T) {
 		}
 	}
 }
+
+func TestTypeProblem(t *testing.T) {
+	for in, want := range map[string]string{
+		"line 3: cannot unmarshal !!str `x` into int": "line 3: a value of the wrong type",
+		"cannot unmarshal": "a value of the wrong type",
+	} {
+		if got := typeProblem(in); got != want {
+			t.Errorf("typeProblem(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDescribeIndexFileAndPermission(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{ErrBadIndexFile, ErrBadIndexFile.Error()},
+		{&os.PathError{Op: "open", Path: "x", Err: os.ErrPermission}, "permission denied"},
+	} {
+		if got := Describe(c.err); got != c.want {
+			t.Errorf("Describe(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}

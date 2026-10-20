@@ -621,3 +621,29 @@ func TestGitignoreOverlongRuleWarns(t *testing.T) {
 		t.Errorf("warnings = %q", w)
 	}
 }
+
+func TestWarningCountAndStat(t *testing.T) {
+	root := t.TempDir()
+	const dirs = 25
+	for i := range dirs {
+		d := fmt.Sprintf("d%02d", i)
+		mkfiles(t, root, d+"/a.go")
+		if err := os.WriteFile(filepath.Join(root, d, ".gitignore"), []byte("*"+strings.Repeat("a", 599)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr := discover(t, root, config.Default())
+	w := tr.Warnings()
+	if len(w) != 21 || w[20] != "more warnings omitted" {
+		t.Errorf("len(Warnings) = %d, last %q", len(w), w[len(w)-1])
+	}
+	if tr.WarningCount() != dirs {
+		t.Errorf("WarningCount = %d, want %d", tr.WarningCount(), dirs)
+	}
+	if _, size, ok := tr.Stat("d00/a.go"); !ok || size < 0 {
+		t.Errorf("tracked file: ok=%v", ok)
+	}
+	if _, _, ok := tr.Stat("nope.go"); ok {
+		t.Error("unknown file reported as tracked")
+	}
+}

@@ -1,6 +1,9 @@
 package fsutil
 
 import (
+	"runtime"
+
+	"auto-context/internal/testutil"
 	"errors"
 	"os"
 	"path/filepath"
@@ -392,5 +395,73 @@ func TestResolveRelativeNotOutside(t *testing.T) {
 	_, err := Resolve(t.TempDir(), "a/b.txt")
 	if err == nil || errors.Is(err, ErrOutside) {
 		t.Errorf("err = %v, want a non-ErrOutside error", err)
+	}
+}
+
+func TestReadDocLimit(t *testing.T) {
+	root := t.TempDir()
+	doc := filepath.Join(root, "context", "x.md")
+	testutil.WriteFile(t, root, "context/x.md", "12345")
+	if _, _, err := ReadDoc(root, doc, 4); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("max+1: err=%v, want ErrTooLarge", err)
+	}
+	full, data, err := ReadDoc(root, doc, 5)
+	if err != nil || string(data) != "12345" {
+		t.Fatalf("at limit: %q, %v", data, err)
+	}
+	want, _ := filepath.EvalSymlinks(doc)
+	if got, _ := filepath.EvalSymlinks(full); got != want {
+		t.Errorf("resolved path %q, want %q", full, want)
+	}
+}
+
+func TestWriteDocKeepsPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no unix permission bits")
+	}
+	root := t.TempDir()
+	doc := filepath.Join(root, "context", "x.md")
+	testutil.WriteFile(t, root, "context/x.md", "old")
+	if err := WriteDoc(root, doc, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", fi.Mode().Perm())
+	}
+	if got, _ := os.ReadFile(doc); string(got) != "new" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+func TestWriteStateCreatesDir(t *testing.T) {
+	root := t.TempDir()
+	p := StatePath(root, "state", "x")
+	if err := WriteState(root, p, []byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != "data" {
+		t.Errorf("content = %q", got)
+	}
+	entries, err := os.ReadDir(filepath.Dir(p))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "x" {
+		t.Errorf("state dir = %v, %v", entries, err)
+	}
+}
+
+// A failed write removes its temp file.
+func TestWriteAtomicLeavesNoTmp(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "sub", "target")
+	testutil.WriteFile(t, root, "sub/target/keep", "x")
+	if err := WriteAtomic(root, target, []byte("data"), 0o644); err == nil {
+		t.Fatal("writing over a non-empty directory succeeded")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "sub"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "target" {
+		t.Errorf("parent = %v, %v", entries, err)
 	}
 }

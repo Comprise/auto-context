@@ -152,3 +152,17 @@ func TestResumeClearsAckFailNotified(t *testing.T) {
 		t.Errorf("journal = %+v", j)
 	}
 }
+
+func TestMarkConfigNotifiedOnce(t *testing.T) {
+	var j Journal
+	if !j.MarkConfigNotified() || !j.Paused {
+		t.Fatalf("first call: %+v", j)
+	}
+	if j.MarkConfigNotified() || !j.Paused {
+		t.Fatalf("second call: %+v", j)
+	}
+	j.Resume()
+	if !j.MarkConfigNotified() {
+		t.Error("not reported again after Resume")
+	}
+}
