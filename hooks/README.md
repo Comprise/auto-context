@@ -21,7 +21,7 @@ Codex (`codex.json`):
 | `SessionStart` | `session-start` | 60 s | same as Claude Code |
 | `UserPromptSubmit` | `prompt-submit` | 30 s | snapshot of files at the start of the turn |
 | `Stop` | `stop` | 60 s | same as Claude Code; the reminder is `{"decision":"block","reason":…}` |
-| `PermissionRequest` (`matcher: ^Bash$`) | `permission-request` | 10 s | auto-approval of the same CLI calls as `pre-tool-use` |
+| `PermissionRequest` (`matcher: ^Bash$`) | `permission-request` | 10 s | auto-approval of the same CLI calls as `pre-tool-use`, only by the plugin's absolute path (never the bare `auto-context`) |
 | `SessionEnd` | `session-end` | 3 s | deletes the snapshot and log (git budget 2 s); Codex does not call it when you quit the TUI |
 
 - A hook never blocks the session: the shim always exits 0, errors go to `.auto-context/log`.

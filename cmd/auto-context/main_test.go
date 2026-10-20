@@ -270,6 +270,7 @@ func TestAckExcludeRootRefused(t *testing.T) {
 
 func TestHookPreToolUse(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("PATH", t.TempDir()) // absolute entries only: a relative one blocks approval
 	allow := `{"tool_name":"Bash","tool_input":{"command":"auto-context status --stale"},"cwd":` + quote(dir) + `}`
 	want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"auto-context CLI"}}` + "\n"
 	if c, out, _ := do(dir, allow, "hook", "pre-tool-use"); c != 0 || out != want {
@@ -1069,6 +1070,7 @@ func TestHookAgentFlagBad(t *testing.T) {
 // The fixture follows the Codex documentation: PermissionRequest was not
 // observed live (Codex runs the plugin binary by absolute path without asking).
 func TestHookPermissionRequest(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/home/u/.codex/plugins/cache/auto-context/auto-context/1.0.0")
 	dir := t.TempDir()
 	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "hooks", "testdata", "permission_request.json"))
 	if err != nil {
@@ -1287,8 +1289,10 @@ func TestAckExcludeAgentsIndex(t *testing.T) {
 }
 
 func TestHookPermissionRequestNeedsCodex(t *testing.T) {
+	const pluginRoot = "/home/u/.codex/plugins/cache/auto-context/auto-context/1.0.0"
+	t.Setenv("CLAUDE_PLUGIN_ROOT", pluginRoot)
 	root := repo(t)
-	in := `{"tool_name":"Bash","tool_input":{"command":"auto-context status"},"cwd":` + quote(root) + `}`
+	in := `{"tool_name":"Bash","tool_input":{"command":"` + pluginRoot + `/bin/auto-context status"},"cwd":` + quote(root) + `}`
 	for _, args := range [][]string{
 		{"hook", "permission-request"},
 		{"hook", "permission-request", "--agent", "claude"},

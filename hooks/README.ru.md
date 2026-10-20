@@ -21,7 +21,7 @@ Codex (`codex.json`):
 | `SessionStart` | `session-start` | 60 с | как у Claude Code |
 | `UserPromptSubmit` | `prompt-submit` | 30 с | снимок файлов на начало хода |
 | `Stop` | `stop` | 60 с | как у Claude Code; напоминание — `{"decision":"block","reason":…}` |
-| `PermissionRequest` (`matcher: ^Bash$`) | `permission-request` | 10 с | авто-одобрение тех же вызовов CLI, что `pre-tool-use` |
+| `PermissionRequest` (`matcher: ^Bash$`) | `permission-request` | 10 с | авто-одобрение тех же вызовов CLI, что `pre-tool-use`, только по абсолютному пути плагина (голое `auto-context` — никогда) |
 | `SessionEnd` | `session-end` | 3 с | удаление снимка и журнала (бюджет git 2 с); при выходе из TUI Codex его не вызывает |
 
 - Хук никогда не блокирует сессию: шим всегда выходит с 0, ошибки идут в `.auto-context/log`.

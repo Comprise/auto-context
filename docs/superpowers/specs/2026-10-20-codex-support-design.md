@@ -193,8 +193,8 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 
 - Для Codex хуки предлагают команды с абсолютным путём `$CLAUDE_PLUGIN_ROOT/bin/auto-context`
   (`Agent.CLI()`); при пустой переменной или небезопасном пути остаётся `auto-context`.
-- `allowedCommand`/`approvable` для Codex принимают и эту абсолютную форму (только путь из
-  `CLAUDE_PLUGIN_ROOT`, прочие правила прежние); `shadowed()` для неё не нужен.
+- `allowedCommand`/`approvable` для Codex принимают только эту абсолютную форму (только путь из
+  `CLAUDE_PLUGIN_ROOT`, прочие правила прежние), голое `auto-context` — никогда; `shadowed()` для неё не нужен.
 - `PermissionRequest` обычно не нужен; оставлен на режимы, где Codex спрашивает. Фикстура — по документации.
 - Вложенный `AGENTS.md` работает как рассчитано; вызов `$name` подтверждён.
 - Полные имена навыков: `$auto-context:init`, `$auto-context:sync`, `$auto-context:status`,

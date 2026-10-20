@@ -1,6 +1,6 @@
 ---
 unit: cmd/auto-context
-source_hash: sha256:a89f06f5659743f326795d28eafe284e771c7ad861e2257c320f9320d37287df
+source_hash: sha256:7b01182862b9b5ac0489b2f872456dc4804d261113b7e895d04abbc3b98f7ba7
 updated: "2026-10-20"
 ---
 # cmd/auto-context

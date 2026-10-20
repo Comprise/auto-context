@@ -18,7 +18,8 @@ func preInput(tool, cmd string) Input {
 	return in
 }
 
-// allowedCLICalls are the commands both PreToolUse and PermissionRequest approve.
+// allowedCLICalls are the commands PreToolUse approves for Claude; for Codex
+// both hooks approve them only with the bare name replaced by Codex.CLI().
 var allowedCLICalls = []string{
 	"auto-context ack svc",
 	"auto-context ack _root src/auth cmd/api",
@@ -32,6 +33,7 @@ var allowedCLICalls = []string{
 
 func TestPreToolUseAllowsOwnCLI(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("PATH", t.TempDir()) // absolute entries only: a relative one blocks approval
 	env := testEnv(root)
 	for _, c := range allowedCLICalls {
 		out, err := PreToolUse(env, preInput("Bash", c))
@@ -217,5 +219,68 @@ func TestPreToolUseRefusesWhenPluginShimMissing(t *testing.T) {
 	t.Setenv("PATH", fake)
 	if out, _ := PreToolUse(testEnv(t.TempDir()), preInput("Bash", "auto-context status")); out != nil {
 		t.Errorf("approved: %s", out)
+	}
+}
+
+// An empty or relative PATH entry anywhere in PATH counts as shadowing: the
+// shell may resolve it from another cwd than the hook's, where a foreign
+// auto-context can sit. Nothing named auto-context is reachable from the
+// hook's cwd here, so only the entry itself can refuse.
+func TestShadowedByAnyRelativeEntry(t *testing.T) {
+	plugin := t.TempDir()
+	pluginShim(t, plugin)
+	t.Chdir(t.TempDir())
+	bin, sep := filepath.Join(plugin, "bin"), string(os.PathListSeparator)
+	for _, withRoot := range []bool{true, false} {
+		if withRoot {
+			t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
+		} else {
+			t.Setenv("CLAUDE_PLUGIN_ROOT", "")
+		}
+		for _, p := range []string{
+			"bin" + sep + bin,
+			bin + sep + "bin",
+			bin + sep + filepath.Join("node_modules", ".bin"),
+			sep + bin,
+			bin + sep,
+			bin + sep + sep + bin,
+			"." + sep + bin,
+		} {
+			t.Setenv("PATH", p)
+			if !shadowed() {
+				t.Errorf("root=%v PATH=%q: shadowed() = false", withRoot, p)
+			}
+			if out, _ := PreToolUse(testEnv(t.TempDir()), preInput("Bash", "auto-context status")); out != nil {
+				t.Errorf("root=%v PATH=%q: approved: %s", withRoot, p, out)
+			}
+		}
+	}
+	// Absolute entries only: the plugin's own bin first still approves (on
+	// Windows LookPath ignores the extensionless shim; nothing to compare).
+	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
+	t.Setenv("PATH", bin+sep+t.TempDir())
+	if shadowed() {
+		t.Error("absolute-only PATH with the plugin bin: shadowed() = true")
+	}
+}
+
+// Codex's shell never has the plugin's bin/ on PATH, so the bare name is
+// never approved for it, whatever PATH the hook sees.
+func TestCodexNeverApprovesBareName(t *testing.T) {
+	plugin := t.TempDir()
+	pluginShim(t, plugin)
+	codex := testEnv(t.TempDir())
+	codex.Agent = Codex
+	for _, root := range []string{"", plugin, "/home/u/.codex/plugins/cache/auto-context/auto-context/1.0.0"} {
+		t.Setenv("CLAUDE_PLUGIN_ROOT", root)
+		t.Setenv("PATH", filepath.Join(plugin, "bin"))
+		for _, c := range allowedCLICalls {
+			if out, err := PreToolUse(codex, preInput("Bash", c)); err != nil || out != nil {
+				t.Errorf("root=%q PreToolUse %q: out=%q err=%v", root, c, out, err)
+			}
+			if out, err := PermissionRequest(codex, preInput("Bash", c)); err != nil || out != nil {
+				t.Errorf("root=%q PermissionRequest %q: out=%q err=%v", root, c, out, err)
+			}
+		}
 	}
 }
