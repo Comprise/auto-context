@@ -19,7 +19,7 @@ updated: "2026-10-20"
 - `SessionEnd` — удаляет снимок и журнал сессии без открытия проекта. В Codex не срабатывает при выходе из TUI; уборка старых файлов сессии держится на SessionStart (`session.RemoveStale`).
 
 ## Агент
-`Env.Agent` (`Claude`, нулевое значение; `Codex`; `ParseAgent` для `--agent`) решает, как тексты называют навыки и команды: `Agent.Skill(name)` — `auto-context:<name>` или `$auto-context:<name>`, `Agent.Command(name)` — `/auto-context:<name>`XИмя индексного файла берётся из `Project.IndexFile()`. Stop у Codex отвечает `{"decision":"block","reason":…}` (только так Codex продолжает ход), у Claude — `additionalContext`. `Input.ToolInput` — сырой JSON; `Input.Command()` возвращает строку-команду или "", если `tool_input` другой формы (у Codex может быть массив): разбор не падает.
+`Env.Agent` (`Claude`, нулевое значение; `Codex`; `ParseAgent` для `--agent`) решает, как тексты называют навыки и команды: `Agent.Skill(name)` — `auto-context:<name>` или `$auto-context:<name>`, `Agent.Command(name)` — `/auto-context:<name>` или `$auto-context:<name>`. Имя индексного файла берётся из `Project.IndexFile()`. Stop у Codex отвечает `{"decision":"block","reason":…}` (только так Codex продолжает ход), у Claude — `additionalContext`. `Input.ToolInput` — сырой JSON; `Input.Command()` возвращает строку-команду или "", если `tool_input` другой формы (у Codex может быть массив): разбор не падает.
 
 ## Устройство Stop
 `Stop` — ввод-вывод вокруг чистых шагов `recordTurn` → авто-ack (`Project.AckTouched`) → `pendingUnits` → `buildFeedback`.
