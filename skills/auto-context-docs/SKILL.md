@@ -4,7 +4,7 @@ description: This skill should be used when creating or updating a unit's index 
 ---
 # auto-context docs
 
-In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+In Codex, `auto-context` is not on PATH. If a hook message gave the binary's path, run it exactly as the message wrote it (an absolute path, single-quoted if it has unusual characters). Otherwise find it with `ls -d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/auto-context/auto-context/*/bin/auto-context 2>/dev/null | sort -V | tail -n 1`, tell the user the path you found before running it the first time, and always run it quoted (`'<path>' status`); if nothing is found, ask the user.
 
 Each unit has two docs (for `_root`: the root index file and `context/_root.md`):
 - `<unit>/<index file>` — a short index. The index file is `CLAUDE.md` by default; `index_file:
@@ -37,7 +37,7 @@ write the docs once the code is done, or run `auto-context ack <unit>` after the
   it like any stale doc, then `auto-context ack <unit>`.
 - `stale (broken frontmatter)` — do not repair the block by hand: review the doc, then `auto-context
   ack <unit>` rewrites the block.
-- `stale (symlink outside repo)` — the doc links outside the repository, into `.git`, to a non-`.md`
+- `stale (unusable symlink)` — the doc is a symlink that leads outside the repository, into `.git`, to a non-`.md`
   file, or nowhere: do not follow it; report it, and replace it with a regular Markdown file only if
   the user agrees.
 - `stale (unreadable doc: …)`, `stale (cannot hash sources: …)` — a read error: report it.

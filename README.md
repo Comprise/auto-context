@@ -1,61 +1,65 @@
 # auto-context
 
-**Плагин для [Claude Code](https://docs.claude.com/en/docs/claude-code) и
-[Codex CLI](https://developers.openai.com/codex), который держит документацию проекта в синхроне с
-кодом.**
+**English** · [Русский](README.ru.md)
 
-Агент лучше работает с проектом, когда знает его устройство, но читать весь код на каждую задачу
-дорого, а написанные когда-то доки быстро устаревают. auto-context раскладывает короткие описания
-по частям проекта и следит, чтобы они не отставали от кода.
+**A plugin for [Claude Code](https://docs.claude.com/en/docs/claude-code) and
+[Codex CLI](https://developers.openai.com/codex) that keeps a project's documentation in sync with
+its code.**
 
-## Как это работает
+An agent works better when it knows how a project is put together, but reading all the code for every
+task is expensive, and docs written once go stale quickly. auto-context spreads short descriptions
+across the parts of a project and makes sure they keep up with the code.
 
-Проект делится на **юниты** — каталоги с модулем (`go.mod`, `package.json`, …) или с достаточным
-числом файлов кода. У каждого юнита два документа:
+## How it works
+
+A project is split into **units**: directories that hold a module (`go.mod`, `package.json`, …) or
+enough code files. Each unit has two documents:
 
 ```
 repo/
-├── CLAUDE.md                 # ваши правила + оглавление юнитов (ведёт плагин)
+├── CLAUDE.md                 # your rules + the unit index (maintained by the plugin)
 ├── services/billing/
-│   └── CLAUDE.md             # назначение и ключевые файлы юнита — коротко
+│   └── CLAUDE.md             # the unit's purpose and key files, briefly
 └── context/
-    ├── _root.md              # устройство проекта целиком
-    └── services/billing.md   # подробно: API, инварианты, связи
+    ├── _root.md              # the project's overall structure
+    └── services/billing.md   # details: API, invariants, relations
 ```
 
-- `<unit>/CLAUDE.md` Claude Code подгружает сам (в Codex индексные файлы называются `AGENTS.md`,
-  см. [Codex](#codex)), когда работает с файлами юнита.
-- `context/<unit>.md` Claude читает, только когда нужны подробности.
-- Если Claude изменил код юнита, а доки остались прежними, в конце хода плагин напомнит обновить
-  их или подтвердить, что правка несущественна.
-- Изменения, сделанные между сессиями (`git pull`, ручные правки), плагин покажет при старте.
+- `<unit>/CLAUDE.md` is loaded by Claude Code itself (in Codex the index files are called `AGENTS.md`,
+  see [Codex](#codex)) when it works with the unit's files.
+- `context/<unit>.md` is read by Claude only when it needs the details.
+- If Claude changed a unit's code but left the docs as they were, the plugin reminds it at the end of
+  the turn to update them or to confirm that the change is minor.
+- Changes made between sessions (`git pull`, manual edits) are reported by the plugin at session start.
 
-Когда доки актуальны, плагин молчит и не тратит контекст.
+When the docs are up to date, the plugin stays silent and spends no context.
 
-## Требования
+## Requirements
 
-- Claude Code (CLI, расширение для IDE или desktop-приложение) или Codex CLI.
-- Linux, macOS или Windows (amd64 или arm64). Go не нужен: плагин ставится с готовыми бинарниками.
-- `git` — желательно, но не обязательно.
-- **Windows:** нужен [Git for Windows](https://git-scm.com/downloads/win) — без Git Bash хуки плагина
-  не запускаются. Если Git Bash стоит не в стандартном месте, укажите путь в `settings.json`:
+- Claude Code (CLI, IDE extension or desktop app) or Codex CLI.
+- Linux, macOS or Windows (amd64 or arm64). Go is not required: the plugin is installed with prebuilt binaries.
+- `git` is recommended but not required.
+- **Windows:** [Git for Windows](https://git-scm.com/downloads/win) is required; without Git Bash the
+  plugin's hooks do not run. If Git Bash is not in the default location, set its path in `settings.json`:
 
   ```json
   { "env": { "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe" } }
   ```
 
-## Установка
+- **Codex:** Linux and macOS only (on Windows, inside WSL). Codex hooks are POSIX sh commands; how Codex runs them on Windows without WSL has not been verified.
 
-В Claude Code:
+## Installation
+
+In Claude Code:
 
 ```
 /plugin marketplace add Comprise/auto-context
 /plugin install auto-context@auto-context
 ```
 
-Без SSH-ключа для GitHub задайте перед этим `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`.
+If you have no SSH key for GitHub, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` first.
 
-Обновление (автообновление сторонних маркетплейсов по умолчанию выключено; включается в
+To update (auto-update for third-party marketplaces is off by default; turn it on in
 `/plugin` → Marketplaces):
 
 ```
@@ -64,139 +68,148 @@ claude plugin update auto-context@auto-context
 
 ## Codex
 
-Хуки и навыки те же, но индексные файлы юнитов называются `AGENTS.md`, а навыки вызываются через `$`.
+Codex is supported on Linux and macOS (on Windows, through WSL).
+
+The hooks and skills are the same, but unit index files are called `AGENTS.md` and skills are invoked with `$`.
 
 ```
 codex plugin marketplace add Comprise/auto-context --ref release
 ```
 
-Затем в Codex:
+Then, in Codex:
 
-1. `/plugins` → установите `auto-context`.
-2. `/hooks` → доверьте хукам плагина. После обновления плагина Codex может спросить доверие снова. Хуки работают только в сессии, начатой после доверия.
-3. Начните новую сессию и выполните `$auto-context:init` (не встроенный `/init` Codex). Навык сам запишет
-   `index_file: AGENTS.md` в `.auto-context/config.yaml` до создания документов.
+1. `/plugins` → install `auto-context`.
+2. `/hooks` → trust the plugin's hooks. After the plugin is updated, Codex may ask for trust again. Hooks only work in a session started after they are trusted.
+3. Start a new session and run `$auto-context:init` (not Codex's built-in `/init`). The skill itself writes
+   `index_file: AGENTS.md` to `.auto-context/config.yaml` before creating any docs.
 
-Остальные навыки: `$auto-context:sync`, `$auto-context:status`. Напоминания в конце хода приходят как обычное продолжение
-хода.
+The other skills are `$auto-context:sync` and `$auto-context:status`. End-of-turn reminders arrive as a regular continuation
+of the turn.
 
-В Codex `auto-context` не в PATH: хуки предлагают команды с абсолютным путём
-(`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`), и навыки
-выполняют их так же. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
-Codex всё же собрался спросить, хук `PermissionRequest` одобряет вызовы CLI плагина (`ack`,
-`status`, `units`, `changes`, `version`; `ack --exclude` всегда спрашивает).
+In Codex, `auto-context` is not on PATH: the hooks suggest commands with an absolute path
+(`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`; a path with spaces
+or other unusual characters is in single quotes), and the skills run them the same way; if a hook did not
+supply a path, the skill looks only under the `auto-context` marketplace of the Codex plugin cache
+(`~/.codex/plugins/cache/auto-context/auto-context/<version>/bin/auto-context`, highest version), shows you
+the path before the first run and always runs it quoted; if it finds none, it asks you. The plugin binary at an absolute path usually runs without a prompt; if
+Codex is about to ask anyway, the `PermissionRequest` hook approves the plugin's CLI calls by that absolute path only (`ack`,
+`status`, `units`, `changes`, `version`; `ack --exclude` always asks).
 
-Маркетплейс для Codex описан в `.agents/plugins/marketplace.json` ветки `release`
-(источник `local`, `./`); идентификатор плагина — `auto-context@auto-context`.
+The Codex marketplace is described in `.agents/plugins/marketplace.json` on the `release` branch
+(source `local`, `./`); the plugin identifier is `auto-context@auto-context`.
 
-## Быстрый старт
+## Quick start
 
-Плагин ставится глобально, но работает только в проектах, где его включили. Откройте проект в
-Claude Code и выполните (в Codex — `$auto-context:init`, см. [Codex](#codex)):
+The plugin is installed globally but only works in projects where it has been enabled. Open a project in
+Claude Code and run (in Codex, `$auto-context:init`, see [Codex](#codex)):
 
 ```
 /auto-context:init
 ```
 
-Claude найдёт юниты, покажет список на подтверждение, спросит язык документов и напишет их.
-Созданные `CLAUDE.md`, `context/` и `.auto-context/config.yaml` закоммитьте — так документы
-получат и коллеги.
+Claude finds the units, shows the list for confirmation, asks for the docs language and writes the docs.
+Commit the generated `CLAUDE.md`, `context/` and `.auto-context/config.yaml` so your colleagues
+get the docs too.
 
-## Как пользоваться
+## Usage
 
-**Работайте как обычно.** Просите Claude менять код — о документах думать не нужно.
+**Work as usual.** Ask Claude to change code; you do not need to think about the docs.
 
-**Если Claude изменил код, а доки нет,** в конце ответа плагин напомнит ему об этом, и Claude сам
-решит: обновить `context/<unit>.md` (если изменилось назначение, API, структура или важное
-поведение) или подтвердить, что правка мелкая (`auto-context ack`). Если документы обновлены в том
-же ходе, плагин подтверждает их сам. Напоминание приходит не чаще раза на юнит за ход.
+**If Claude changed code but not the docs,** the plugin reminds it at the end of the reply, and Claude
+decides for itself: update `context/<unit>.md` (if the purpose, API, structure or important behavior
+changed) or confirm that the change is minor (`auto-context ack`). If the docs are updated in the same
+turn, the plugin acknowledges them itself. The reminder comes at most once per unit per turn.
 
-**После `git pull`, смены ветки или правок вне Claude** при старте сессии плагин сообщит, какие
-документы устарели. Чтобы обновить их сразу:
+**After `git pull`, a branch switch or edits made outside Claude,** the plugin reports at session start which
+docs are stale. To update them right away:
 
 ```
 /auto-context:sync
 ```
 
-**Появился новый модуль или каталог с кодом** — плагин заметит его, и Claude спросит, описывать ли
-его или не считать отдельным юнитом. **Каталог удалён** — его документы плагин покажет как лишние,
-а Claude удалит их, только спросив вас.
+**A new module or a directory with code appears:** the plugin notices it, and Claude asks whether to
+document it or not to treat it as a separate unit. **A directory is deleted:** the plugin reports its docs as orphaned,
+and Claude deletes them only after asking you.
 
-**Проверить, всё ли актуально,** — `/auto-context:status`.
+**To check whether everything is up to date,** run `/auto-context:status`.
 
-**Хотите вести документы на одном языке** — задайте `language` в настройках (`/auto-context:init`
-спрашивает его сам).
+**To keep the docs in a single language,** set `language` in the settings (`/auto-context:init`
+asks for it itself).
 
-## Команды
+## Commands
 
-| Команда (Claude Code / Codex) | Что делает |
+| Command (Claude Code / Codex) | What it does |
 |---|---|
-| `/auto-context:init` / `$auto-context:init` | включить плагин в проекте и написать документы |
-| `/auto-context:sync` / `$auto-context:sync` | найти устаревшие документы и обновить их |
-| `/auto-context:status` / `$auto-context:status` | показать, какие документы устарели, ничего не меняя |
+| `/auto-context:init` / `$auto-context:init` | enable the plugin in the project and write the docs |
+| `/auto-context:sync` / `$auto-context:sync` | find stale docs and update them |
+| `/auto-context:status` / `$auto-context:status` | show which docs are stale, changing nothing |
 
-Claude пользуется и консольной утилитой — её можно запускать вручную:
+Claude also uses the command-line tool, which you can run by hand:
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `auto-context status` | состояние документов юнитов: `ok`, `stale`, `missing` |
-| `auto-context units` | список юнитов |
-| `auto-context ack <unit…>` | правка несущественна: считать документы актуальными |
-| `auto-context ack --exclude <unit>` | не считать каталог отдельным юнитом |
-| `auto-context changes <unit>` | что изменилось в юните с последнего обновления доков |
+| `auto-context status` | state of unit docs: `ok`, `stale`, `missing` |
+| `auto-context status --stale` | only stale and missing |
+| `auto-context status --exit-code` | exit code 1 if anything is stale/missing, for CI |
+| `auto-context units` | list of units |
+| `auto-context ack <unit…>` | the change is minor: treat the docs as up to date |
+| `auto-context ack --exclude <unit>` | do not treat the directory as a separate unit |
+| `auto-context changes <unit>` | what changed in the unit since the docs were last updated |
 
-## Настройка
+## Configuration
 
-Настройки необязательны и лежат в `.auto-context/config.yaml`. Значения по умолчанию:
+Settings are optional and live in `.auto-context/config.yaml`. Defaults:
 
 ```yaml
-min_files: 5            # сколько файлов кода делает каталог юнитом
-include: []             # каталоги, которые всегда юниты
+min_files: 5            # how many code files make a directory a unit
+include: []             # directories that are always units
 exclude: [vendor/**, node_modules/**, "**/testdata/**", dist/**, build/**]
-track: []               # файлы без кодового расширения, которые тоже считать кодом юнита
-index_file: CLAUDE.md   # имя индексного файла юнитов: CLAUDE.md или AGENTS.md (Codex)
-language: ""            # язык документов: ru, en, pt-BR…; пусто — как в существующих доках
-max_session_notice: 10  # сколько юнитов перечислять в напоминании при старте
+track: []               # files without a code extension that also count as unit code
+index_file: CLAUDE.md   # unit index file name: CLAUDE.md or AGENTS.md (Codex)
+language: ""            # docs language: ru, en, pt-BR…; empty means as in the existing docs
+max_session_notice: 10  # how many units to list in the session-start notice
 code_extensions: [.go, .ts, .tsx, .mts, .cts, .js, .jsx, .mjs, .cjs, .vue, .svelte, .py, .rs, .java, .kt,
                   .scala, .swift, .dart, .rb, .php, .cs, .fs, .c, .h, .cc, .cpp, .cxx, .hh, .hpp, .m, .mm,
                   .ex, .exs, .erl, .hs, .clj, .lua, .zig, .sh, .sql, .proto, .graphql, .tf]
 module_markers: [go.mod, package.json, Cargo.toml, pyproject.toml, pom.xml, build.gradle]
 ```
 
-- Заданный список заменяет значение по умолчанию, а не дополняет его.
-- Чтобы каталог не был отдельным юнитом, добавьте его в `exclude` (или `auto-context ack --exclude`);
-  чтобы плагин его вообще не видел — `<dir>/**`.
-- Файлы, которые игнорирует git (`.gitignore`), плагин не учитывает.
-- Ошибочная настройка отбрасывается с предупреждением, остальные продолжают действовать. Исключение —
-  `index_file`: любое значение, кроме `CLAUDE.md` и `AGENTS.md`, ломает конфиг целиком (отслеживание
-  доков приостанавливается, пока значение не исправлено).
+- A list you set replaces the default value; it does not extend it.
+- To stop a directory from being a separate unit, add it to `exclude` (or run `auto-context ack --exclude`);
+  to make the plugin ignore it entirely, use `<dir>/**`.
+- Files ignored by git (`.gitignore`) are not taken into account by the plugin.
+- An invalid setting is dropped with a warning, and the others stay in effect. The exception is
+  `index_file`: any value other than `CLAUDE.md` and `AGENTS.md` breaks the whole config (doc
+  tracking is suspended until the value is fixed).
 
-## Если что-то не работает
+## Troubleshooting
 
-- `auto-context status` покажет предупреждения: о конфиге, `.gitignore`, git.
-- В `/hooks` должны быть хуки плагина: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreToolUse`,
-  `SessionEnd` (в Codex вместо `PreToolUse` — `PermissionRequest`, и хуки нужно доверить).
-- Ошибки плагина пишутся в `.auto-context/log`. Работу агента плагин не прерывает никогда.
-- Очень большой репозиторий (миллионы файлов) плагин может не успеть обработать — добавьте большие
-  сгенерированные каталоги в `.gitignore`.
+- `auto-context status` shows warnings: about the config, `.gitignore`, git.
+- `/hooks` should list the plugin's hooks: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreToolUse`,
+  `SessionEnd` (in Codex, `PermissionRequest` instead of `PreToolUse`, and the hooks must be trusted).
+- In Codex the `SessionEnd` hook does not fire when you quit the TUI (a background app-server keeps the session alive), so session files in `.auto-context/state` remain; SessionStart deletes those older than 7 days.
+- Two agent sessions in the same directory see each other's edits: a reminder or auto-ack may reach the wrong session. For parallel work, use separate `git worktree`s.
+- Plugin errors are written to `.auto-context/log`. The plugin never interrupts the agent's work.
+- The plugin may not be able to process a very large repository (millions of files); add large
+  generated directories to `.gitignore`.
 
-## Безопасность
+## Security
 
-Плагин рассчитан на то, что репозиторий может оказаться чужим: он не читает и не пишет файлы за
-пределами репозитория, не запускает команд из его конфигурации и не передаёт Claude текст из
-репозитория, кроме самих документов.
+The plugin assumes the repository may be untrusted: it neither reads nor writes files outside the
+repository, does not run commands from its configuration, and passes no text from the repository to
+Claude other than the docs themselves.
 
-## Разработка
+## Development
 
 ```sh
-make test                                   # тесты
-make dist                                   # бинарники для 6 платформ
-claude --plugin-dir /path/to/auto-context   # запустить Claude Code с локальной версией
+make test                                   # tests
+make dist                                   # binaries for 6 platforms
+claude --plugin-dir /path/to/auto-context   # run Claude Code with the local version
 ```
 
-Релиз — тег `vX.Y.Z` на коммите из `main`: workflow соберёт бинарники и обновит ветку `release`,
-из которой ставится плагин. Устройство кода описано в [`context/_root.md`](context/_root.md).
+A release is a `vX.Y.Z` tag on a commit from `main`: the workflow builds the binaries and updates the `release` branch,
+from which the plugin is installed. The code structure is described in [`context/_root.md`](context/_root.md) (in Russian).
 
-## Лицензия
+## License
 
 [MIT](LICENSE)

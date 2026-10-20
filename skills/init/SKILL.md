@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 # /auto-context:init (Codex: $auto-context:init)
 
-In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+In Codex, `auto-context` is not on PATH. If a hook message gave the binary's path, run it exactly as the message wrote it (an absolute path, single-quoted if it has unusual characters). Otherwise find it with `ls -d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/auto-context/auto-context/*/bin/auto-context 2>/dev/null | sort -V | tail -n 1`, tell the user the path you found before running it the first time, and always run it quoted (`'<path>' status`); if nothing is found, ask the user.
 
 0. In Codex, first of all — before creating any docs — set `index_file: AGENTS.md` in
    `.auto-context/config.yaml` (create the file and its directory if missing; keep existing content).
