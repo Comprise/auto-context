@@ -16,6 +16,7 @@ import (
 	"auto-context/internal/docstate"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/session"
+	"auto-context/internal/units"
 )
 
 const stopSID = "stop-sess"
@@ -681,9 +682,82 @@ func TestRecordTurn(t *testing.T) {
 		"svc/CLAUDE.md":  {MtimeNs: 30, Size: 2},
 	}
 	var j session.Journal
-	fresh := recordTurn(p.Tree(), before, cur, &j)
+	fresh := recordTurn(p.Tree(), before, cur, 0, &j)
 	if !slices.Equal(fresh, []string{"svc"}) || !slices.Equal(j.CodeChanged, []string{"lib", "svc"}) || !slices.Equal(j.DocsTouched, []string{"lib", "svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
+	}
+}
+
+func TestRecordTurnOldMtime(t *testing.T) {
+	env := newRepo(t, true)
+	p, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := session.Snapshot{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 1, Size: 1}}
+	cur := session.Snapshot{
+		"svc/main.go": {MtimeNs: 1, Size: 2}, "svc/moved.go": {MtimeNs: 5, Size: 1},
+		"context/svc.md": {MtimeNs: 20, Size: 2},
+	}
+	var j session.Journal
+	if fresh := recordTurn(p.Tree(), before, cur, 10, &j); len(fresh) != 0 ||
+		!slices.Equal(j.CodeChanged, []string{"svc"}) || !slices.Equal(j.DocsTouched, []string{"svc"}) {
+		t.Errorf("fresh=%v journal=%+v", fresh, j)
+	}
+	var j0 session.Journal
+	if fresh := recordTurn(p.Tree(), before, cur, 0, &j0); !slices.Equal(fresh, []string{"svc"}) {
+		t.Errorf("rule off: fresh=%v", fresh)
+	}
+	// A modified (not new) file with an old mtime bars the ack too.
+	delete(cur, "svc/moved.go")
+	cur["svc/main.go"] = units.Stat{MtimeNs: 5, Size: 2}
+	var j1 session.Journal
+	if fresh := recordTurn(p.Tree(), before, cur, 10, &j1); len(fresh) != 0 {
+		t.Errorf("modified old file: fresh=%v", fresh)
+	}
+}
+
+// A file moved in with an old mtime cannot be ordered against the docs edit.
+func TestStopMovedInFileNotAutoAcked(t *testing.T) {
+	old := filepath.Join(t.TempDir(), "moved.go")
+	if err := os.WriteFile(old, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(old, ts, ts); err != nil {
+		t.Fatal(err)
+	}
+	env := turn(t)
+	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited.\n")
+	if err := os.Rename(old, filepath.Join(env.Root, "svc", "moved.go")); err != nil {
+		t.Skipf("rename across filesystems: %v", err)
+	}
+	out := stop(t, env)
+	if !strings.Contains(string(out), "code changed in svc ") {
+		t.Errorf("feedback: %s", out)
+	}
+	if got := unitState(t, env, "svc"); got != docstate.Stale {
+		t.Errorf("state %v", got)
+	}
+}
+
+// A snapshot left from an earlier turn is older than every edit: auto-ack works.
+func TestStopAutoAcksWithOldSnapshot(t *testing.T) {
+	env := turn(t)
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(session.SnapshotPath(env.Root, stopSID), old, old); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(time.Minute)
+	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	setMtime(t, env.Root, "svc/main.go", base, 0)
+	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, updated.\n")
+	setMtime(t, env.Root, "context/svc.md", base, time.Second)
+	if out := stop(t, env); out != nil {
+		t.Errorf("feedback: %s", out)
+	}
+	if got := unitState(t, env, "svc"); got != docstate.OK {
+		t.Errorf("state %v", got)
 	}
 }
 

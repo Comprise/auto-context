@@ -1,6 +1,6 @@
 ---
 unit: internal/session
-source_hash: sha256:e4bb9d546b8d3c355348c850469598ca4b92db38b1411f4083edbd867c8fd1d0
+source_hash: sha256:170dd6751a7152e34ecc070f3bd56142d3fc3e905dfee04c53c43c631822de17
 updated: "2026-10-20"
 ---
 # internal/session
@@ -11,6 +11,7 @@ PromptSubmit сохраняет снимок (mtime/size отслеживаем�
 
 ## Публичный API / точки входа
 - `Snapshot` — путь → `units.Stat`; `FromTree` берёт копию из `Tree.Stats()` без второго копирования; `Diff` — изменённые, удалённые, добавленные пути.
+- `SnapshotTime` — mtime файла снимка в ns, то есть начало хода; нет файла — ошибка с `os.ErrNotExist`.
 - `LoadSnapshot` / `Save`; снимок без заголовка или с битой записью — ошибка с путём файла.
 - `Journal`: `LoadJournal`, `Save`, `AddCode`/`AddDocs`/`Notify`, `Pause`/`Paused` (конфиг ломался в этой сессии; снимок до паузы, если он есть, сохраняется), `MarkConfigNotified`/`ConfigNotified` (Stop уже сказал об этом), `Resume` (снимает паузу и сбрасывает напоминания), `NotifyAckFailed`/`AckFailNotified` (о неудачном авто-ack сказано в этом ходе); `Clear` — удалить файлы сессии.
 - `RemoveStale(root, maxAge, now)` — все обычные файлы state-dir старше `maxAge`; каталоги и их содержимое не трогает.

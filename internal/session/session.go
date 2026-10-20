@@ -91,6 +91,21 @@ func journalPath(root, sessionID string) string {
 // "<mtime_ns> <size> <path>\x00" (paths may contain spaces and newlines).
 const snapshotHeader = "auto-context snapshot 1\n"
 
+// SnapshotTime returns the modification time (ns) of a session's snapshot
+// file: when the turn started. A missing file yields an error wrapping
+// os.ErrNotExist.
+func SnapshotTime(root, sessionID string) (int64, error) {
+	full, err := fsutil.Resolve(root, SnapshotPath(root, sessionID))
+	if err != nil {
+		return 0, err
+	}
+	fi, err := os.Stat(full)
+	if err != nil {
+		return 0, err
+	}
+	return fi.ModTime().UnixNano(), nil
+}
+
 // LoadSnapshot reads a session's snapshot; a missing file yields nil,
 // os.ErrNotExist, and one without the header or with a bad record an error
 // naming the file.

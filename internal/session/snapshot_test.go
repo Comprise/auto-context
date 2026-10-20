@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -249,5 +250,22 @@ func TestRemoveStaleSkipsDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(inner); err != nil {
 		t.Errorf("file inside a directory touched: %v", err)
+	}
+}
+
+func TestSnapshotTime(t *testing.T) {
+	root := t.TempDir()
+	if err := (Snapshot{}).Save(root, "s"); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2021, 3, 4, 5, 6, 7, 0, time.UTC)
+	if err := os.Chtimes(SnapshotPath(root, "s"), t0, t0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SnapshotTime(root, "s"); err != nil || got != t0.UnixNano() {
+		t.Errorf("got %d, %v", got, err)
+	}
+	if _, err := SnapshotTime(root, "none"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("missing: %v", err)
 	}
 }

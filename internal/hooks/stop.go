@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -81,7 +82,13 @@ func Stop(env Env, in Input) ([]byte, error) {
 		// this turn, so earlier notifications must not hide its changes.
 		j.Resume()
 	}
-	fresh := recordTurn(tree, before, cur, &j)
+	// The snapshot was just read: a failed stat is a race, and 0 only turns
+	// the old-mtime rule off.
+	turnStart, err := session.SnapshotTime(root, id)
+	if err != nil {
+		turnStart = 0
+	}
+	fresh := recordTurn(tree, before, cur, turnStart, &j)
 	if err := j.Save(root, id); err != nil {
 		// Feedback is still worth giving; it may repeat on the next Stop.
 		logx.Errorf(root, "stop: saving the journal: %v", err)
@@ -199,7 +206,10 @@ func configPaused(root, id string, a Agent) ([]byte, error) {
 // recordTurn folds the changes between the turn-start snapshot and now into
 // the journal and returns the units whose context doc was touched this turn
 // and is not older than their newest code edit: the candidates for auto-ack.
-func recordTurn(tree *units.Tree, before, cur session.Snapshot, j *session.Journal) (fresh []string) {
+// A changed code file whose mtime predates the turn start (turnStart, ns; 0
+// turns the rule off) was moved in with its old time (mv, cp -p) and cannot
+// be ordered against the docs edit: it bars the unit's auto-ack.
+func recordTurn(tree *units.Tree, before, cur session.Snapshot, turnStart int64, j *session.Journal) (fresh []string) {
 	// newestCode is the latest mtime of a changed code file per unit; a docs
 	// edit counts for the unit only if it is not older (deleted files have no
 	// mtime and do not order).
@@ -210,7 +220,11 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, j *session.Journ
 		case units.KindCode:
 			mt := newestCode[unit] // a deleted file changes the unit, with no mtime to order by
 			if fs, ok := cur[path]; ok {
-				mt = max(mt, fs.MtimeNs)
+				m := fs.MtimeNs
+				if m < turnStart {
+					m = math.MaxInt64
+				}
+				mt = max(mt, m)
 			}
 			newestCode[unit] = mt
 		case units.KindContextDoc:
