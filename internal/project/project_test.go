@@ -381,16 +381,28 @@ func TestAckTouchedMixed(t *testing.T) {
 func TestAckTouchedEmptyKeepsIndex(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
-	testutil.WriteFile(t, root, "context/svc.md", "# svc\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !Active(root) {
+		t.Fatal("project not active")
+	}
+	index := filepath.Join(root, "CLAUDE.md")
 	if _, _, err := p.AckTouched(nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("index file created: %v", err)
+	if _, err := os.Stat(index); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("index written for empty touched: %v", err)
+	}
+	// The counterpart: a touched unit refreshes the index.
+	if _, _, err := p.AckTouched([]string{"svc"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(index); !strings.Contains(string(data), "`svc`") {
+		t.Errorf("index not written for touched units:\n%s", data)
 	}
 }
 

@@ -635,7 +635,7 @@ func TestWarningCountAndStat(t *testing.T) {
 	tr := discover(t, root, config.Default())
 	w := tr.Warnings()
 	if len(w) != 21 || w[20] != "more warnings omitted" {
-		t.Errorf("len(Warnings) = %d, last %q", len(w), w[len(w)-1])
+		t.Errorf("len(Warnings) = %d, warnings %q", len(w), w)
 	}
 	if tr.WarningCount() != dirs {
 		t.Errorf("WarningCount = %d, want %d", tr.WarningCount(), dirs)

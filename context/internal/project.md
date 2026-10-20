@@ -1,6 +1,6 @@
 ---
 unit: internal/project
-source_hash: sha256:b5a25b7c0a536a2d143a18d4677a5a278042fe6df2ee9a81cae229ec4dbdf0fe
+source_hash: sha256:6f1671f724854f3d17e4b87b653bee3c7fdbca28c3a684e5a5da77496239a92a
 updated: "2026-10-20"
 ---
 # internal/project
