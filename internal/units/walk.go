@@ -137,6 +137,7 @@ type ignoreRule struct {
 	// head and tail are literal text every match starts and ends with, mid
 	// the longest literal run it contains: cheap tests before doublestar.
 	head, mid, tail string
+	suffix          string // the literal after "*" of a suffix rule, unescaped
 }
 
 // ignoreFile is one parsed .gitignore. Rules that need no glob matching (an
@@ -206,6 +207,7 @@ func parseIgnore(lines []string) ignoreFile {
 			}
 		}
 		r.pattern = p
+		r.suffix = l[1:]
 		if k := strings.IndexAny(p, globMeta); k >= 0 {
 			r.head = p[:k]
 			t := strings.LastIndexAny(p, globMeta)
@@ -291,7 +293,7 @@ func (f *ignoreFile) match(sub string, isDir bool, budget *int) (ignored, matche
 		}
 	}
 	for _, i := range f.suffix {
-		if i > best && ok(i) && strings.HasSuffix(base, f.rules[i].pattern[1:]) {
+		if i > best && ok(i) && strings.HasSuffix(base, f.rules[i].suffix) {
 			best = i
 		}
 	}
@@ -697,13 +699,18 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 				return filepath.SkipDir
 			}
 			t.loadGitignore(root, rel)
-			if !isContext(rel) && dirs[rel] == nil {
-				dirs[rel] = &dirInfo{}
-			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
 			return nil
+		}
+		// As in git mode, a directory exists only through a file of its own
+		// (or below) that is neither excluded nor ignored. A known directory
+		// has its ancestors already: .gitignore is checked once per directory.
+		if dir := path.Dir(rel); dirs[dir] == nil && !t.excluded(rel) && !t.gitIgnored(rel, false) {
+			for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
+				dirs[dir] = &dirInfo{}
+			}
 		}
 		t.addFile(rel, dirs, false, d.Info)
 		return nil

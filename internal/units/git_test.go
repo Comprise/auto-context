@@ -503,3 +503,52 @@ func TestWalkWarningHidesHostilePath(t *testing.T) {
 	tr := discover(t, root, config.Default())
 	checkHostileWarnings(t, tr.Warnings())
 }
+
+func TestDiscoverEmptyDirsMatchGit(t *testing.T) {
+	build := func() string {
+		root := t.TempDir()
+		mkfiles(t, root, "packages/a/x.go", "packages/old/out.log", "packages/txt/readme.txt", "packages/gi/.gitignore")
+		if err := os.MkdirAll(filepath.Join(root, "packages", "empty"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for rel, s := range map[string]string{".gitignore": "*.log\n", "packages/gi/.gitignore": "x\n"} {
+			if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(s), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root
+	}
+	cfg := config.Default()
+	cfg.Include = []string{"packages/*"}
+	plain, viaGit := build(), build()
+	gitInit(t, viaGit)
+	a, b := discover(t, plain, cfg), discover(t, viaGit, cfg)
+	if !b.viaGit || a.viaGit {
+		t.Fatalf("modes: walk viaGit=%v git viaGit=%v", a.viaGit, b.viaGit)
+	}
+	want := []string{"_root", "packages/a", "packages/gi", "packages/txt"}
+	if got := paths(a.Units()); !slices.Equal(got, want) {
+		t.Errorf("walk units = %v, want %v", got, want)
+	}
+	if got := paths(b.Units()); !slices.Equal(got, want) {
+		t.Errorf("git units = %v, want %v", got, want)
+	}
+}
+
+func TestGitignoreBraceSuffixMatchesGit(t *testing.T) {
+	build := func() string {
+		root := t.TempDir()
+		mkfiles(t, root, "x{a}.go", "y.go", "z}.go")
+		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*{a}.go\n*}.go\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	plain, viaGit := build(), build()
+	gitInit(t, viaGit)
+	for name, tr := range map[string]*Tree{"walk": discover(t, plain, config.Default()), "git": discover(t, viaGit, config.Default())} {
+		if got := tr.Tracked(); !slices.Equal(got, []string{"y.go"}) {
+			t.Errorf("%s tracked = %v", name, got)
+		}
+	}
+}
