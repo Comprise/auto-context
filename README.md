@@ -145,6 +145,8 @@ Claude пользуется и консольной утилитой — её м
 | Команда | Что делает |
 |---|---|
 | `auto-context status` | состояние документов юнитов: `ok`, `stale`, `missing` |
+| `auto-context status --stale` | только устаревшие и недостающие |
+| `auto-context status --exit-code` | код 1, если есть stale/missing — для CI |
 | `auto-context units` | список юнитов |
 | `auto-context ack <unit…>` | правка несущественна: считать документы актуальными |
 | `auto-context ack --exclude <unit>` | не считать каталог отдельным юнитом |
@@ -182,6 +184,7 @@ module_markers: [go.mod, package.json, Cargo.toml, pyproject.toml, pom.xml, buil
 - В `/hooks` должны быть хуки плагина: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreToolUse`,
   `SessionEnd` (в Codex вместо `PreToolUse` — `PermissionRequest`, и хуки нужно доверить).
 - В Codex хук `SessionEnd` при выходе из TUI не срабатывает (сессию держит фоновый app-server), поэтому файлы сессии в `.auto-context/state` остаются; SessionStart удаляет те, что старше 7 дней.
+- Две сессии агента в одном каталоге видят правки друг друга: напоминание или auto-ack может прийти не той сессии. Для параллельной работы используйте отдельные `git worktree`.
 - Ошибки плагина пишутся в `.auto-context/log`. Работу агента плагин не прерывает никогда.
 - Очень большой репозиторий (миллионы файлов) плагин может не успеть обработать — добавьте большие
   сгенерированные каталоги в `.gitignore`.

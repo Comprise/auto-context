@@ -19,10 +19,12 @@ const (
 	header      = "## Units (details: context/<unit>.md)"
 )
 
+// Entry is one unit line of the root index: unit path and summary.
 type Entry struct {
 	Unit, Summary string
 }
 
+// ErrBrokenMarkers reports unbalanced units markers in the root index file.
 var ErrBrokenMarkers = errors.New("unbalanced auto-context:units markers in the root index file")
 
 // maxSummary caps a unit summary in the index (runes); MaxSize caps the root

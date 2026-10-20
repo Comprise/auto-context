@@ -31,6 +31,7 @@ const (
 	IndexAgents = "AGENTS.md"
 )
 
+// Config holds the settings of .auto-context/config.yaml.
 type Config struct {
 	MinFiles       int      `yaml:"min_files"`
 	CodeExtensions []string `yaml:"code_extensions"`
@@ -49,6 +50,7 @@ type Config struct {
 	IndexFile string `yaml:"index_file"`
 }
 
+// Default returns the configuration used when no config file overrides it.
 func Default() Config {
 	return Config{
 		MinFiles: 5,

@@ -13,6 +13,7 @@ import (
 	"auto-context/internal/units"
 )
 
+// State is the freshness of a unit's context doc: ok, stale or missing.
 type State string
 
 const (
@@ -21,6 +22,7 @@ const (
 	Missing State = "missing"
 )
 
+// UnitStatus is the doc state of one unit with its context path and summary.
 type UnitStatus struct {
 	Unit        string
 	State       State

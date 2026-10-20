@@ -1,7 +1,7 @@
 # auto-context — поддержка OpenAI Codex CLI
 
 Дата: 2026-10-20
-Статус: проект; дополняет `2026-10-19-auto-context-design.md`
+Статус: реализовано; дополняет `2026-10-19-auto-context-design.md`
 
 ## 1. Цель
 

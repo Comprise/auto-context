@@ -24,12 +24,14 @@ const (
 	ReasonFiles   Reason = "files"   // holds at least min_files source files
 )
 
+// Unit is a documentation unit: its path, why it is one and its source file count.
 type Unit struct {
 	Path      string
 	Reason    Reason
 	FileCount int
 }
 
+// Kind classifies a repository path: ignored, code, index doc or context doc.
 type Kind int
 
 const (
@@ -81,6 +83,7 @@ func (t *Tree) Units() []Unit {
 	return append([]Unit{t.units[RootUnit]}, out...)
 }
 
+// IsUnit reports whether p is the path of a discovered unit.
 func (t *Tree) IsUnit(p string) bool {
 	_, ok := t.units[p]
 	return ok

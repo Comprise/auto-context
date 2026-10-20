@@ -1,6 +1,6 @@
 ---
 unit: internal/docstate
-source_hash: sha256:b0b656461c7e80facd37a1443f9d7f45d188694b1619e2a9fd5fa07752b9aab8
+source_hash: sha256:cb7c495a1fa4ae70886c154d966751ca41efe9277a0729909f216acf4b4c8935
 updated: "2026-10-20"
 ---
 # internal/docstate

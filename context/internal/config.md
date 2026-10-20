@@ -1,6 +1,6 @@
 ---
 unit: internal/config
-source_hash: sha256:0a89e3ed08e3027a7524db0849c8ef62a51f1884f388ef83c3fc0b5f9694a7e8
+source_hash: sha256:3cf0f8ff7517f54e54cdaab8da16568ff88e448116da95a90f7e951785344bc8
 updated: "2026-10-20"
 ---
 # internal/config

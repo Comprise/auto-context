@@ -171,10 +171,10 @@ sh-shim работает: `uname -s` вида `MINGW64_NT-*` / `MSYS_NT-*` / `CY
 вывод при этом пустой.
 
 **Активация.** Плагин устанавливается глобально, поэтому хуки работают только в проектах, где он включён:
-в корне есть `.auto-context/config.yaml` или каталог `context/`. Иначе `SessionStart`, `UserPromptSubmit` и `Stop` сразу завершаются с пустым выводом
+в корне есть `.auto-context/config.yaml` или `context/_root.md`. Иначе `SessionStart`, `UserPromptSubmit` и `Stop` сразу завершаются с пустым выводом
 и ничего не пишут (ни `.auto-context/`, ни `.gitignore`, ни корневой `CLAUDE.md`, ни лог). Проверка одна —
-`hooks.Active(root)` в начале каждого из этих обработчиков. `PreToolUse` (п. 8.4) и команды CLI не ограничиваются; `/auto-context:init`
-создаёт `context/` и тем самым включает хуки.
+`project.Active(root)` в начале каждого из этих обработчиков. `PreToolUse` (п. 8.4) и команды CLI не ограничиваются; `/auto-context:init`
+создаёт `context/_root.md` и тем самым включает хуки.
 
 ### 8.1 SessionStart (`source`: startup | resume | clear | compact)
 
@@ -242,8 +242,8 @@ sh-shim работает: `uname -s` вида `MINGW64_NT-*` / `MSYS_NT-*` / `CY
    Для нового юнита `_root` вместо подсказки `ack --exclude` выводится
    `New unit _root: create context/_root.md (and the root CLAUDE.md purpose line).` — корневой юнит исключить нельзя.
 
-6. `pending` пуст → очистить журнал и удалить снимок; разрешить остановку. Новый снимок сделает
-   следующий `UserPromptSubmit`.
+6. `pending` пуст → разрешить остановку; снимок и журнал остаются (другой Stop-хук может продолжить ход),
+   их сбрасывает следующий `UserPromptSubmit`.
 
 Порядок шагов важен: auto-ack (шаг 3) сам пишет во frontmatter `context/<unit>.md`, но это правка документа,
 а не кода, и на `pending` не влияет. Если auto-ack переписал оглавление корневого `CLAUDE.md`, запись `CLAUDE.md`
@@ -256,8 +256,8 @@ sh-shim работает: `uname -s` вида `MINGW64_NT-*` / `MSYS_NT-*` / `CY
 
 1. Разрешать, только если `tool_name` — `Bash`, а вся команда `tool_input.command` как есть (без обрезки пробелов:
    bash не делит слова по Unicode-пробелам вроде NBSP) — один простой вызов, целиком совпадающий с
-   `^auto-context (ack|status|units|version)( [A-Za-z0-9_./-]+)*$` (подходят `ack --exclude <unit>` и
-   `status --stale`), и ни один аргумент не содержит `..`. Любые другие символы (`;`, `&`, `|`, `$`, обратные
+   `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$` (подходят `status --stale` и
+   `changes <unit>`), и ни один аргумент не содержит `..`; `ack --exclude` правит конфиг, поэтому всегда спрашивает. Любые другие символы (`;`, `&`, `|`, `$`, обратные
    кавычки, `>`, `<`, кавычки, переводы строк, табы, двойные пробелы), префиксы (`sudo`, `VAR=…`, путь к
    бинарнику) и подкоманды (`hook`) — пустой вывод, обычный поток разрешений.
 2. Вывод при разрешении:
@@ -274,11 +274,15 @@ sh-shim работает: `uname -s` вида `MINGW64_NT-*` / `MSYS_NT-*` / `CY
 
 | Команда | Действие |
 |---|---|
-| `auto-context hook <session-start\|prompt-submit\|stop\|pre-tool-use>` | обработчики хуков |
+| `auto-context hook <session-start\|prompt-submit\|stop\|pre-tool-use\|session-end> [--agent codex]` | обработчики хуков |
+| `auto-context hook permission-request --agent codex` | авто-одобрение собственного CLI в Codex (аналог `pre-tool-use`) |
+| `auto-context hook-exit <event> <code>` | внутренняя: шим записывает в лог падение бинаря |
 | `auto-context ack <unit…>` | правка несущественна: записать текущий `source_hash` во frontmatter `context/<unit>.md` (если в файле нет frontmatter — добавить его; если самого файла нет — ошибка с подсказкой создать документы или `ack --exclude`) |
 | `auto-context ack --exclude <unit>` | добавить юнит в `exclude` в `.auto-context/config.yaml` (создать файл при отсутствии); для `_root` (или `.`) — ошибка `the root unit cannot be excluded; create context/_root.md instead`, код 1, конфиг не меняется |
-| `auto-context status [--stale]` | таблица юнитов: unit / state (ok, stale, missing) / путь к документам; `--stale` — только stale и missing |
+| `auto-context status [--stale] [--exit-code]` | таблица юнитов: unit / state (ok, stale, missing) / путь к документам; `--stale` — только stale и missing; `--exit-code` — код 1, если есть stale/missing |
+| `auto-context changes <unit>` | что изменилось в юните с последнего обновления доков |
 | `auto-context units` | список юнитов по эвристике (для `/auto-context:init`) |
+| `auto-context version` | версия бинаря |
 
 Аргумент `<unit>` нормализуется: `/` вместо разделителя ОС, `path.Clean` (`./svc`, `svc/`, `svc//` → `svc`),
 `.` → `_root`.
@@ -376,16 +380,7 @@ Frontmatter пишет только бинарник. Пустые раздел�
 
 ## 13. Конфиг `.auto-context/config.yaml`
 
-Необязателен; значения по умолчанию:
-
-```yaml
-min_files: 5
-code_extensions: [.go, .ts, .tsx, .js, .jsx, .py, .rs, .java, .kt, .rb, .php, .cs, .cpp, .c, .h]
-module_markers: [go.mod, package.json, Cargo.toml, pyproject.toml, pom.xml, build.gradle]
-include: []
-exclude: [vendor/**, node_modules/**, "**/testdata/**", dist/**, build/**]
-max_session_notice: 10
-```
+Необязателен; значения по умолчанию — см. `config.Default()` и README, «Настройка».
 
 Битый YAML → используются значения по умолчанию, ошибка в лог.
 

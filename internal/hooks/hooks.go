@@ -1,4 +1,4 @@
-// Package hooks implements the Claude Code hook handlers.
+// Package hooks implements the Claude Code and Codex hook handlers.
 package hooks
 
 import (
@@ -10,7 +10,7 @@ import (
 	"auto-context/internal/project"
 )
 
-// Input is the JSON payload Claude Code passes to a hook on stdin.
+// Input is the JSON payload the agent (Claude Code or Codex) passes to a hook on stdin.
 type Input struct {
 	SessionID string          `json:"session_id"`
 	Cwd       string          `json:"cwd"`

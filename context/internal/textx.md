@@ -17,4 +17,4 @@ updated: "2026-10-20"
 
 ## Связи
 Зависит от: только стандартная библиотека.
-Используется в: `cmd/auto-context`, `internal/hooks`, `internal/logx`, `internal/project`, `internal/rootindex`, `internal/units`.
+Используется в: `cmd/auto-context`, `internal/logx`, `internal/project`, `internal/rootindex`.

@@ -1,6 +1,6 @@
 ---
 unit: _root
-source_hash: sha256:54c8a1844f0972e5fa2133cc9071165d68f1800e67e1bb5e26c9453554f84390
+source_hash: sha256:8e7b0ef98d0a2b1e43cfd5eb32d62e7fbf2b601021e59ed47f27bcdcbdf92987
 updated: "2026-10-20"
 ---
 # _root
@@ -28,6 +28,7 @@ updated: "2026-10-20"
   `logx` (лог ошибок), `textx` (очистка текста из репозитория).
 - Параллельные сессии в одном дереве делят `cache.json`: побеждает последняя запись, кэш
   восстановим. Файлы хода у каждой сессии свои.
+- Параллельные сессии (и правки пользователя в редакторе) в одном дереве не различаются: Stop каждой сессии сравнивает всё дерево со своим снимком начала хода, поэтому правка, сделанная во время чужого хода, попадает в напоминание и auto-ack обеих. Отделить свои правки по stat нельзя; для параллельной работы нужны отдельные worktree.
 - Плагин: `.claude-plugin/plugin.json` и `hooks/hooks.json` (Claude Code), `.codex-plugin/plugin.json` и `hooks/codex.json` (Codex; команды с `--agent codex`), `.agents/plugins/marketplace.json` (маркетплейс Codex: источник `local`, `./`, потому что Codex молча игнорирует github-источник из `.claude-plugin/marketplace.json`), общие навыки в `skills/`, POSIX sh-shim
   `bin/auto-context`, выбирающий бинарник `libexec/auto-context-<os>-<arch>` (в main бинарников нет).
 - `.github/workflows/`: `ci.yml` (тесты на Linux/macOS/Windows, `claude plugin validate`),

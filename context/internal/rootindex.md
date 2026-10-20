@@ -1,6 +1,6 @@
 ---
 unit: internal/rootindex
-source_hash: sha256:ffa8feb1640d840acac54dcbb72794a510966aa7768bd88d91f7d8165ff5f208
+source_hash: sha256:e63d54c76a3c38b5ec2b585bb3588c4f57534c4142779bd5faa207603a8491e7
 updated: "2026-10-20"
 ---
 # internal/rootindex

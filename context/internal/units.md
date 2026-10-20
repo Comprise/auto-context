@@ -1,6 +1,6 @@
 ---
 unit: internal/units
-source_hash: sha256:9ad6b8d54562c6425ae16869c56148b9164254b95761b69a6c4bd8949b60970f
+source_hash: sha256:e5d2e695e01725632bc825811a0f1dad49cc5d6d77149d5450ff6fedd25f12e7
 updated: "2026-10-20"
 ---
 # internal/units
@@ -37,5 +37,5 @@ updated: "2026-10-20"
 - `Discover` проверяет переданный `Config` (`Validate`), даже если он собран в коде.
 
 ## Связи (зависит от / используется в)
-Зависит от: `internal/config`, `internal/fsutil`, `internal/gitx`, `internal/textx`; внешняя `doublestar/v4`.
+Зависит от: `internal/config`, `internal/fsutil`, `internal/gitx`; внешняя `doublestar/v4`.
 Используется в: `cmd/auto-context`, `internal/docstate`, `internal/hooks`, `internal/project`, `internal/rootindex`, `internal/session`.
