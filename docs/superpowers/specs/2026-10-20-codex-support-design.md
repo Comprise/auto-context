@@ -114,8 +114,8 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 ## 6. Тексты под агента
 
 - Профиль агента — маленькая таблица в `internal/hooks`: ссылка на навык
-  (`auto-context:auto-context-docs` → `$auto-context-docs`), команда синка
-  (`/auto-context:sync` → `$sync`).
+  (`auto-context:auto-context-docs` → `$auto-context:auto-context-docs`), команда синка
+  (`/auto-context:sync` → `$auto-context:sync`).
 - Строки хуков и CLI слова «Claude» не содержат (оно только в комментариях); меняются лишь
   имя индексного файла и ссылки на навыки/команды.
 - Навыки: frontmatter Claude-only (`disable-model-invocation`, `allowed-tools`) остаётся —
@@ -163,7 +163,7 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   разбор `--agent` в `main.go`.
 - `make test` на Linux/macOS/Windows в CI.
 - Ручной прогон в Codex 0.163: установка из маркетплейса, доверие хукам, `$auto-context:init`, ход с правкой
-  кода → напоминание `Stop`, `auto-context ack` без запроса, `SessionEnd` чистит файлы сессии.
+  кода → напоминание `Stop`, `auto-context ack` без запроса, старые файлы сессии (старше 7 дней) чистит SessionStart: Codex не вызывает SessionEnd при выходе из TUI.
 
 ## Поправки по шагу 0 (2026-10-20)
 
