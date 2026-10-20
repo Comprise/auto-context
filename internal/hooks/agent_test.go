@@ -97,3 +97,18 @@ func TestBrokenIndexFileNoClaudeMD(t *testing.T) {
 		t.Error("CLAUDE.md was created")
 	}
 }
+
+func TestNonStringIndexFileNoClaudeMD(t *testing.T) {
+	env := newRepo(t, false)
+	env.Agent = Codex
+	if err := os.Remove(filepath.Join(env.Root, "CLAUDE.md")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	write(t, env.Root, ".auto-context/config.yaml", "index_file: [AGENTS.md]\n")
+	if _, err := SessionStart(env, Input{SessionID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(env.Root, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md was created")
+	}
+}

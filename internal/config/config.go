@@ -119,7 +119,18 @@ func Load(root string) (Config, Problems, error) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		var te *yaml.TypeError
 		if !errors.As(err, &te) {
+			if indexFileKeys(data) > 1 {
+				return Default(), nil, ErrBadIndexFile // duplicated key
+			}
 			return Default(), nil, err
+		}
+	}
+	if indexFileKeys(data) > 1 {
+		return Default(), nil, ErrBadIndexFile // duplicated key
+	}
+	if v, ok := raw["index_file"]; ok && v != nil {
+		if _, isStr := v.(string); !isStr {
+			return Default(), nil, ErrBadIndexFile
 		}
 	}
 	var pr Problems
@@ -393,4 +404,20 @@ func FindRoot(cwd string) string {
 		}
 		dir = parent
 	}
+}
+
+// indexFileKeys counts the top-level index_file keys in data (0 if unparsable).
+func indexFileKeys(data []byte) int {
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return 0
+	}
+	n := 0
+	m := doc.Content[0].Content
+	for i := 0; i+1 < len(m); i += 2 {
+		if m[i].Value == "index_file" {
+			n++
+		}
+	}
+	return n
 }

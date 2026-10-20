@@ -426,6 +426,9 @@ func TestIndexFile(t *testing.T) {
 		{"empty", "index_file: \"\"\n", "CLAUDE.md", ""},
 		{"null", "index_file: null\n", "CLAUDE.md", ""},
 		{"other", "index_file: README.md\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
+		{"list", "index_file: [AGENTS.md]\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
+		{"mapping", "index_file: {a: b}\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
+		{"duplicated", "index_file: AGENTS.md\nindex_file: AGENTS.md\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
 		{"case", "index_file: agents.md\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
 	}
 	for _, tc := range cases {
