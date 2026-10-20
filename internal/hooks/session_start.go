@@ -241,7 +241,7 @@ func failNotice(env Env, err error) ([]byte, error) {
 // (a panic, unreadable input): fixed text, the error is in the log.
 func SessionFailure(a Agent) []byte {
 	var out sessionOutput
-	out.SystemMessage = "auto-context: docs tracking is off for this session: the session-start hook failed (see .auto-context/log or run `"+a.CLI()+" status`)."
+	out.SystemMessage = "auto-context: docs tracking is off for this session: the session-start hook failed (see .auto-context/log or run `" + a.CLI() + " status`)."
 	out.Hook.EventName = "SessionStart"
 	data, _ := json.Marshal(out)
 	return data
