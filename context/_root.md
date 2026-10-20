@@ -1,6 +1,6 @@
 ---
 unit: _root
-source_hash: sha256:445a26ff7d21732bc2b22a41e5ae6973d8f269d8377eda80986f333e63b29e33
+source_hash: sha256:3fc92eb084d5acd92968126b6409478dc6af812eef9ca021ef1070b0eb9e5c89
 updated: "2026-10-20"
 ---
 # _root
@@ -28,10 +28,10 @@ updated: "2026-10-20"
   `logx` (лог ошибок), `textx` (очистка текста из репозитория).
 - Параллельные сессии в одном дереве делят `cache.json`: побеждает последняя запись, кэш
   восстановим. Файлы хода у каждой сессии свои.
-- Плагин: `.claude-plugin/plugin.json` и `hooks/hooks.json` (Claude Code), `.codex-plugin/plugin.json` и `hooks/codex.json` (Codex; команды с `--agent codex`), общие навыки в `skills/`, POSIX sh-shim
+- Плагин: `.claude-plugin/plugin.json` и `hooks/hooks.json` (Claude Code), `.codex-plugin/plugin.json` и `hooks/codex.json` (Codex; команды с `--agent codex`), `.agents/plugins/marketplace.json` (маркетплейс Codex: источник `local`, `./`, потому что Codex молча игнорирует github-источник из `.claude-plugin/marketplace.json`), общие навыки в `skills/`, POSIX sh-shim
   `bin/auto-context`, выбирающий бинарник `libexec/auto-context-<os>-<arch>` (в main бинарников нет).
 - `.github/workflows/`: `ci.yml` (тесты на Linux/macOS/Windows, `claude plugin validate`),
-  `release.yml` (оба ставят и `.codex-plugin`; по тегу `vX.Y.Z[-pre]` с коммита из main: 6 бинарников, provenance, строгая
+  `release.yml` (оба проверяют и ставят `.codex-plugin` и `.agents`; по тегу `vX.Y.Z[-pre]` с коммита из main: 6 бинарников, provenance, строгая
   проверка дерева плагина, ветка `release` с файлами плагина — новый коммит поверх прежнего, без
   истории main и без force-push, только к более высокой версии; затем GitHub Release; теги с `-`
   ветку не трогают).

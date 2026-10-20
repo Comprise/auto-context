@@ -2,7 +2,7 @@
 Плагин Claude Code и Codex CLI на Go: держит индексные файлы юнитов и библиотеку context/ в синхроне с кодом.
 
 - `cmd/auto-context/` — бинарник (hook, ack, status, changes, units, version)
-- `internal/` — пакеты ядра; `hooks/`, `skills/`, `bin/`, `.claude-plugin/` — упаковка плагина
+- `internal/` — пакеты ядра; `hooks/`, `skills/`, `bin/`, `.claude-plugin/`, `.codex-plugin/`, `.agents/` — упаковка плагина
 - `docs/superpowers/` — спецификация и план; `Makefile` — `make test`, `make dist`
 
 Подробно: context/_root.md
