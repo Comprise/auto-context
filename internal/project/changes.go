@@ -27,6 +27,29 @@ const maxChangesOutput = 64 << 10
 // also allow `--output=<any file>`). Paths are relative to the root, which may
 // be below the git top level. Git failures are written as notes, not returned.
 func (p *Project) WriteChanges(w io.Writer, unit string) error {
+	ew := &errWriter{w: w}
+	if err := p.writeChanges(ew, unit); err != nil {
+		return err
+	}
+	return ew.err
+}
+
+// errWriter remembers the first error of its writer and drops later writes.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(b []byte) (int, error) {
+	if e.err != nil {
+		return 0, e.err
+	}
+	n, err := e.w.Write(b)
+	e.err = err
+	return n, err
+}
+
+func (p *Project) writeChanges(w io.Writer, unit string) error {
 	if p.ConfigBroken() {
 		return ErrConfigBroken // the units would be the defaults
 	}

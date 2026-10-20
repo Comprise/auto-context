@@ -1,6 +1,6 @@
 ---
 unit: cmd/auto-context
-source_hash: sha256:eb3f8bbaf761f8ec687278afdcff4ca28973497b5ed59f0317e2a4fecb8d39ed
+source_hash: sha256:572809afa219d8089a4b0a2d5e2937f588208eef12b8642e5cda92954593db63
 updated: "2026-10-20"
 ---
 # cmd/auto-context
@@ -14,7 +14,7 @@ CLI-бинарь: запуск хуков Claude Code и Codex и команды
 - `ack <unit>...` — `Project.Ack`, затем `RefreshIndex` — только если хоть один ack удался; `.` — `_root`. При битом конфиге — отказ (`project.ErrConfigBroken`), как и у `units` и `changes`.
 - `ack --exclude <unit>` — `Project.Exclude` (каталог должен существовать); затем проект перечитывается и оглавление обновляется.
 - `status [--stale] [--exit-code]` — таблица (предупреждение о маркерах называет индексный файл из конфига); `warning:` (конфиг, конфиг под `.gitignore`, кэш, маркеры оглавления, обход) и ошибка открытия — в stdout: это отчёт, а `!`-вставка skill `sync` может не видеть stderr; `note:` о доках-сиротах (не больше 20 имён, только прошедшие `units.SafeName`, остальные — числом), языке доков, числе ошибок в логе (с просьбой не читать его самому) и `warning:`, если лог нельзя дописать; `--exit-code` — 1 при stale/missing. При битом конфиге таблицы нет (юниты были бы по умолчанию): код 0, с `--exit-code` — 1.
-- `changes <unit>` — `Project.WriteChanges`.
+- `changes <unit>` — `Project.WriteChanges`; ошибка (в том числе записи в stdout) — в stderr, код 1.
 - `units`, `version`; `hook-exit <event> <code>` — внутренняя, шим пишет через неё падение бинаря в лог.
 
 ## Устройство и потоки данных

@@ -438,3 +438,19 @@ func TestWarnings(t *testing.T) {
 		t.Error("no warning for an over-long .gitignore line")
 	}
 }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestWriteChangesReportsWriteError(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.WriteChanges(failingWriter{}, "svc"); err == nil || !strings.Contains(err.Error(), "write failed") {
+		t.Errorf("err = %v", err)
+	}
+}

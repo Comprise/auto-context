@@ -219,17 +219,15 @@ func TestChangesExitCodes(t *testing.T) {
 	}
 }
 
-// Project.WriteChanges ignores write errors, so a failing stdout exits 0: a
-// production bug found by this test, to be fixed apart from the tests-only task.
+// A failing stdout is an error, not a silent success.
 func TestChangesStdoutFailureExits1(t *testing.T) {
-	t.Skip("known bug: WriteChanges drops write errors (expected exit 1, got 0)")
 	root := repo(t)
 	testutil.RequireGit(t)
 	testutil.Git(t, root, "init", "-q")
 	testutil.Git(t, root, "add", "-A")
 	testutil.Git(t, root, "commit", "-qm", "initial")
 	var errb bytes.Buffer
-	if code := run([]string{"changes", "svc"}, strings.NewReader(""), failWriter{}, &errb, root); code != 1 {
+	if code := run([]string{"changes", "svc"}, strings.NewReader(""), failWriter{}, &errb, root); code != 1 || errb.Len() == 0 {
 		t.Errorf("failing stdout: code=%d err=%q", code, errb.String())
 	}
 }
