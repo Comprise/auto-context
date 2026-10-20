@@ -346,7 +346,7 @@ func TestHooksJSONContract(t *testing.T) {
 				if _, ok := hookHandlers[sub]; !ok {
 					t.Errorf("%s: binary has no handler for %q", event, sub)
 				}
-				if b, ok := hookBudget[sub]; !ok || b >= time.Duration(h.Timeout)*time.Second {
+				if b, ok := budgetFor(sub, hooks.Claude); !ok || b >= time.Duration(h.Timeout)*time.Second {
 					t.Errorf("%s: git budget %v not below the timeout %ds", event, b, h.Timeout)
 				}
 			}
@@ -1087,5 +1087,84 @@ func TestBudgetFor(t *testing.T) {
 		if got, ok := budgetFor(c.event, c.agent); !ok || got != c.want {
 			t.Errorf("budgetFor(%q, %q) = %v, %v; want %v", c.event, c.agent, got, ok, c.want)
 		}
+	}
+}
+
+// hooks/codex.json and .codex-plugin/plugin.json must match what the binary handles.
+func TestCodexHooksManifest(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "hooks", "codex.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		sub     string
+		timeout int
+	}{
+		"SessionStart": {"session-start", 60}, "UserPromptSubmit": {"prompt-submit", 30},
+		"Stop": {"stop", 60}, "PermissionRequest": {"permission-request", 10},
+		"SessionEnd": {"session-end", 3},
+	}
+	if len(cfg.Hooks) != len(want) {
+		t.Errorf("events = %d, want %d", len(cfg.Hooks), len(want))
+	}
+	for event, groups := range cfg.Hooks {
+		w, known := want[event]
+		if !known {
+			t.Errorf("unexpected event %s", event)
+			continue
+		}
+		if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+			t.Errorf("%s: want one group with one hook", event)
+			continue
+		}
+		g, h := groups[0], groups[0].Hooks[0]
+		wantCmd := `"${CLAUDE_PLUGIN_ROOT}"/bin/auto-context hook ` + w.sub + " --agent codex"
+		if h.Type != "command" || h.Command != wantCmd {
+			t.Errorf("%s: command %q, want %q", event, h.Command, wantCmd)
+		}
+		if _, ok := hookHandlers[w.sub]; !ok {
+			t.Errorf("%s: binary has no handler for %q", event, w.sub)
+		}
+		if h.Timeout != w.timeout {
+			t.Errorf("%s: timeout %d, want %d", event, h.Timeout, w.timeout)
+		}
+		if b, ok := budgetFor(w.sub, hooks.Codex); !ok || b >= time.Duration(h.Timeout)*time.Second {
+			t.Errorf("%s: git budget %v not below the timeout %ds", event, b, h.Timeout)
+		}
+		wantMatcher := ""
+		if event == "PermissionRequest" {
+			wantMatcher = "^Bash$"
+		}
+		if g.Matcher != wantMatcher {
+			t.Errorf("%s: matcher %q, want %q", event, g.Matcher, wantMatcher)
+		}
+	}
+
+	pdata, err := os.ReadFile(filepath.Join("..", "..", ".codex-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plugin map[string]any
+	if err := json.Unmarshal(pdata, &plugin); err != nil {
+		t.Fatal(err)
+	}
+	if plugin["name"] != "auto-context" || plugin["hooks"] != "./hooks/codex.json" {
+		t.Errorf("plugin.json name=%v hooks=%v", plugin["name"], plugin["hooks"])
+	}
+	if _, has := plugin["version"]; has {
+		t.Error("plugin.json on main must not carry a version")
 	}
 }

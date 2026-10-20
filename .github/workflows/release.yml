@@ -86,10 +86,11 @@ jobs:
         # plugin.json on main has no version; the tag is the single source.
         run: |
           jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' .claude-plugin/plugin.json > plugin.json.tmp && mv plugin.json.tmp .claude-plugin/plugin.json
+          jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' .codex-plugin/plugin.json > plugin.json.tmp && mv plugin.json.tmp .codex-plugin/plugin.json
       - name: Archive and checksums
         run: |
           chmod +x libexec/* bin/auto-context
-          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin hooks skills bin libexec README.md LICENSE
+          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin .codex-plugin hooks skills bin libexec README.md LICENSE
           sha256sum libexec/* "auto-context-${GITHUB_REF_NAME}.tar.gz" > checksums.txt
       - name: Validate the tree users install
         run: |
@@ -122,7 +123,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git rm -rq --cached .
-          git add -f .claude-plugin hooks skills bin libexec README.md LICENSE
+          git add -f .claude-plugin .codex-plugin hooks skills bin libexec README.md LICENSE
           tree=$(git write-tree)
           parents=""
           if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
