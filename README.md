@@ -44,6 +44,8 @@ repo/
   { "env": { "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe" } }
   ```
 
+- **Codex:** только Linux и macOS (в Windows — внутри WSL). Хуки Codex — команды POSIX sh; как Codex запускает их в Windows без WSL, не проверено.
+
 ## Установка
 
 В Claude Code:
@@ -64,6 +66,8 @@ claude plugin update auto-context@auto-context
 
 ## Codex
 
+Codex поддерживается в Linux и macOS (в Windows — через WSL).
+
 Хуки и навыки те же, но индексные файлы юнитов называются `AGENTS.md`, а навыки вызываются через `$`.
 
 ```
@@ -81,8 +85,9 @@ codex plugin marketplace add Comprise/auto-context --ref release
 хода.
 
 В Codex `auto-context` не в PATH: хуки предлагают команды с абсолютным путём
-(`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`), и навыки
-выполняют их так же. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
+(`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`; путь с пробелами
+или другими необычными символами — в одинарных кавычках), и навыки выполняют их так же; если хук пути
+не дал, навык находит бинарник в кэше плагинов Codex сам. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
 Codex всё же собрался спросить, хук `PermissionRequest` одобряет вызовы CLI плагина (`ack`,
 `status`, `units`, `changes`, `version`; `ack --exclude` всегда спрашивает).
 
@@ -176,6 +181,7 @@ module_markers: [go.mod, package.json, Cargo.toml, pyproject.toml, pom.xml, buil
 - `auto-context status` покажет предупреждения: о конфиге, `.gitignore`, git.
 - В `/hooks` должны быть хуки плагина: `SessionStart`, `UserPromptSubmit`, `Stop`, `PreToolUse`,
   `SessionEnd` (в Codex вместо `PreToolUse` — `PermissionRequest`, и хуки нужно доверить).
+- В Codex хук `SessionEnd` при выходе из TUI не срабатывает (сессию держит фоновый app-server), поэтому файлы сессии в `.auto-context/state` остаются; SessionStart удаляет те, что старше 7 дней.
 - Ошибки плагина пишутся в `.auto-context/log`. Работу агента плагин не прерывает никогда.
 - Очень большой репозиторий (миллионы файлов) плагин может не успеть обработать — добавьте большие
   сгенерированные каталоги в `.gitignore`.
