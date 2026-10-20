@@ -51,28 +51,74 @@ func Stop(env Env, in Input) ([]byte, error) {
 	before, err := session.LoadSnapshot(root, id)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		j, jerr := session.LoadJournal(root, id)
-		if jerr != nil {
-			logx.Errorf(root, "stop: journal unreadable, starting empty: %v", jerr)
-		}
-		switch {
-		case j.Paused:
-			// Broken since the session started, fixed during this turn: there
-			// was nothing to snapshot. Tracking resumes from now.
-			j.Resume()
-			if err := j.Save(root, id); err != nil {
-				logx.Errorf(root, "stop: saving the journal: %v", err)
-			}
-		case wasActive:
-			logx.Errorf(root, "stop: no turn-start snapshot (prompt-submit did not run or failed); this turn's changes are not tracked")
-		}
-		return nil, cur.Save(root, id)
+		return stopWithoutSnapshot(root, id, wasActive, cur)
 	case err != nil:
 		// A corrupt snapshot is replaced, or every Stop of the turn would fail.
 		logx.Errorf(root, "stop: turn-start snapshot unreadable, this turn's changes are not tracked: %v", err)
 		return nil, cur.Save(root, id)
 	}
 
+	j, fresh := recordJournal(tree, before, cur, root, id)
+	acked, failed := autoAck(env, p, fresh)
+	// Hash the changed units in parallel first; UpToDate then hits the cache.
+	var files []string
+	for _, u := range j.CodeChanged {
+		files = append(files, tree.Files(u)...)
+	}
+	p.Prewarm(files)
+	q := pendingQuery{notified: j.AlreadyNotified, failNotified: j.AckFailNotified, acked: acked, failed: failed, isUnit: tree.IsUnit, upToDate: p.UpToDate}
+	pending := pendingUnits(j.CodeChanged, q)
+	docKind := func(u string) docstate.DocKind {
+		kind, _, _ := docstate.Doc(root, u)
+		return kind
+	}
+	pending = withParents(tree, pending, before, docKind, q)
+	if err := p.SaveCache(); err != nil {
+		logx.Errorf(root, "hash cache: %v", err)
+	}
+	if len(pending) == 0 {
+		// Keep the turn-start snapshot and the journal: another Stop hook may make
+		// Claude continue this turn. PromptSubmit resets both.
+		return nil, nil
+	}
+	f := buildFeedback(pending, failed, docKind, p.Config().Language)
+	j.Notify(pending...)
+	j.NotifyAckFailed(slices.Collect(maps.Keys(f.Failed))...)
+	if err := j.Save(root, id); err != nil {
+		// Without the notified mark the same feedback would come back on every
+		// Stop (it continues the turn): say nothing rather than loop.
+		logx.Errorf(root, "stop: saving the journal, feedback dropped: %v", err)
+		return nil, nil
+	}
+	f.Agent, f.IndexFile = env.Agent, p.IndexFile()
+	return stopFeedback(StopReason(f), env.Agent)
+}
+
+// stopWithoutSnapshot handles a Stop with no turn-start snapshot: the project
+// was activated or the config fixed during this turn, or PromptSubmit failed.
+// It saves the current snapshot so tracking starts from now.
+func stopWithoutSnapshot(root, id string, wasActive bool, cur session.Snapshot) ([]byte, error) {
+	j, err := session.LoadJournal(root, id)
+	if err != nil {
+		logx.Errorf(root, "stop: journal unreadable, starting empty: %v", err)
+	}
+	switch {
+	case j.Paused:
+		// Broken since the session started, fixed during this turn: there
+		// was nothing to snapshot. Tracking resumes from now.
+		j.Resume()
+		if err := j.Save(root, id); err != nil {
+			logx.Errorf(root, "stop: saving the journal: %v", err)
+		}
+	case wasActive:
+		logx.Errorf(root, "stop: no turn-start snapshot (prompt-submit did not run or failed); this turn's changes are not tracked")
+	}
+	return nil, cur.Save(root, id)
+}
+
+// recordJournal folds this turn's changes into the session journal, saves it
+// and returns it with the units that are candidates for auto-ack.
+func recordJournal(tree *units.Tree, before, cur session.Snapshot, root, id string) (session.Journal, []string) {
 	j, err := session.LoadJournal(root, id)
 	if err != nil {
 		logx.Errorf(root, "stop: journal unreadable, starting empty: %v", err)
@@ -93,46 +139,22 @@ func Stop(env Env, in Input) ([]byte, error) {
 		// Feedback is still worth giving; it may repeat on the next Stop.
 		logx.Errorf(root, "stop: saving the journal: %v", err)
 	}
-	acked, failed := autoAck(env, p, fresh)
-	// Hash the changed units in parallel first; UpToDate then hits the cache.
-	var files []string
-	for _, u := range j.CodeChanged {
-		files = append(files, tree.Files(u)...)
-	}
-	p.Prewarm(files)
-	pending := pendingUnits(j.CodeChanged, j.AlreadyNotified, j.AckFailNotified, acked, failed, tree.IsUnit, p.UpToDate)
-	// A new unit takes files from its parent unit and changes _root's unit
-	// list: both may be stale now without a code edit of their own.
-	docKind := func(u string) docstate.DocKind {
-		kind, _, _ := docstate.Doc(root, u)
-		return kind
-	}
+	return j, fresh
+}
+
+// withParents adds to pending the parent units and _root of every unit new
+// this turn: a new unit takes files from its parent unit and changes _root's
+// unit list, so both may be stale without a code edit of their own.
+func withParents(tree *units.Tree, pending []string, before session.Snapshot, doc func(string) docstate.DocKind, q pendingQuery) []string {
 	var parents []string
-	for _, u := range turnNewUnits(session.AddUnique(pending, acked...), before, docKind) {
+	for _, u := range turnNewUnits(session.AddUnique(pending, q.acked...), before, doc) {
 		parents = session.AddUnique(parents, tree.UnitOf(u), units.RootUnit)
 	}
-	if len(parents) > 0 {
-		pending = session.AddUnique(pending, pendingUnits(parents, session.AddUnique(j.AlreadyNotified, pending...), nil, acked, nil, tree.IsUnit, p.UpToDate)...)
+	if len(parents) == 0 {
+		return pending
 	}
-	if err := p.SaveCache(); err != nil {
-		logx.Errorf(root, "hash cache: %v", err)
-	}
-	if len(pending) == 0 {
-		// Keep the turn-start snapshot and the journal: another Stop hook may make
-		// Claude continue this turn. PromptSubmit resets both.
-		return nil, nil
-	}
-	f := buildFeedback(pending, failed, docKind, p.Config().Language)
-	j.Notify(pending...)
-	j.NotifyAckFailed(slices.Collect(maps.Keys(f.Failed))...)
-	if err := j.Save(root, id); err != nil {
-		// Without the notified mark the same feedback would come back on every
-		// Stop (it continues the turn): say nothing rather than loop.
-		logx.Errorf(root, "stop: saving the journal, feedback dropped: %v", err)
-		return nil, nil
-	}
-	f.Agent, f.IndexFile = env.Agent, p.IndexFile()
-	return stopFeedback(StopReason(f), env.Agent)
+	pq := pendingQuery{notified: session.AddUnique(q.notified, pending...), acked: q.acked, isUnit: q.isUnit, upToDate: q.upToDate}
+	return session.AddUnique(pending, pendingUnits(parents, pq)...)
 }
 
 // maxFeedbackUnits caps the units each Stop message names: a mass change must
@@ -190,14 +212,11 @@ func configPaused(root, id string, a Agent) ([]byte, error) {
 		logx.Errorf(root, "stop: journal unreadable, starting empty: %v", err)
 	}
 	first := j.MarkConfigNotified()
-	if !first {
-		if err := j.Save(root, id); err != nil {
-			logx.Errorf(root, "stop: saving the journal: %v", err)
-		}
-		return nil, nil
-	}
 	if err := j.Save(root, id); err != nil {
 		logx.Errorf(root, "stop: saving the journal: %v", err)
+		return nil, nil
+	}
+	if !first {
 		return nil, nil
 	}
 	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `"+a.CLI()+" status` for the error. Changes made meanwhile are checked once it is fixed.", a)
@@ -263,24 +282,31 @@ func turnNewUnits(us []string, before session.Snapshot, doc func(string) docstat
 	return slices.Compact(out)
 }
 
+// pendingQuery is what pendingUnits needs to know besides the changed units.
+type pendingQuery struct {
+	notified, failNotified, acked []string
+	failed                        map[string]string // unit -> why its auto-ack failed
+	isUnit, upToDate              func(string) bool
+}
+
 // pendingUnits returns the units that need feedback: units whose code
 // changed this turn, neither acked nor notified yet, still units, and whose
 // docs do not already match the code — plus units whose auto-ack failed and
 // was not reported yet (even if notified before: the failure is new). A unit
 // counts as updated when it was acked or its docs already match.
-func pendingUnits(changed, notified, failNotified, acked []string, failed map[string]string, isUnit, upToDate func(string) bool) []string {
+func pendingUnits(changed []string, q pendingQuery) []string {
 	var pending []string
-	for _, u := range session.Minus(changed, acked, notified) {
+	for _, u := range session.Minus(changed, q.acked, q.notified) {
 		// A unit that stopped being one (excluded, too few files) cannot be
 		// acked; docs that already match the code (an edit undone, a checkout of
 		// acked code, a formatter that rewrote nothing) need no feedback.
-		if !isUnit(u) || (failed[u] == "" && upToDate(u)) {
+		if !q.isUnit(u) || (q.failed[u] == "" && q.upToDate(u)) {
 			continue
 		}
 		pending = append(pending, u)
 	}
-	for _, u := range session.Minus(slices.Collect(maps.Keys(failed)), failNotified, pending) {
-		if isUnit(u) {
+	for _, u := range session.Minus(slices.Collect(maps.Keys(q.failed)), q.failNotified, pending) {
+		if q.isUnit(u) {
 			pending = append(pending, u)
 		}
 	}
@@ -360,6 +386,15 @@ type Feedback struct {
 	IndexFile string
 }
 
+// contextPaths returns the context doc path of each unit.
+func contextPaths(us []string) []string {
+	out := make([]string, len(us))
+	for i, u := range us {
+		out[i] = units.ContextPath(u)
+	}
+	return out
+}
+
 // StopReason builds the feedback text.
 func StopReason(f Feedback) string {
 	cli := f.Agent.CLI()
@@ -383,20 +418,10 @@ func StopReason(f Feedback) string {
 		parts = append(parts, "More failed auto-acks"+more+"; run `"+cli+" status`.")
 	}
 	if refused, more := capList(f.Refused); len(refused) > 0 {
-		var ctxs []string
-		for _, u := range refused {
-			ctx := units.ContextPath(u)
-			ctxs = append(ctxs, ctx)
-		}
-		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be used: each "+docstate.OutsideText+". Tell the user; replace it with a regular Markdown file if they agree.")
+		parts = append(parts, strings.Join(contextPaths(refused), ", ")+more+" cannot be used: each "+docstate.OutsideText+". Tell the user; replace it with a regular Markdown file if they agree.")
 	}
 	if unreadable, more := capList(f.Unreadable); len(unreadable) > 0 {
-		var ctxs []string
-		for _, u := range unreadable {
-			ctx := units.ContextPath(u)
-			ctxs = append(ctxs, ctx)
-		}
-		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be read (e.g. permissions); fix it, then run `"+cli+" status`.")
+		parts = append(parts, strings.Join(contextPaths(unreadable), ", ")+more+" cannot be read (e.g. permissions); fix it, then run `"+cli+" status`.")
 	}
 	newUnits, moreNew := capList(f.New)
 	for _, u := range newUnits {

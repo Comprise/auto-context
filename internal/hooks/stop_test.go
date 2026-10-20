@@ -662,7 +662,7 @@ func TestPendingUnits(t *testing.T) {
 		{"failed ack without a code change", session.Journal{}, nil, map[string]string{"b": "x"}, yes, no, []string{"b"}},
 	}
 	for _, c := range cases {
-		if got := pendingUnits(c.j.CodeChanged, c.j.AlreadyNotified, c.j.AckFailNotified, c.acked, c.failed, c.isUnit, c.upToDate); !slices.Equal(got, c.want) {
+		if got := pendingUnits(c.j.CodeChanged, pendingQuery{notified: c.j.AlreadyNotified, failNotified: c.j.AckFailNotified, acked: c.acked, failed: c.failed, isUnit: c.isUnit, upToDate: c.upToDate}); !slices.Equal(got, c.want) {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
