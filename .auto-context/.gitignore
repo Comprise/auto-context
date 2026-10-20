@@ -1,0 +1,4 @@
+# auto-context: config.yaml is committed, the rest is local state
+/*
+!/.gitignore
+!/config.yaml

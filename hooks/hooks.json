@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook session-start", "timeout": 60 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook prompt-submit", "timeout": 30 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook stop", "timeout": 60 }] }],
+    "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "if": "Bash(auto-context *)", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook pre-tool-use", "timeout": 10 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook session-end", "timeout": 10 }] }]
+  }
+}

@@ -1,0 +1,12 @@
+include:
+  - cmd/auto-context
+  - internal/*
+# Packaging files are not code by extension but are part of the root unit.
+track:
+  - .claude-plugin/*
+  - .github/workflows/*
+  - bin/*
+  - hooks/*
+  - skills/**
+  - Makefile
+language: ru

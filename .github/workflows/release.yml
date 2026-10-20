@@ -1,0 +1,143 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency: release
+
+jobs:
+  guard:
+    # A tag reaches every user, so only a tag on a commit from main may publish.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag is semver
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
+            echo "::error::tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-pre]"; exit 1; }
+      - name: Tag commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+  test:
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          # No module cache from other runs in a release build.
+          cache: false
+      - run: go mod verify
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          EXT: ${{ matrix.goos == 'windows' && '.exe' || '' }}
+        run: |
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "libexec/auto-context-${GOOS}-${GOARCH}${EXT}" ./cmd/auto-context
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: libexec/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: libexec
+          merge-multiple: true
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: 'libexec/*'
+      - name: Stamp plugin version
+        # plugin.json on main has no version; the tag is the single source.
+        run: |
+          jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' .claude-plugin/plugin.json > plugin.json.tmp && mv plugin.json.tmp .claude-plugin/plugin.json
+      - name: Archive and checksums
+        run: |
+          chmod +x libexec/* bin/auto-context
+          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin hooks skills bin libexec README.md LICENSE
+          sha256sum libexec/* "auto-context-${GITHUB_REF_NAME}.tar.gz" > checksums.txt
+      - name: Validate the tree users install
+        run: |
+          mkdir -p "$RUNNER_TEMP/tree"
+          tar -xzf "auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$RUNNER_TEMP/tree"
+          # --strict: warnings (most broken skill frontmatter, an unknown hook
+          # event) fail the release; without it validate exits 0 on them.
+          # TestSkillsFrontmatter covers the YAML the validator lets through.
+          cd "$RUNNER_TEMP/tree" && npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate --strict .
+      - name: Update release branch
+        # Users install from this branch, so pre-releases never reach it, and it
+        # only moves to a higher version (an older tag pushed later would roll
+        # every user back). It holds only what the plugin needs (plugin.json is
+        # already stamped above). Each release is a new commit on top of the
+        # previous one only, so the branch only fast-forwards (no force-push)
+        # without pulling main's history into installs; the message names the
+        # tagged commit. A re-run of the same version pushes nothing. It is
+        # pushed before the GitHub Release, so a release never points at a
+        # stale branch.
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          new="${GITHUB_REF_NAME#v}"
+          if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
+            cur=$(git show refs/remotes/origin/release:.claude-plugin/plugin.json | jq -r '.version // "0.0.0"')
+            if [ "$cur" = "$new" ] || [ "$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)" != "$new" ]; then
+              echo "::notice::release branch is at $cur; $new is not newer, branch left as is"
+              exit 0
+            fi
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git rm -rq --cached .
+          git add -f .claude-plugin hooks skills bin libexec README.md LICENSE
+          tree=$(git write-tree)
+          parents=""
+          if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
+            parents="-p refs/remotes/origin/release"
+          fi
+          commit=$(git commit-tree "$tree" $parents -m "release ${GITHUB_REF_NAME}" -m "source: ${GITHUB_SHA}")
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$commit:refs/heads/release"
+      - name: GitHub Release
+        # Tags with a hyphen (v0.1.0-rc1) are pre-releases. A re-run of a
+        # published tag leaves the existing release alone.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::release $GITHUB_REF_NAME already exists"
+            exit 0
+          fi
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "auto-context-${GITHUB_REF_NAME}.tar.gz" checksums.txt --generate-notes $prerelease
