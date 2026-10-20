@@ -3,10 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
-
-	"auto-context/internal/testutil"
 )
 
 func TestPermissionRequestAllows(t *testing.T) {
@@ -35,17 +32,9 @@ func TestPermissionRequestSilent(t *testing.T) {
 }
 
 func TestPermissionRequestSilentWhenShadowed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
-	}
 	plugin, fake := t.TempDir(), t.TempDir()
-	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
-	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(fake, "auto-context")} {
-		if err := os.Chmod(p, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fakeCLI(t, filepath.Join(plugin, "bin"))
+	fakeCLI(t, fake)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", fake+string(os.PathListSeparator)+filepath.Join(plugin, "bin"))
 	if out, err := PermissionRequest(testEnv(t.TempDir()), preInput("Bash", "auto-context status")); err != nil || out != nil {

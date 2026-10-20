@@ -95,6 +95,20 @@ func unitState(t *testing.T, env Env, unit string) docstate.State {
 	return ""
 }
 
+func TestStopGolden(t *testing.T) {
+	env := turn(t)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	checkGolden(t, "stop.golden.json", stop(t, env))
+}
+
+func TestStopCodexGolden(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/opt/p")
+	env := turn(t)
+	env.Agent = Codex
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	checkGolden(t, "stop_codex.golden.json", stop(t, env))
+}
+
 // Claude Code sets stop_hook_active on every Stop after feedback; docs edits
 // made in response must still be processed and auto-acked.
 func TestStopHookActiveAfterFeedbackAutoAcks(t *testing.T) {

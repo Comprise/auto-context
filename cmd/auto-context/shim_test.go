@@ -12,14 +12,11 @@ import (
 )
 
 // plugin lays out a plugin dir with the real shim and, if script is not
-// empty, a fake binary for this platform running script.
-func plugin(t *testing.T, script string) string {
+// empty, a fake binary named name (under libexec) running script.
+func plugin(t *testing.T, name, script string) string {
 	t.Helper()
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("shim test needs a POSIX sh")
-	}
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		t.Skip("unsupported arch for the shim")
 	}
 	dir := t.TempDir()
 	shim, err := os.ReadFile(filepath.Join("..", "..", "bin", "auto-context"))
@@ -28,12 +25,20 @@ func plugin(t *testing.T, script string) string {
 	}
 	testutil.WriteFile(t, dir, "bin/auto-context", string(shim))
 	if script != "" {
-		testutil.WriteFile(t, dir, "libexec/auto-context-"+runtime.GOOS+"-"+runtime.GOARCH, "#!/bin/sh\n"+script+"\n")
-		if err := os.Chmod(filepath.Join(dir, "libexec", "auto-context-"+runtime.GOOS+"-"+runtime.GOARCH), 0o755); err != nil {
+		testutil.WriteFile(t, dir, "libexec/"+name, "#!/bin/sh\n"+script+"\n")
+		if err := os.Chmod(filepath.Join(dir, "libexec", name), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return dir
+}
+
+// hostBinary is the libexec name the shim picks on the machine running the test.
+func hostBinary() string {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		return "auto-context-" + runtime.GOOS + "-unknown"
+	}
+	return "auto-context-" + runtime.GOOS + "-" + runtime.GOARCH
 }
 
 func shim(t *testing.T, dir, project string, args ...string) (int, string, string) {
@@ -54,7 +59,7 @@ func shim(t *testing.T, dir, project string, args ...string) (int, string, strin
 }
 
 func TestShimWithoutBinary(t *testing.T) {
-	dir := plugin(t, "")
+	dir := plugin(t, hostBinary(), "")
 	active, inactive := t.TempDir(), t.TempDir()
 	testutil.WriteFile(t, active, ".auto-context/config.yaml", "min_files: 1\n")
 
@@ -77,7 +82,7 @@ func TestShimWithoutBinary(t *testing.T) {
 // shim reports the exit through `hook-exit` so it reaches the log.
 func TestShimHookCrashExitsZero(t *testing.T) {
 	calls := filepath.Join(t.TempDir(), "calls")
-	dir := plugin(t, `echo "$@" >> '`+calls+`'; exit 2`)
+	dir := plugin(t, hostBinary(), `echo "$@" >> '`+calls+`'; exit 2`)
 	if code, _, _ := shim(t, dir, t.TempDir(), "hook", "prompt-submit"); code != 0 {
 		t.Errorf("hook exit = %d, want 0", code)
 	}
@@ -92,7 +97,7 @@ func TestShimHookCrashExitsZero(t *testing.T) {
 // A session-start crash in an enabled project tells the user that tracking is
 // off; partial output of the crashed binary is not passed on.
 func TestShimSessionStartCrashNotice(t *testing.T) {
-	dir := plugin(t, `[ "$1" = hook-exit ] && exit 0; echo '{"partial'; exit 2`)
+	dir := plugin(t, hostBinary(), `[ "$1" = hook-exit ] && exit 0; echo '{"partial'; exit 2`)
 	active := t.TempDir()
 	testutil.WriteFile(t, active, "context/_root.md", "# root\n")
 	code, out, _ := shim(t, dir, active, "hook", "session-start")
@@ -108,7 +113,7 @@ func TestShimSessionStartCrashNotice(t *testing.T) {
 // subdirectory of an enabled repo gets the notice, one in a nested repo
 // without markers does not.
 func TestShimWithoutBinaryFindsRoot(t *testing.T) {
-	dir := plugin(t, "")
+	dir := plugin(t, hostBinary(), "")
 	base := t.TempDir()
 	testutil.WriteFile(t, base, "repo/context/_root.md", "# root\n")
 	testutil.WriteFile(t, base, "repo/a/b/x.go", "package b\n")
@@ -124,4 +129,40 @@ func TestShimWithoutBinaryFindsRoot(t *testing.T) {
 			t.Errorf("%s: notice %v, want %v (%q)", sub, got, want, out)
 		}
 	}
+}
+
+// The shim maps uname output to the libexec binary name. A fake uname first
+// in PATH stands in for each platform.
+func TestShimPlatformMapping(t *testing.T) {
+	fake := t.TempDir()
+	testutil.WriteFile(t, fake, "uname", "#!/bin/sh\ncase \"$1\" in -s) echo \"$FAKE_S\" ;; -m) echo \"$FAKE_M\" ;; esac\n")
+	if err := os.Chmod(filepath.Join(fake, "uname"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, c := range []struct{ s, m, bin string }{
+		{"Linux", "x86_64", "auto-context-linux-amd64"},
+		{"Linux", "aarch64", "auto-context-linux-arm64"},
+		{"Darwin", "arm64", "auto-context-darwin-arm64"},
+		{"MINGW64_NT-10.0", "x86_64", "auto-context-windows-amd64.exe"},
+	} {
+		t.Run(c.bin, func(t *testing.T) {
+			t.Setenv("FAKE_S", c.s)
+			t.Setenv("FAKE_M", c.m)
+			dir := plugin(t, c.bin, "echo ran")
+			code, out, errs := shim(t, dir, t.TempDir(), "version")
+			if code != 0 || strings.TrimSpace(out) != "ran" {
+				t.Errorf("code=%d out=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+	t.Run("unknown arch", func(t *testing.T) {
+		t.Setenv("FAKE_S", "Linux")
+		t.Setenv("FAKE_M", "riscv64")
+		dir := plugin(t, "", "")
+		code, _, errs := shim(t, dir, t.TempDir(), "version")
+		if code != 1 || !strings.Contains(errs, "binary for linux/unknown was not found") {
+			t.Errorf("code=%d stderr=%q", code, errs)
+		}
+	})
 }

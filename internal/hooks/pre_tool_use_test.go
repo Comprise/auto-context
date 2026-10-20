@@ -130,25 +130,38 @@ func TestPreToolUseRejectsEverythingElse(t *testing.T) {
 	}
 }
 
+// fakeCLI writes an executable stub auto-context into dir (auto-context.bat
+// on Windows, where LookPath only finds PATHEXT files) and returns its path.
+func fakeCLI(t *testing.T, dir string) string {
+	t.Helper()
+	name, body := "auto-context", "#!/bin/sh\n"
+	if runtime.GOOS == "windows" {
+		name, body = "auto-context.bat", "@echo off\r\n"
+	}
+	testutil.WriteFile(t, dir, name, body)
+	p := filepath.Join(dir, name)
+	if err := os.Chmod(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 // An auto-context earlier on PATH than the plugin's own is not auto-approved.
 func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
-	}
 	plugin, fake := t.TempDir(), t.TempDir()
-	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
-	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(fake, "auto-context")} {
-		if err := os.Chmod(p, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fakeCLI(t, filepath.Join(plugin, "bin"))
+	fakeCLI(t, fake)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	env := testEnv(t.TempDir())
 
 	t.Setenv("PATH", fake+string(os.PathListSeparator)+filepath.Join(plugin, "bin"))
 	if out, _ := PreToolUse(env, preInput("Bash", "auto-context status")); out != nil {
 		t.Errorf("shadowed binary approved: %s", out)
+	}
+	// On Windows LookPath only finds PATHEXT files and the plugin's shim has
+	// no extension, so it is never resolved there: nothing to approve.
+	if runtime.GOOS == "windows" {
+		return
 	}
 	t.Setenv("PATH", filepath.Join(plugin, "bin")+string(os.PathListSeparator)+fake)
 	if out, _ := PreToolUse(env, preInput("Bash", "auto-context status")); out == nil {
@@ -158,17 +171,9 @@ func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 
 // An auto-context found through a relative PATH entry (".") is not approved.
 func TestPreToolUseRefusesRelativePath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("LookPath only finds PATHEXT files")
-	}
 	plugin, cwd := t.TempDir(), t.TempDir()
-	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	testutil.WriteFile(t, cwd, "auto-context", "#!/bin/sh\n")
-	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(cwd, "auto-context")} {
-		if err := os.Chmod(p, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fakeCLI(t, filepath.Join(plugin, "bin"))
+	fakeCLI(t, cwd)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", "."+string(os.PathListSeparator)+filepath.Join(plugin, "bin"))
 	t.Chdir(cwd)
@@ -179,14 +184,8 @@ func TestPreToolUseRefusesRelativePath(t *testing.T) {
 
 // When the plugin's own shim cannot be resolved, nothing is approved.
 func TestPreToolUseRefusesWhenPluginShimMissing(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
-	}
 	fake := t.TempDir()
-	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
-	if err := os.Chmod(filepath.Join(fake, "auto-context"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fakeCLI(t, fake)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", t.TempDir()) // no bin/auto-context
 	t.Setenv("PATH", fake)
 	if out, _ := PreToolUse(testEnv(t.TempDir()), preInput("Bash", "auto-context status")); out != nil {

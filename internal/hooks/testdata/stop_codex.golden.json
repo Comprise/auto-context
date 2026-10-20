@@ -1,0 +1,1 @@
+{"decision":"block","reason":"auto-context: code changed in svc but docs not updated. If the change affects purpose, public API, structure or key behavior — update context/<unit>.md (and <unit>/CLAUDE.md if its purpose or key files changed) per skill $auto-context:auto-context-docs. Otherwise run `/opt/p/bin/auto-context ack svc`."}

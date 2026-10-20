@@ -87,16 +87,14 @@ func TestSessionStartQuietWhenOK(t *testing.T) {
 	}
 }
 
-func TestSessionStartGolden(t *testing.T) {
-	env := newRepo(t, true)
-	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
-	out, err := SessionStart(env, Input{SessionID: "s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	golden := filepath.Join("testdata", "session_start.golden.json")
+// checkGolden compares got with testdata/<name>; -update rewrites the file.
+// Golden files are stored without a trailing newline, so trailing line breaks
+// (e.g. from a CRLF checkout) are trimmed from the file before comparing.
+func checkGolden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	golden := filepath.Join("testdata", name)
 	if *update {
-		if err := os.WriteFile(golden, out, 0o644); err != nil {
+		if err := os.WriteFile(golden, got, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,9 +102,30 @@ func TestSessionStartGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != string(want) {
-		t.Errorf("got %q\nwant %q", out, want)
+	if w := strings.TrimRight(string(want), "\r\n"); string(got) != w {
+		t.Errorf("%s:\n got %q\nwant %q", name, got, w)
 	}
+}
+
+func TestSessionStartGolden(t *testing.T) {
+	env := newRepo(t, true)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, "session_start.golden.json", out)
+}
+
+func TestSessionStartCodexGolden(t *testing.T) {
+	env := newRepo(t, true)
+	env.Agent = Codex
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, "session_start_codex.golden.json", out)
 }
 
 func TestSessionStartUpdatesRootIndex(t *testing.T) {
