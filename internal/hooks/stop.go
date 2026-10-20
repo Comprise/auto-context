@@ -96,11 +96,13 @@ func Stop(env Env, in Input) ([]byte, error) {
 	pending := pendingUnits(j.CodeChanged, j.AlreadyNotified, j.AckFailNotified, acked, failed, tree.IsUnit, p.UpToDate)
 	// A new unit takes files from its parent unit and changes _root's unit
 	// list: both may be stale now without a code edit of their own.
+	docKind := func(u string) docstate.DocKind {
+		kind, _, _ := docstate.Doc(root, u)
+		return kind
+	}
 	var parents []string
-	for _, u := range pending {
-		if kind, _, _ := docstate.Doc(root, u); kind == docstate.DocAbsent && u != units.RootUnit {
-			parents = session.AddUnique(parents, tree.UnitOf(u), units.RootUnit)
-		}
+	for _, u := range turnNewUnits(session.AddUnique(pending, acked...), before, docKind) {
+		parents = session.AddUnique(parents, tree.UnitOf(u), units.RootUnit)
 	}
 	if len(parents) > 0 {
 		pending = session.AddUnique(pending, pendingUnits(parents, session.AddUnique(j.AlreadyNotified, pending...), nil, acked, nil, tree.IsUnit, p.UpToDate)...)
@@ -113,10 +115,7 @@ func Stop(env Env, in Input) ([]byte, error) {
 		// Claude continue this turn. PromptSubmit resets both.
 		return nil, nil
 	}
-	f := buildFeedback(pending, failed, func(u string) docstate.DocKind {
-		kind, _, _ := docstate.Doc(root, u)
-		return kind
-	}, p.Config().Language)
+	f := buildFeedback(pending, failed, docKind, p.Config().Language)
 	j.Notify(pending...)
 	j.NotifyAckFailed(slices.Collect(maps.Keys(f.Failed))...)
 	if err := j.Save(root, id); err != nil {
@@ -230,6 +229,24 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, j *session.Journ
 		}
 	}
 	return fresh
+}
+
+// turnNewUnits returns the sorted unique units of us (except _root) that are
+// new this turn: their doc is absent, or context/<u>.md did not exist at the
+// turn start. Their parent unit and _root may be stale even if the new unit
+// was documented (or auto-acked) in the same turn.
+func turnNewUnits(us []string, before session.Snapshot, doc func(string) docstate.DocKind) []string {
+	var out []string
+	for _, u := range us {
+		if u == units.RootUnit {
+			continue
+		}
+		if _, ok := before[units.ContextPath(u)]; !ok || doc(u) == docstate.DocAbsent {
+			out = append(out, u)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // pendingUnits returns the units that need feedback: units whose code

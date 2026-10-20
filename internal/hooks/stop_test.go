@@ -994,3 +994,68 @@ func TestPromptSubmitPausedCorruptSnapshot(t *testing.T) {
 		t.Errorf("no fresh snapshot: %v", err)
 	}
 }
+
+func TestTurnNewUnits(t *testing.T) {
+	before := session.Snapshot{"context/svc.md": {}}
+	present := func(string) docstate.DocKind { return docstate.DocPresent }
+	if got := turnNewUnits([]string{"_root", "pkg", "svc"}, before, present); !slices.Equal(got, []string{"pkg"}) {
+		t.Errorf("present docs = %v, want [pkg]", got)
+	}
+	absentSvc := func(u string) docstate.DocKind {
+		if u == "svc" {
+			return docstate.DocAbsent
+		}
+		return docstate.DocPresent
+	}
+	if got := turnNewUnits([]string{"svc", "_root", "pkg", "pkg"}, before, absentSvc); !slices.Equal(got, []string{"pkg", "svc"}) {
+		t.Errorf("absent svc = %v, want [pkg svc]", got)
+	}
+	absent := func(string) docstate.DocKind { return docstate.DocAbsent }
+	if got := turnNewUnits([]string{"_root"}, before, absent); len(got) != 0 {
+		t.Errorf("_root = %v, want none", got)
+	}
+}
+
+func TestStopNewUnitWithDocsFlagsRoot(t *testing.T) {
+	env := turn(t)
+	base := time.Now().Add(time.Hour)
+	write(t, env.Root, "pkg/go.mod", "module pkg\n")
+	write(t, env.Root, "pkg/a.go", "package pkg\n")
+	setMtime(t, env.Root, "pkg/go.mod", base, 0)
+	setMtime(t, env.Root, "pkg/a.go", base, 0)
+	write(t, env.Root, "context/pkg.md", "# pkg\n\nPkg summary.\n")
+	setMtime(t, env.Root, "context/pkg.md", base, time.Second)
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "code changed in _root ") {
+		t.Errorf("reason lacks _root: %q", r)
+	}
+	if strings.Contains(r, "New unit pkg") {
+		t.Errorf("documented unit reported as new: %q", r)
+	}
+	if got := unitState(t, env, "pkg"); got != docstate.OK {
+		t.Errorf("pkg state = %v, want OK", got)
+	}
+}
+
+func TestStopSubdirBecomesUnitFlagsParent(t *testing.T) {
+	env := newRepo(t, false)
+	for _, n := range []string{"a", "b", "c", "d"} {
+		write(t, env.Root, "svc/sub/"+n+".go", "package sub\n")
+	}
+	ack(t, env, "svc", "_root")
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(time.Hour)
+	write(t, env.Root, "svc/sub/e.go", "package sub\n")
+	setMtime(t, env.Root, "svc/sub/e.go", base, 0)
+	write(t, env.Root, "context/svc/sub.md", "# sub\n\nSub summary.\n")
+	setMtime(t, env.Root, "context/svc/sub.md", base, time.Second)
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "code changed in _root, svc ") {
+		t.Errorf("reason lacks _root, svc: %q", r)
+	}
+	if got := unitState(t, env, "svc/sub"); got != docstate.OK {
+		t.Errorf("svc/sub state = %v, want OK", got)
+	}
+}
