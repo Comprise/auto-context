@@ -83,6 +83,14 @@ func Read(root, path string) (Meta, string, error) {
 	return m, body, nil
 }
 
+// eolOf returns "\r\n" if the first line of s ends with it, else "\n".
+func eolOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i > 0 && s[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
 // SetHash rewrites our frontmatter block (even a broken one) or, if the file
 // has none, adds it above the content; the rest is kept byte-for-byte. path is
 // resolved with fsutil.ResolveDoc and must stay inside root.
@@ -103,7 +111,8 @@ func SetHash(root, path, unit, hash string, today time.Time) error {
 	if err != nil {
 		return err
 	}
-	out := "---\n" + string(y) + "---\n" + body
+	eol := eolOf(string(data))
+	out := "---" + eol + strings.ReplaceAll(string(y), "\n", eol) + "---" + eol + body
 	return fsutil.WriteDoc(root, path, []byte(out), perm)
 }
 

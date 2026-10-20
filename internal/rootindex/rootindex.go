@@ -33,11 +33,19 @@ const (
 )
 
 // Render returns the index section including markers and a trailing newline.
-func Render(entries []Entry) string { return render(header, entries) }
+func Render(entries []Entry) string { return render(header, entries, "\n") }
 
-func render(head string, entries []Entry) string {
+// eolOf returns "\r\n" if the first line of s ends with it, else "\n".
+func eolOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i > 0 && s[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func render(head string, entries []Entry, eol string) string {
 	var b strings.Builder
-	b.WriteString(openMarker + "\n" + head + "\n")
+	b.WriteString(openMarker + eol + head + eol)
 	for _, e := range entries {
 		if e.Unit == units.RootUnit || strings.ContainsAny(e.Unit, "`\r\n") {
 			continue
@@ -46,9 +54,9 @@ func render(head string, entries []Entry) string {
 		if sum := sanitize(e.Summary); sum != "" {
 			b.WriteString(" — " + sum)
 		}
-		b.WriteString("\n")
+		b.WriteString(eol)
 	}
-	b.WriteString(closeMarker + "\n")
+	b.WriteString(closeMarker + eol)
 	return b.String()
 }
 
@@ -125,20 +133,21 @@ func Update(root, name string, entries []Entry) (bool, error) {
 		return false, err
 	}
 
+	eol := eolOf(cur)
 	lines := strings.SplitAfter(cur, "\n")
 	oi, ci := markers(lines)
 	var next string
 	switch {
 	case oi < 0 && ci < 0:
 		next = cur
-		if next != "" && !strings.HasSuffix(next, "\n\n") {
+		if next != "" && !strings.HasSuffix(next, "\n"+eol) {
 			if strings.HasSuffix(next, "\n") {
-				next += "\n"
+				next += eol
 			} else {
-				next += "\n\n"
+				next += eol + eol
 			}
 		}
-		next += Render(entries)
+		next += render(header, entries, eol)
 	case oi < 0 || ci < oi:
 		return false, ErrBrokenMarkers
 	default:
@@ -146,7 +155,7 @@ func Update(root, name string, entries []Entry) (bool, error) {
 		if oi+1 < ci && strings.HasPrefix(strings.TrimSpace(lines[oi+1]), "#") {
 			head = strings.TrimRight(lines[oi+1], "\r\n")
 		}
-		next = strings.Join(lines[:oi], "") + render(head, entries) + strings.Join(lines[ci+1:], "")
+		next = strings.Join(lines[:oi], "") + render(head, entries, eol) + strings.Join(lines[ci+1:], "")
 	}
 	if next == cur {
 		return false, nil

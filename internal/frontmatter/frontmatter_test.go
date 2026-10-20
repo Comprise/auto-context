@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -174,5 +175,22 @@ func TestReadRefusesNonMarkdownLink(t *testing.T) {
 	}
 	if err := SetHash(dir, link, "u", "h", day); err == nil {
 		t.Fatal("SetHash wrote through a link to .env")
+	}
+}
+
+func TestSetHashKeepsCRLF(t *testing.T) {
+	for _, in := range []string{"---\r\nunit: old\r\n---\r\n# T\r\n", "# T\r\ntext\r\n"} {
+		p := write(t, in)
+		if err := SetHash(filepath.Dir(p), p, "u", "h", day); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(p)
+		if strings.Contains(strings.ReplaceAll(string(data), "\r\n", ""), "\n") {
+			t.Fatalf("bare LF in %q", data)
+		}
+		m, _, err := Read(filepath.Dir(p), p)
+		if err != nil || m.Unit != "u" || m.SourceHash != "h" {
+			t.Fatalf("m=%+v err=%v", m, err)
+		}
 	}
 }

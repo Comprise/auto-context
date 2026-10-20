@@ -246,3 +246,61 @@ func TestUpdateThroughSymlink(t *testing.T) {
 		t.Errorf("CLAUDE.md lacks the section: %q", got)
 	}
 }
+
+func writeIndex(t *testing.T, content string) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func noBareLF(s string) bool {
+	return !strings.Contains(strings.ReplaceAll(s, "\r\n", ""), "\n")
+}
+
+func TestUpdateKeepsCRLF(t *testing.T) {
+	root := writeIndex(t, "# P\r\n\r\ntext\r\n")
+	es := []Entry{{"svc", "S"}}
+	if _, err := Update(root, "CLAUDE.md", es); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); !noBareLF(got) || !strings.Contains(got, "- `svc` — S\r\n") {
+		t.Fatalf("got %q", got)
+	}
+	if changed, err := Update(root, "CLAUDE.md", es); err != nil || changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+}
+
+func TestUpdateCRLFExistingSection(t *testing.T) {
+	root := writeIndex(t, "# P\r\n\r\n<!-- auto-context:units -->\r\n## My units\r\n- `old`\r\n<!-- /auto-context:units -->\r\ntail\r\n")
+	if _, err := Update(root, "CLAUDE.md", []Entry{{"svc", "S"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, root)
+	if !noBareLF(got) || !strings.Contains(got, "## My units\r\n- `svc` — S\r\n") || strings.Contains(got, "old") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestUpdateCRLFNoFinalNewline(t *testing.T) {
+	root := writeIndex(t, "# P\r\ntext")
+	if _, err := Update(root, "CLAUDE.md", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); !strings.HasPrefix(got, "# P\r\ntext\r\n\r\n<!-- auto-context:units -->\r\n") || !noBareLF(got) {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestUpdateLFSingleLine(t *testing.T) {
+	root := writeIndex(t, "text")
+	if _, err := Update(root, "CLAUDE.md", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); !strings.HasPrefix(got, "text\n\n<!-- auto-context:units -->\n") || strings.Contains(got, "\r") {
+		t.Fatalf("got %q", got)
+	}
+}
