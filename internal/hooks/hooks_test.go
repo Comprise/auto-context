@@ -478,8 +478,18 @@ func TestSessionStartCorruptCache(t *testing.T) {
 }
 
 func TestSessionFailureIsValidJSON(t *testing.T) {
-	if v := decodeSession(t, SessionFailure()); !strings.Contains(v.SystemMessage, "docs tracking is off") {
+	if v := decodeSession(t, SessionFailure(Claude)); !strings.Contains(v.SystemMessage, "docs tracking is off") {
 		t.Errorf("%+v", v)
+	}
+}
+
+func TestSessionFailureAgentCLI(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/home/u/plugin")
+	if v := decodeSession(t, SessionFailure(Codex)); !strings.Contains(v.SystemMessage, "`/home/u/plugin/bin/auto-context status`") {
+		t.Errorf("codex: %s", v.SystemMessage)
+	}
+	if v := decodeSession(t, SessionFailure(Claude)); !strings.Contains(v.SystemMessage, "`auto-context status`") {
+		t.Errorf("claude: %s", v.SystemMessage)
 	}
 }
 

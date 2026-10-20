@@ -203,7 +203,7 @@ func runHook(event string, agent hooks.Agent, stdin io.Reader, stdout io.Writer,
 		logHook(root, "hook %s: %v", event, err)
 		if event == "session-start" && project.Active(root) {
 			// Say that tracking is off rather than go silent.
-			out = hooks.SessionFailure()
+			out = hooks.SessionFailure(agent)
 		} else {
 			return 0
 		}
