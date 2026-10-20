@@ -416,3 +416,41 @@ func TestDescribe(t *testing.T) {
 		t.Errorf("Describe of an unknown error = %q", d)
 	}
 }
+
+func TestIndexFile(t *testing.T) {
+	cases := []struct {
+		name, yaml, want, wantErr string
+	}{
+		{"absent", "min_files: 5\n", "CLAUDE.md", ""},
+		{"agents", "index_file: AGENTS.md\n", "AGENTS.md", ""},
+		{"empty", "index_file: \"\"\n", "CLAUDE.md", ""},
+		{"null", "index_file: null\n", "CLAUDE.md", ""},
+		{"other", "index_file: README.md\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
+		{"case", "index_file: agents.md\n", "CLAUDE.md", "index_file must be CLAUDE.md or AGENTS.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := writeConfig(root, []byte(tc.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, pr, err := Load(root)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+			} else if err != nil || pr != nil {
+				t.Fatalf("err = %v, problems = %v", err, pr)
+			}
+			if cfg.IndexFile != tc.want {
+				t.Errorf("IndexFile = %q, want %q", cfg.IndexFile, tc.want)
+			}
+		})
+	}
+	var c Config
+	for _, p := range c.Validate() {
+		if strings.Contains(p, "index_file") {
+			t.Errorf("Validate on zero Config: %q", p)
+		}
+	}
+}

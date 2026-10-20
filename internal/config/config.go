@@ -24,6 +24,13 @@ import (
 // rest of that directory (local state) out of git.
 const FileName = ".auto-context/config.yaml"
 
+// The two names a unit's index file may have: CLAUDE.md for Claude Code,
+// AGENTS.md for Codex CLI.
+const (
+	IndexClaude = "CLAUDE.md"
+	IndexAgents = "AGENTS.md"
+)
+
 type Config struct {
 	MinFiles       int      `yaml:"min_files"`
 	CodeExtensions []string `yaml:"code_extensions"`
@@ -37,6 +44,9 @@ type Config struct {
 	// Language is the language code unit docs are written in (e.g. "ru",
 	// "pt-BR"); empty means the language of the existing docs.
 	Language string `yaml:"language"`
+	// IndexFile is the name of the per-unit index file: CLAUDE.md (default)
+	// or AGENTS.md. Any other value breaks the config.
+	IndexFile string `yaml:"index_file"`
 }
 
 func Default() Config {
@@ -54,6 +64,7 @@ func Default() Config {
 		Exclude:          []string{"vendor/**", "node_modules/**", "**/testdata/**", "dist/**", "build/**"},
 		Track:            []string{},
 		MaxSessionNotice: 10,
+		IndexFile:        IndexClaude,
 	}
 }
 
@@ -78,7 +89,7 @@ func (p Problems) Error() string { return FileName + ": ignored " + strings.Join
 var knownKeys = map[string]bool{
 	"min_files": true, "code_extensions": true, "module_markers": true,
 	"include": true, "exclude": true, "track": true, "max_session_notice": true,
-	"language": true,
+	"language": true, "index_file": true,
 }
 
 // languageRe accepts a BCP 47-style code only: the value is shown to Claude,
@@ -123,6 +134,10 @@ func Load(root string) (Config, Problems, error) {
 		for _, e := range te.Errors {
 			pr = append(pr, typeProblem(e)) // the field keeps its default
 		}
+	}
+	if cfg.IndexFile != "" && cfg.IndexFile != IndexClaude && cfg.IndexFile != IndexAgents {
+		// Which file holds the index decides where every doc lives: no guessing.
+		return Default(), nil, errors.New("index_file must be " + IndexClaude + " or " + IndexAgents)
 	}
 	pr = append(pr, cfg.fix()...)
 	if len(pr) == 0 {
@@ -189,6 +204,9 @@ func (c *Config) fix() Problems {
 	if c.MaxSessionNotice < 0 || c.MaxSessionNotice > maxSessionNotice {
 		pr = append(pr, fmt.Sprintf("max_session_notice %d (must be 0..%d)", c.MaxSessionNotice, maxSessionNotice))
 		c.MaxSessionNotice = def.MaxSessionNotice
+	}
+	if c.IndexFile == "" {
+		c.IndexFile = def.IndexFile
 	}
 	if c.Language != "" && !ValidLanguage(c.Language) {
 		pr = append(pr, "language (must be a language code such as ru, en or pt-BR)")
