@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -134,7 +134,7 @@ func SourceHash(root string, files, extra []string, c *Cache) (string, error) {
 		c.entries = map[string]Entry{}
 	}
 	sorted := append([]string(nil), files...)
-	sort.Strings(sorted)
+	slices.Sort(sorted)
 	h := sha256.New()
 	for _, f := range sorted {
 		sum, err := fileSum(root, f, c)
@@ -144,7 +144,7 @@ func SourceHash(root string, files, extra []string, c *Cache) (string, error) {
 		fmt.Fprintf(h, "%s\x00%s\n", f, sum)
 	}
 	ex := append([]string(nil), extra...)
-	sort.Strings(ex)
+	slices.Sort(ex)
 	for _, e := range ex {
 		fmt.Fprintf(h, "\x00unit\x00%s\n", e)
 	}

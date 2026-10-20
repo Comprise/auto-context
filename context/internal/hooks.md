@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:b0269903dbb67b399ea5b7c96463f828dca13b08eddcf356d840e76163f8bdcd
+source_hash: sha256:19e53dfd8b38e66f23feea1ba8af73dd96d2142864e1f9c8f5577a5be9f0b5d3
 updated: "2026-10-20"
 ---
 # internal/hooks

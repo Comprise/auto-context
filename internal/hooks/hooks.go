@@ -48,11 +48,7 @@ func load(env Env) (*project.Project, error) {
 	if err := fsutil.EnsureStateDir(env.Root); err != nil {
 		return nil, err
 	}
-	p, err := project.Open(env.Root)
-	if err != nil {
-		return nil, err
-	}
-	return p, nil
+	return project.Open(env.Root)
 }
 
 // encodeJSON marshals v without HTML escaping and without a trailing newline.

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,7 +61,7 @@ func TestJournalsIsolatedBySession(t *testing.T) {
 	if j, _ := LoadJournal(root, "s1"); len(j.CodeChanged) != 0 {
 		t.Fatal("s1 not cleared")
 	}
-	if _, err := LoadSnapshot(root, "s1"); err != os.ErrNotExist {
+	if _, err := LoadSnapshot(root, "s1"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("s1 snapshot: %v", err)
 	}
 	if j, _ := LoadJournal(root, "s2"); !reflect.DeepEqual(j.CodeChanged, []string{"2"}) {

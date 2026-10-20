@@ -1,6 +1,6 @@
 ---
 unit: internal/frontmatter
-source_hash: sha256:2bf33941928e5d4629b8688332d7f482c526afdc9888cec286588e4096c988fb
+source_hash: sha256:0d116712d496d205f570387f8c704ba3e24cfc78fec33c80d0e7c22f00a06bf0
 updated: "2026-10-20"
 ---
 # internal/frontmatter

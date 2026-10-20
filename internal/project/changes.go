@@ -163,7 +163,7 @@ func trustedFilters(root string) (bool, string) {
 	default:
 		return false, "the git filter config could not be checked (" + textx.Err(err) + ")"
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(res.Out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(res.Out)), "\n") {
 		scope, _, _ := strings.Cut(line, "\t")
 		if scope != "global" && scope != "command" {
 			return false, "the repository's git config defines filter drivers"

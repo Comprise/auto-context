@@ -19,13 +19,17 @@ import (
 	"auto-context/internal/units"
 )
 
+// markerPaths are the files whose presence turns the plugin on.
+func markerPaths() []string {
+	return []string{config.FileName, units.ContextPath(units.RootUnit)}
+}
+
 // Active reports whether the plugin is enabled in root: it has
 // .auto-context/config.yaml or context/_root.md (created by /auto-context:init), as a
 // regular file inside the repo. A bare context/ directory is too common a name
 // to count. Inactive projects are never written to.
 func Active(root string) bool {
-	ctx := units.ContextPath(units.RootUnit)
-	for _, m := range []string{config.FileName, ctx} {
+	for _, m := range markerPaths() {
 		p, err := fsutil.Resolve(root, fsutil.Abs(root, m))
 		if err != nil {
 			continue
@@ -41,8 +45,7 @@ func Active(root string) bool {
 // that exists but is not used: it links outside the repo or into .git, is not
 // a regular file, or cannot be inspected, so the plugin stays off.
 func ActivationRefused(root string) bool {
-	ctx := units.ContextPath(units.RootUnit)
-	for _, m := range []string{config.FileName, ctx} {
+	for _, m := range markerPaths() {
 		full := fsutil.Abs(root, m)
 		if _, err := os.Lstat(full); err != nil {
 			continue
@@ -209,9 +212,9 @@ func (p *Project) Statuses() []docstate.UnitStatus {
 	for _, u := range p.tree.Units() {
 		files = append(files, p.tree.Files(u.Path)...)
 	}
-	// Hash what changed in parallel first; save along the way (best effort,
-	// the caller's final SaveCache reports errors).
-	c.Prewarm(p.root, files, func() { _ = p.SaveCache() }, cacheSaveEvery)
+	// Hash what changed in parallel first (the caller's final SaveCache
+	// reports save errors).
+	p.Prewarm(files)
 	var out []docstate.UnitStatus
 	for _, u := range p.tree.Units() {
 		out = append(out, docstate.StatusOf(p.root, p.tree, c, u.Path))

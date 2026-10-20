@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -243,7 +242,8 @@ func SessionFailure(a Agent) []byte {
 	var out sessionOutput
 	out.SystemMessage = "auto-context: docs tracking is off for this session: the session-start hook failed (see .auto-context/log or run `" + a.CLI() + " status`)."
 	out.Hook.EventName = "SessionStart"
-	data, _ := json.Marshal(out)
+	// Encoding a struct of strings cannot fail.
+	data, _ := encodeJSON(out)
 	return data
 }
 

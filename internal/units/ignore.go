@@ -3,6 +3,7 @@ package units
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"path"
 	"strings"
@@ -134,9 +135,9 @@ const maxRuleLen = 512
 const globMeta = "*?[]\\{}"
 
 // parseIgnore parses .gitignore lines.
-func parseIgnore(lines []string) ignoreFile {
+func parseIgnore(lines iter.Seq[string]) ignoreFile {
 	f := ignoreFile{exact: map[string][]int{}, ext: map[string][]int{}}
-	for _, l := range lines {
+	for l := range lines {
 		l = strings.TrimRight(l, "\r")
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
@@ -329,7 +330,7 @@ func (t *Tree) loadGitignore(root, dir string) {
 		t.warn("skipped " + shown(rel) + ": " + errKind(err))
 		return
 	}
-	f := parseIgnore(strings.Split(strings.TrimPrefix(string(data), "\ufeff"), "\n"))
+	f := parseIgnore(strings.SplitSeq(strings.TrimPrefix(string(data), "\ufeff"), "\n"))
 	if f.invalid > 0 {
 		t.warn(fmt.Sprintf("%s: %d invalid or overlong rule(s) ignored", shown(rel), f.invalid))
 	}

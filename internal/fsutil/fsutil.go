@@ -97,7 +97,7 @@ func resolve(root, path string) (full, lexical string, err error) {
 	// symlink among the existing components the path is already resolved.
 	cur, linked := realRoot, false
 	if rel != "." {
-		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 			cur = filepath.Join(cur, part)
 			fi, err := os.Lstat(cur)
 			if errors.Is(err, os.ErrNotExist) {
@@ -305,7 +305,7 @@ const stateGitignore = "# auto-context: config.yaml is committed, the rest is lo
 // hasLines reports whether data holds every line in want (whitespace trimmed).
 func hasLines(data []byte, want ...string) bool {
 	have := map[string]bool{}
-	for _, l := range strings.Split(string(data), "\n") {
+	for l := range strings.SplitSeq(string(data), "\n") {
 		have[strings.TrimSpace(l)] = true
 	}
 	for _, w := range want {

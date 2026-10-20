@@ -1,6 +1,6 @@
 ---
 unit: internal/units
-source_hash: sha256:b64c5915581e9cfc0174600a68cca3aecb84c89561330e254e38ea44dd56a034
+source_hash: sha256:9ad6b8d54562c6425ae16869c56148b9164254b95761b69a6c4bd8949b60970f
 updated: "2026-10-20"
 ---
 # internal/units

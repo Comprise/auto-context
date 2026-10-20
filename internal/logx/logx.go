@@ -130,7 +130,7 @@ func Entries(root string) ([]time.Time, error) {
 		if err != nil {
 			return out, err
 		}
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			ts, _, _ := strings.Cut(line, " ")
 			if t, err := time.Parse(time.RFC3339, ts); err == nil {
 				out = append(out, t)

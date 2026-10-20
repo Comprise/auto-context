@@ -65,7 +65,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if len(s) != 1 {
 		t.Fatalf("missing file must be skipped: %v", s)
 	}
-	if _, err := LoadSnapshot(root, "sess"); err != os.ErrNotExist {
+	if _, err := LoadSnapshot(root, "sess"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("want os.ErrNotExist, got %v", err)
 	}
 	if err := s.Save(root, "sess"); err != nil {

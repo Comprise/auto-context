@@ -106,15 +106,12 @@ func SnapshotTime(root, sessionID string) (int64, error) {
 	return fi.ModTime().UnixNano(), nil
 }
 
-// LoadSnapshot reads a session's snapshot; a missing file yields nil,
-// os.ErrNotExist, and one without the header or with a bad record an error
-// naming the file.
+// LoadSnapshot reads a session's snapshot; a missing file yields nil and
+// an error matching os.ErrNotExist, and one without the header or with a bad
+// record an error naming the file.
 func LoadSnapshot(root, sessionID string) (Snapshot, error) {
 	data, err := fsutil.ReadFile(root, SnapshotPath(root, sessionID), MaxSize)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, os.ErrNotExist
-		}
 		return nil, err
 	}
 	body, ok := bytes.CutPrefix(data, []byte(snapshotHeader))
@@ -128,22 +125,17 @@ func LoadSnapshot(root, sessionID string) (Snapshot, error) {
 			return nil, fmt.Errorf("snapshot %s: truncated record", SnapshotPath(root, sessionID))
 		}
 		body = rest
-		a := bytes.IndexByte(rec, ' ')
-		b := -1
-		if a >= 0 {
-			if k := bytes.IndexByte(rec[a+1:], ' '); k >= 0 {
-				b = a + 1 + k
-			}
-		}
-		if b < 0 {
+		mtime, afterMtime, ok1 := bytes.Cut(rec, []byte{' '})
+		size, path, ok2 := bytes.Cut(afterMtime, []byte{' '})
+		if !ok1 || !ok2 {
 			return nil, fmt.Errorf("snapshot %s: bad record", SnapshotPath(root, sessionID))
 		}
-		m, err1 := strconv.ParseInt(string(rec[:a]), 10, 64)
-		n, err2 := strconv.ParseInt(string(rec[a+1:b]), 10, 64)
+		m, err1 := strconv.ParseInt(string(mtime), 10, 64)
+		n, err2 := strconv.ParseInt(string(size), 10, 64)
 		if err1 != nil || err2 != nil {
 			return nil, fmt.Errorf("snapshot %s: bad number", SnapshotPath(root, sessionID))
 		}
-		s[string(rec[b+1:])] = units.Stat{MtimeNs: m, Size: n}
+		s[string(path)] = units.Stat{MtimeNs: m, Size: n}
 	}
 	return s, nil
 }
@@ -284,7 +276,7 @@ func Clear(root, sessionID string) error {
 			errs = append(errs, err)
 			continue
 		}
-		if err := os.Remove(rp); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(rp); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}
 	}

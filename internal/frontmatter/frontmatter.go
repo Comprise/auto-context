@@ -120,7 +120,7 @@ func SetHash(root, path, unit, hash string, today time.Time) error {
 // or "" if absent or that line is itself a heading.
 func Summary(body string) string {
 	seen := false
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimRight(line, " \t\r")
 		if !seen {
 			seen = strings.HasPrefix(line, "# ")

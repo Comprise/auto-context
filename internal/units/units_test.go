@@ -529,7 +529,7 @@ func TestCompilePatterns(t *testing.T) {
 
 // Bracket classes survive the literal prefilter.
 func TestGitignoreBracketClasses(t *testing.T) {
-	f := parseIgnore([]string{"[Bb]in/", "*.py[cod]", "x[0-9].go"})
+	f := parseIgnore(slices.Values([]string{"[Bb]in/", "*.py[cod]", "x[0-9].go"}))
 	budget := 1 << 30
 	for _, c := range []struct {
 		path  string

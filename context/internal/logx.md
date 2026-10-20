@@ -1,6 +1,6 @@
 ---
 unit: internal/logx
-source_hash: sha256:f8fdb63cf97b96ce9f3d329991cb22e23c1bdf71455824bb909435612cbf932f
+source_hash: sha256:6f6c923fb8c068551633a5eb73d91b97aca1c97e05c36802e96f6f80535aec9d
 updated: "2026-10-20"
 ---
 # internal/logx

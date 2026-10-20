@@ -115,18 +115,15 @@ func Load(root string) (Config, Problems, error) {
 	if err != nil {
 		return Default(), nil, err
 	}
+	if indexFileKeys(data) > 1 {
+		return Default(), nil, ErrBadIndexFile // duplicated key
+	}
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		var te *yaml.TypeError
 		if !errors.As(err, &te) {
-			if indexFileKeys(data) > 1 {
-				return Default(), nil, ErrBadIndexFile // duplicated key
-			}
 			return Default(), nil, err
 		}
-	}
-	if indexFileKeys(data) > 1 {
-		return Default(), nil, ErrBadIndexFile // duplicated key
 	}
 	if v, ok := raw["index_file"]; ok && v != nil {
 		if _, isStr := v.(string); !isStr {
@@ -335,7 +332,7 @@ func AddExclude(root, pattern string) error {
 		docs = []*yaml.Node{{Kind: yaml.DocumentNode}}
 	}
 	doc := docs[0]
-	if len(doc.Content) == 0 || doc.Content[0].Kind == yaml.ScalarNode && doc.Content[0].Tag == "!!null" {
+	if len(doc.Content) == 0 || (doc.Content[0].Kind == yaml.ScalarNode && doc.Content[0].Tag == "!!null") {
 		doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
 	}
 	m := doc.Content[0]

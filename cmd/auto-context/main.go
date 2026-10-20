@@ -88,7 +88,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string) i
 		}
 		return runHook(rest[0], agent, stdin, stdout, cwd)
 	case "ack":
-		return runAck(rest, stdout, stderr, cwd)
+		return runAck(rest, stderr, cwd)
 	case "status":
 		return runStatus(rest, stdout, stderr, cwd)
 	case "units":
@@ -273,21 +273,22 @@ func normUnit(arg string) string {
 	return u
 }
 
-func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
+func runAck(args []string, stderr io.Writer, cwd string) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
-	if args[0] == "--exclude" {
-		if len(args) != 2 {
-			fmt.Fprint(stderr, usage)
-			return 2
-		}
-		p, err := loadRepo(stderr, cwd)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
+	exclude := args[0] == "--exclude"
+	if exclude && len(args) != 2 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	p, err := loadRepo(stderr, cwd)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if exclude {
 		if err := p.Exclude(normUnit(args[1])); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -303,11 +304,6 @@ func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
 		}
 		saveCache(q, stderr)
 		return 0
-	}
-	p, err := loadRepo(stderr, cwd)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
 	}
 	if p.ConfigBroken() {
 		// The units come from defaults: a hash over them would be wrong.

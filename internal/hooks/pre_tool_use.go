@@ -62,7 +62,7 @@ func allowedCommand(cmd string) bool {
 	if !ownCLI.MatchString(cmd) {
 		return false
 	}
-	for _, arg := range strings.Split(cmd, " ") {
+	for arg := range strings.SplitSeq(cmd, " ") {
 		if strings.Contains(arg, "..") || arg == "--exclude" {
 			return false
 		}

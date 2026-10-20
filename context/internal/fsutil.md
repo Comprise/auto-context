@@ -1,6 +1,6 @@
 ---
 unit: internal/fsutil
-source_hash: sha256:45fc00fdd35bddde3bf287f436145a183b7c82af88a39f61dec5af74249731a5
+source_hash: sha256:d245eb9ed44c5cec7d86abc68633ad77f519e6e339676f43d1d4d04de77aeb72
 updated: "2026-10-20"
 ---
 # internal/fsutil
