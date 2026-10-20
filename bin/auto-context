@@ -1,0 +1,68 @@
+#!/bin/sh
+# Shim: picks the prebuilt binary in ../libexec for the current OS/arch.
+os=$(uname -s | tr 'A-Z' 'a-z')
+ext=
+case "$os" in
+  mingw*|msys*|cygwin*) os=windows; ext=.exe ;;
+  linux*) os=linux ;;
+  darwin*) os=darwin ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch=amd64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  *) arch=unknown ;;
+esac
+# active reports whether the plugin is enabled for the project, finding its
+# root like config.FindRoot (without its ownership check): the nearest
+# directory up with .git or .auto-context/config.yaml, stopping below $HOME
+# when started under it, else the start directory.
+active() {
+  start=$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && pwd) || return 1
+  root=$start dir=$start
+  while :; do
+    if [ "$dir" = "$HOME" ] && [ "$dir" != "$start" ]; then break; fi
+    if [ -e "$dir/.git" ] || [ -e "$dir/.auto-context/config.yaml" ]; then root=$dir; break; fi
+    parent=$(dirname "$dir")
+    if [ "$parent" = "$dir" ]; then break; fi
+    dir=$parent
+  done
+  [ -f "$root/.auto-context/config.yaml" ] || [ -f "$root/context/_root.md" ]
+}
+bin="$(dirname "$0")/../libexec/auto-context-$os-$arch$ext"
+if [ -e "$bin" ]; then problem="is not executable"; else problem="was not found"; fi
+if [ ! -x "$bin" ]; then
+  # Hooks must never fail the session.
+  if [ "$1" = hook ]; then
+    # Say why nothing happens, once per session and only where the plugin is enabled.
+    if [ "$2" = session-start ] && active; then
+      # JSON: systemMessage shows the user, additionalContext tells Claude.
+      msg=$(printf '%s' "auto-context: the binary for $os/$arch $problem ($bin), docs tracking is off. Reinstall the plugin (it installs from the release branch)." | sed 's/\\/\\\\/g; s/"/\\"/g')
+      printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$msg" "$msg"
+    fi
+    exit 0
+  fi
+  echo "auto-context: binary for $os/$arch $problem: $bin" >&2
+  exit 1
+fi
+if [ "$1" = hook ]; then
+  # No exec: a crash the binary cannot recover from (a Go fatal error exits 2,
+  # which Claude Code treats as blocking) must not block the prompt or the
+  # turn. It is recorded in .auto-context/log instead.
+  if [ "$2" = session-start ]; then
+    # Buffered, so a crash prints the notice below instead of a partial answer.
+    out=$("$bin" "$@")
+    rc=$?
+    [ "$rc" -eq 0 ] && [ -n "$out" ] && printf '%s\n' "$out"
+  else
+    "$bin" "$@"
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    "$bin" hook-exit "$2" "$rc" </dev/null >/dev/null 2>&1
+    if [ "$2" = session-start ] && active; then
+      printf '%s\n' '{"systemMessage":"auto-context: docs tracking is off for this session: the session-start hook crashed (see .auto-context/log).","hookSpecificOutput":{"hookEventName":"SessionStart"}}'
+    fi
+  fi
+  exit 0
+fi
+exec "$bin" "$@"

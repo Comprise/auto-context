@@ -1,0 +1,20 @@
+{
+  "name": "auto-context",
+  "owner": {
+    "name": "Elia Samoylov"
+  },
+  "plugins": [
+    {
+      "name": "auto-context",
+      "description": "Keeps per-directory CLAUDE.md indexes and a context/ knowledge library in sync with code",
+      "source": {
+        "source": "github",
+        "repo": "Comprise/auto-context",
+        "ref": "release"
+      }
+    }
+  ],
+  "metadata": {
+    "description": "Marketplace for the auto-context plugin"
+  }
+}
