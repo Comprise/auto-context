@@ -37,7 +37,7 @@ write the docs once the code is done, or run `auto-context ack <unit>` after the
   it like any stale doc, then `auto-context ack <unit>`.
 - `stale (broken frontmatter)` — do not repair the block by hand: review the doc, then `auto-context
   ack <unit>` rewrites the block.
-- `stale (symlink outside repo)` — the doc links outside the repository, into `.git`, to a non-`.md`
+- `stale (unusable symlink)` — the doc is a symlink that leads outside the repository, into `.git`, to a non-`.md`
   file, or nowhere: do not follow it; report it, and replace it with a regular Markdown file only if
   the user agrees.
 - `stale (unreadable doc: …)`, `stale (cannot hash sources: …)` — a read error: report it.

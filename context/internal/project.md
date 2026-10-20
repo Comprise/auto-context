@@ -1,6 +1,6 @@
 ---
 unit: internal/project
-source_hash: sha256:8e46f51a2dfadbf7144261fb35e2b03a59441adf56fb70790f9c945f1942ca7a
+source_hash: sha256:ff36f63c541524f9486e5776f877423cc86ef4594ff78d58c379c50addd6f307
 updated: "2026-10-20"
 ---
 # internal/project
@@ -14,7 +14,7 @@ updated: "2026-10-20"
 - `Open(root)` → `*Project`, только для чтения (кроме кэша, загружаемого лениво); геттеры `Root()`, `IndexFile()` — имя индексного файла из конфига, `Config()`, `Tree()`, `ConfigProblems()` — отброшенные настройки, `ConfigErr()` — конфиг не прочитан (`ConfigBroken()`).
 - `Cache()` — кэш отпечатков, загружается при первом обращении; `CacheErr()` — почему он непригоден. `ConfigIgnored()` — конфиг под `.gitignore`, ошибка — сбой git, кроме «не репозиторий» и «нет git»; `StateDirErr()` — `.auto-context` ведёт наружу.
 - `Prewarm(files)` — параллельное хеширование изменённых файлов с периодическим сохранением кэша; `ShowNames(paths)` — пути, которые можно показать Claude (`units.SafeName`, не больше 20), и число остальных.
-- Статусы, ack (`Ack`, `AckTouched` — для авто-ack: оглавление обновляется при любом затронутом доке — summary мог измениться без смены хеша, — его ошибка возвращается отдельно), оглавление (`UpdateIndex` с полным списком статусов, `RefreshIndex`), `Exclude`, `SaveCache`, доки-сироты (`Orphans`), отчёт `changes` (`WriteChanges`).
+- Статусы, ack (`Ack`, `AckTouched` — для авто-ack: оглавление обновляется при любом затронутом доке — summary мог измениться без смены хеша, — его ошибка возвращается отдельно), оглавление (`UpdateIndex` с полным списком статусов, `RefreshIndex`; в неактивном проекте `UpdateIndex` ничего не читает и не пишет), `Exclude`, `SaveCache`, доки-сироты (`Orphans`), отчёт `changes` (`WriteChanges`).
 
 ## Инварианты и подводные камни
 - При `ConfigBroken` `Ack`, `UpdateIndex` и `WriteChanges` отказывают (`ErrConfigBroken`): юниты по умолчанию не те.

@@ -130,8 +130,8 @@ func TestComputeRefusesLinkedDocs(t *testing.T) {
 	}
 	for _, u := range []string{"ok", "svc"} {
 		s := statusOf(t, root, tr, u)
-		if s.State != Stale || s.Note != "symlink outside repo" || s.Summary != "" {
-			t.Errorf("%s: %+v, want stale (symlink outside repo) with no summary", u, s)
+		if s.State != Stale || s.Note != "unusable symlink" || s.Summary != "" {
+			t.Errorf("%s: %+v, want stale (unusable symlink) with no summary", u, s)
 		}
 	}
 }

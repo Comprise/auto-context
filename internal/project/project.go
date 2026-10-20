@@ -256,10 +256,13 @@ func (p *Project) AckTouched(touched []string, now time.Time) (acked []string, f
 
 // UpdateIndex rewrites the root index file units index from sts, which must be
 // the statuses of every unit (a partial list drops units from the index), and
-// reports whether the file changed.
+// reports whether the file changed. An inactive project gets nothing.
 func (p *Project) UpdateIndex(sts []docstate.UnitStatus) (bool, error) {
 	if p.ConfigBroken() {
 		return false, ErrConfigBroken
+	}
+	if !Active(p.root) {
+		return false, nil
 	}
 	entries := make([]rootindex.Entry, 0, len(sts))
 	for _, s := range sts {

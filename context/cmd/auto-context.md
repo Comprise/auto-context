@@ -1,6 +1,6 @@
 ---
 unit: cmd/auto-context
-source_hash: sha256:1dcb19c7041e94b2c4c200dba8436d8e88906c7acbd2fd867cfb6897d94086ae
+source_hash: sha256:7071315c9ee4e8255243000cb2fec675a42079422f03c6e0c680d5dba0ca1efa
 updated: "2026-10-20"
 ---
 # cmd/auto-context
@@ -11,8 +11,8 @@ CLI-бинарь: запуск хуков Claude Code и Codex и команды
 
 ## Публичный API / точки входа
 - `hook <event> [--agent codex]` — JSON из stdin (до 1 МиБ), ответ в stdout, код всегда 0; `--agent` — `claude` (по умолчанию) или `codex`, иное — запись в лог и выход 0. Событие `permission-request` — только для Codex.
-- `ack <unit>...` — `Project.Ack`, затем `RefreshIndex`; `.` — `_root`. При битом конфиге — отказ (`project.ErrConfigBroken`), как и у `units` и `changes`.
-- `ack --exclude <unit>` — `Project.Exclude` (каталог должен существовать).
+- `ack <unit>...` — `Project.Ack`, затем `RefreshIndex` — только если хоть один ack удался; `.` — `_root`. При битом конфиге — отказ (`project.ErrConfigBroken`), как и у `units` и `changes`.
+- `ack --exclude <unit>` — `Project.Exclude` (каталог должен существовать); затем проект перечитывается и оглавление обновляется.
 - `status [--stale] [--exit-code]` — таблица (предупреждение о маркерах называет индексный файл из конфига); `warning:` (конфиг, конфиг под `.gitignore`, кэш, маркеры оглавления, обход) и ошибка открытия — в stdout: это отчёт, а `!`-вставка skill `sync` может не видеть stderr; `note:` о доках-сиротах (не больше 20 имён, только прошедшие `units.SafeName`, остальные — числом), языке доков, числе ошибок в логе (с просьбой не читать его самому) и `warning:`, если лог нельзя дописать; `--exit-code` — 1 при stale/missing. При битом конфиге таблицы нет (юниты были бы по умолчанию): код 0, с `--exit-code` — 1.
 - `changes <unit>` — `Project.WriteChanges`.
 - `units`, `version`; `hook-exit <event> <code>` — внутренняя, шим пишет через неё падение бинаря в лог.

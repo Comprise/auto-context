@@ -1192,3 +1192,74 @@ func TestCodexMarketplace(t *testing.T) {
 		t.Errorf("plugins = %+v", m.Plugins)
 	}
 }
+
+func writeFiles(t *testing.T, root, dir string) {
+	for _, f := range []string{"a", "b", "c", "d", "e"} {
+		write(t, root, dir+"/"+f+".go", "package x\n")
+	}
+}
+
+func TestAckTypoInactiveWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, "pkg")
+	code, _, errs := do(root, "", "ack", "typo")
+	if code != 1 || !strings.Contains(errs, "typo") {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	for _, n := range []string{"CLAUDE.md", ".auto-context"} {
+		if _, err := os.Lstat(filepath.Join(root, n)); err == nil {
+			t.Errorf("%s was created in an inactive project", n)
+		}
+	}
+}
+
+func TestAckAllFailKeepsIndex(t *testing.T) {
+	root := repo(t)
+	before, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if code, _, _ := do(root, "", "ack", "typo"); code != 1 {
+		t.Fatalf("code=%d", code)
+	}
+	after, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if string(before) != string(after) {
+		t.Errorf("CLAUDE.md changed:\n%q\n%q", before, after)
+	}
+}
+
+func TestAckExcludeRefreshesIndex(t *testing.T) {
+	root := repo(t)
+	writeFiles(t, root, "newu")
+	write(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
+	if code, _, errs := do(root, "", "ack", "_root", "newu"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if !strings.Contains(string(data), "- `newu`") {
+		t.Fatalf("index lacks newu:\n%s", data)
+	}
+	if code, _, errs := do(root, "", "ack", "--exclude", "newu"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	data, _ = os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if strings.Contains(string(data), "`newu`") {
+		t.Errorf("index still lists newu:\n%s", data)
+	}
+}
+
+func TestAckExcludeAgentsIndex(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	writeFiles(t, root, "keep")
+	writeFiles(t, root, "newu")
+	write(t, root, "context/keep.md", "# keep\n\nKept unit.\n")
+	write(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
+	if code, _, errs := do(root, "", "ack", "--exclude", "newu"); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if !strings.Contains(string(data), "`keep`") || strings.Contains(string(data), "`newu`") {
+		t.Errorf("AGENTS.md:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md was created")
+	}
+}

@@ -323,3 +323,20 @@ func TestUpdateIndexUsesIndexFile(t *testing.T) {
 		t.Error("CLAUDE.md was created")
 	}
 }
+
+func TestUpdateIndexInactiveWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"f1", "f2", "f3", "f4", "f5"} {
+		write(t, root, "pkg/"+f+".go", "package pkg\n")
+	}
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.RefreshIndex(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md was created in an inactive project")
+	}
+}

@@ -288,6 +288,16 @@ func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		// The unit is gone from the project now: reread it before the index.
+		q, err := project.Open(p.Root())
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: root index: %v\n", err)
+			return 0
+		}
+		if err := q.RefreshIndex(); err != nil {
+			fmt.Fprintf(stderr, "warning: root index: %v\n", err)
+		}
+		saveCache(q, stderr)
 		return 0
 	}
 	p, err := loadRepo(stderr, cwd)
@@ -300,15 +310,19 @@ func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
 		fmt.Fprintln(stderr, project.ErrConfigBroken)
 		return 1
 	}
-	code := 0
+	code, acked := 0, 0
 	for _, a := range args {
 		if err := p.Ack(normUnit(a), time.Now()); err != nil {
 			fmt.Fprintln(stderr, err)
 			code = 1
+		} else {
+			acked++
 		}
 	}
-	if err := p.RefreshIndex(); err != nil {
-		fmt.Fprintf(stderr, "warning: root index: %v\n", err)
+	if acked > 0 {
+		if err := p.RefreshIndex(); err != nil {
+			fmt.Fprintf(stderr, "warning: root index: %v\n", err)
+		}
 	}
 	saveCache(p, stderr)
 	return code

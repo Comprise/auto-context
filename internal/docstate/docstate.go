@@ -40,7 +40,7 @@ type Note string
 
 const (
 	NoteNotAcked   Note = "not acked yet"
-	NoteOutside    Note = "symlink outside repo" // links outside the repo, into .git, to a non-.md file, or nowhere
+	NoteOutside    Note = "unusable symlink" // links outside the repo, into .git, to a non-.md file, or nowhere
 	NoteBroken     Note = "broken frontmatter"
 	NoteUnreadable Note = "unreadable doc"
 	NoteHashError  Note = "cannot hash sources"

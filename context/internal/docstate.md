@@ -1,6 +1,6 @@
 ---
 unit: internal/docstate
-source_hash: sha256:d2e98935249b8241091ce50df96dcf1981bd4a001a373c51b3bcbcfd2352faef
+source_hash: sha256:ab81205131d0cbea8fc5a8814c7ab7ad13925c156a3dbc1f33193a7764af9e71
 updated: "2026-10-20"
 ---
 # internal/docstate
@@ -11,7 +11,7 @@ updated: "2026-10-20"
 
 ## Публичный API / точки входа
 - `StatusOf(root, t, c, unit)` — статус одного юнита (все юниты обходит `Project.Statuses`).
-- `UnitStatus{Unit, State, ContextPath, Summary, Note, Detail}`, `NoteText()`; `Note` — `NoteNotAcked`, `NoteOutside`, `NoteBroken`, `NoteUnreadable`, `NoteHashError`.
+- `UnitStatus{Unit, State, ContextPath, Summary, Note, Detail}`, `NoteText()`; `Note` — `NoteNotAcked`, `NoteOutside` (текст `unusable symlink`), `NoteBroken`, `NoteUnreadable`, `NoteHashError`.
 - `OutsideText` — описание отклонённого дока для сообщений хуков и CLI.
 - `Doc(root, unit)` — чем является context-док: `DocAbsent`, `DocPresent`, `DocRefused` (ссылка наружу, в `.git`, на не-`.md`, висячая, не обычный файл), `DocUnreadable`.
 - `Ack(root, t, c, unit, now)` — записывает текущий отпечаток во frontmatter.
