@@ -66,18 +66,22 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 
 ## 4. Конфиг: `index_file`
 
-- Ключ `index_file`, значения `CLAUDE.md` (по умолчанию) или `AGENTS.md`; другое значение —
-  проблема конфига (как прочие невалидные ключи: игнорируется с сообщением в SessionStart).
+- Ключ `index_file`, значения `CLAUDE.md` (по умолчанию; также при пустом/`null`) или `AGENTS.md`.
+  Другое значение делает конфиг сломанным (как ошибка разбора: трекинг на паузе, сообщение в
+  SessionStart и `status`), а не откатывается на умолчание — иначе опечатка в Codex-репо создала бы
+  корневой `CLAUDE.md` (`rootindex.Update` создаёт файл). При сломанном конфиге `status` не
+  проверяет корневой индекс.
 - Хуки активны по-прежнему при `.auto-context/config.yaml` или `context/_root.md`; без конфига
   `index_file` = `CLAUDE.md`, поэтому Codex-репозиторию конфиг нужен (его создаёт `$init`).
 - Имя берётся из конфига везде, где сейчас зашит `CLAUDE.md`:
-  - `units`: `Classify` (`KindIndexDoc`), `interesting`/`addFile` (индексный файл делает каталог
-    юнитом, как сейчас `CLAUDE.md`), `DocPaths` становится методом `Tree` (или получает имя);
-    файл с другим именем — обычный файл, не док.
+  - `units`: `Classify` (`KindIndexDoc`), `interesting`/`addFile` (индексный файл отслеживается;
+    юнитом каталог он не делает — ни сейчас, ни после), `DocPaths` заменяется на `ContextPath`;
+    файл с другим именем — не док (`KindIgnore`).
   - `rootindex.Check`/`Update` получают имя файла; секция `auto-context:units` пишется в
     корневой `AGENTS.md`.
   - `fsutil.ResolveDoc` не меняется (симлинки внутри репо уже поддержаны).
-  - Тексты хуков (`stop.go`, `session_start.go`) и CLI (`main.go`) подставляют имя.
+  - Тексты хуков (`stop.go`, `session_start.go`, включая сообщения о корневом индексе) и CLI
+    (`main.go`) подставляют имя.
 - Правило §8.3 основной спецификации («правка индексного файла не считается обновлением доков»)
   сохраняется для выбранного имени.
 
@@ -89,7 +93,7 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 |---|---|---|---|
 | SessionStart | `hook session-start --agent codex` | 60 | нет (`source` хуки не читают) |
 | UserPromptSubmit | `hook prompt-submit --agent codex` | 30 | нет |
-| Stop | `hook stop --agent codex` | 60 | нет: `decision: block` + `reason` |
+| Stop | `hook stop --agent codex` | 60 | ответ `{"decision":"block","reason":…}` вместо `hookSpecificOutput.additionalContext` |
 | PermissionRequest (`matcher: ^Bash$`) | `hook permission-request --agent codex` | 10 | новый обработчик |
 | SessionEnd | `hook session-end --agent codex` | 3 | таймаут ≤ 3 с |
 
@@ -97,7 +101,11 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
   `shadowed`), и отвечает `{"hookSpecificOutput":{"hookEventName":"PermissionRequest",
   "decision":{"behavior":"allow"}}}`; для чужих команд — пустой вывод. `PreToolUse` в Codex не
   регистрируется. `shadowed` сравнивает с `CLAUDE_PLUGIN_ROOT`, который Codex выставляет.
-- Бюджет git (`hookBudget`) для `session-end` в Codex укладывается в 3 с.
+- Бюджет git зависит от события и агента (`session-end` в Codex — 2 с при таймауте 3 с).
+- `tool_input` разбирается терпимо: команда берётся, только если это строка; иной формат —
+  не ошибка разбора, а «не наша команда».
+- `hooks/hooks.json` Codex загружать не должен (у него нет `if`, а `allow` в PreToolUse
+  переписывает команду) — проверяется в шаге 0.
 - Шим: при отсутствии `CLAUDE_PROJECT_DIR` уже берёт `.` — это `cwd` сессии Codex. JSON-ответы
   шима (`systemMessage` + `additionalContext`) Codex понимает.
 - Код: `hooks.Env` получает поле `Agent` (`claude` | `codex`); `main.go` разбирает `--agent`
@@ -136,15 +144,19 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 
 ## 8. Ошибки
 
-Без изменений: хуки всегда выходят с 0, ошибки — в `.auto-context/log`, проблемы конфига
+Одобрение в `PermissionRequest` может означать запуск вне sandbox; одобряется только та же строгая
+форма команды, что в Claude Code. В режимах, где sandbox и так разрешает команду, запроса нет —
+это нормально.
+
+В остальном без изменений: хуки всегда выходят с 0, ошибки — в `.auto-context/log`, проблемы конфига
 (включая невалидный `index_file`) — в SessionStart. Модель угроз та же; `--agent` приходит из
 манифеста плагина, не из репозитория.
 
 ## 9. Тестирование
 
 - `config`: `index_file` — значение по умолчанию, оба допустимых, невалидное.
-- `units`: таблицы `Classify`/`Discover`/`DocPaths` для обоих имён; `CLAUDE.md` в
-  AGENTS-репозитории — не док и не делает юнит.
+- `units`: таблицы `Classify`/`Discover`/`ContextPath` для обоих имён; `CLAUDE.md` в
+  AGENTS-репозитории — не док и не отслеживается.
 - `rootindex`: `Update`/`Check` на `AGENTS.md`.
 - `hooks`: `permission-request` (одобряет те же команды, что `pre-tool-use`, молчит на
   остальные); тексты `stop`/`session-start` для обоих агентов и обоих имён (golden-строки);
