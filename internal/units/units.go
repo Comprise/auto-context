@@ -34,7 +34,7 @@ type Kind int
 const (
 	KindIgnore     Kind = iota
 	KindCode            // a source file of a unit
-	KindIndexDoc        // <unit>/CLAUDE.md
+	KindIndexDoc        // <unit>/<index file> (CLAUDE.md or AGENTS.md)
 	KindContextDoc      // context/<unit>.md
 )
 
@@ -98,12 +98,12 @@ func (t *Tree) UnitOf(rel string) string {
 }
 
 // Classify says what a repo path is to the plugin and which unit it belongs
-// to: a unit's CLAUDE.md or context doc, a source of a unit, or nothing
+// to: a unit's index file or context doc, a source of a unit, or nothing
 // (KindIgnore, also for docs of directories that are no unit). It applies the
 // same rules as Discover, so a file created since is classified too.
 func (t *Tree) Classify(rel string) (Kind, string) {
 	rel = path.Clean(rel)
-	if path.Base(rel) == "CLAUDE.md" {
+	if path.Base(rel) == t.IndexFile() {
 		dir := path.Dir(rel)
 		if dir == "." {
 			return KindIndexDoc, RootUnit
@@ -132,7 +132,7 @@ func (t *Tree) Classify(rel string) (Kind, string) {
 // Files returns the sorted source files of unit.
 func (t *Tree) Files(unit string) []string { return slices.Clone(t.files[unit]) }
 
-// Tracked returns every file Discover tracked (sources, CLAUDE.md files,
+// Tracked returns every file Discover tracked (sources, index files,
 // context docs), sorted.
 func (t *Tree) Tracked() []string { return slices.Clone(t.tracked) }
 
@@ -164,9 +164,9 @@ func (t *Tree) warn(msg string) {
 	}
 }
 
-func DocPaths(unit string) (claudeMD, contextMD string) {
-	if unit == RootUnit {
-		return "CLAUDE.md", "context/_root.md"
-	}
-	return unit + "/CLAUDE.md", "context/" + unit + ".md"
-}
+// ContextPath is the repo path of unit's context doc.
+func ContextPath(unit string) string { return "context/" + unit + ".md" }
+
+// IndexFile is the name of the per-unit index file (CLAUDE.md or AGENTS.md),
+// taken from the config Discover was given.
+func (t *Tree) IndexFile() string { return t.cfg.IndexFile }

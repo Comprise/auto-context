@@ -216,7 +216,7 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, j *session.Journ
 	j.AddCode(slices.Collect(maps.Keys(newestCode))...)
 	j.AddDocs(slices.Collect(maps.Keys(docs))...)
 	for _, u := range j.DocsTouched {
-		_, ctx := units.DocPaths(u)
+		ctx := units.ContextPath(u)
 		if fs, ok := cur[ctx]; ok && fs.MtimeNs >= newestCode[u] {
 			fresh = append(fresh, u)
 		}
@@ -337,7 +337,7 @@ func StopReason(f Feedback) string {
 	if refused, more := capList(f.Refused); len(refused) > 0 {
 		var ctxs []string
 		for _, u := range refused {
-			_, ctx := units.DocPaths(u)
+			ctx := units.ContextPath(u)
 			ctxs = append(ctxs, ctx)
 		}
 		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be used: each "+docstate.OutsideText+". Tell the user; replace it with a regular Markdown file if they agree.")
@@ -345,7 +345,7 @@ func StopReason(f Feedback) string {
 	if unreadable, more := capList(f.Unreadable); len(unreadable) > 0 {
 		var ctxs []string
 		for _, u := range unreadable {
-			_, ctx := units.DocPaths(u)
+			ctx := units.ContextPath(u)
 			ctxs = append(ctxs, ctx)
 		}
 		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be read (e.g. permissions); fix it, then run `auto-context status`.")

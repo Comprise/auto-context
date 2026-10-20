@@ -373,7 +373,7 @@ func (t *Tree) loadGitignore(root, dir string) {
 }
 
 // SafeName reports whether a repo path may be shown as is: unit names end up
-// in the root CLAUDE.md, in Claude's context and in suggested commands, so
+// in the root index file, in Claude's context and in suggested commands, so
 // only letters, digits, marks, spaces and "._-@+/" are allowed.
 func SafeName(p string) bool {
 	if p == RootUnit {
@@ -522,10 +522,10 @@ func (t *Tree) excludedPath(rel string) bool {
 }
 
 // interesting reports whether addFile looks at rel at all: a context doc, a
-// CLAUDE.md, a module marker or a source.
+// index file, a module marker or a source.
 func (t *Tree) interesting(rel string) bool {
 	dir, name := path.Dir(rel), path.Base(rel)
-	if isContext(dir) || name == "CLAUDE.md" {
+	if isContext(dir) || name == t.IndexFile() {
 		return true
 	}
 	return slices.Contains(t.cfg.ModuleMarkers, name) || t.isSource(rel)
@@ -587,13 +587,13 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 }
 
 // addFile records one listed file. Only files that can matter (context docs,
-// CLAUDE.md, module markers, sources) are checked against the ignore rules
+// index files, module markers, sources) are checked against the ignore rules
 // and stat'ed; an ignored or excluded marker makes no unit, as with git.
 // checked means the caller already applied excludes and .gitignore.
 func (t *Tree) addFile(rel string, dirs map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
 	dir, name := path.Dir(rel), path.Base(rel)
 	ctxDoc := isContext(dir)
-	isDoc := name == "CLAUDE.md"
+	isDoc := name == t.IndexFile()
 	isMarker := !ctxDoc && slices.Contains(t.cfg.ModuleMarkers, name)
 	isSrc := !ctxDoc && !isDoc && t.isSource(rel)
 	if !ctxDoc && !isDoc && !isMarker && !isSrc {

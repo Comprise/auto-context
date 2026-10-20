@@ -297,3 +297,29 @@ func TestConfigIgnoredWithoutGit(t *testing.T) {
 		t.Errorf("ignored=%v err=%v", ign, err)
 	}
 }
+
+func TestUpdateIndexUsesIndexFile(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	write(t, root, "context/_root.md", "# root\n\nRoot.\n")
+	write(t, root, "svc/go.mod", "module svc\n")
+	write(t, root, "svc/a.go", "package svc\n")
+	write(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.IndexFile() != "AGENTS.md" {
+		t.Fatalf("IndexFile = %q", p.IndexFile())
+	}
+	if err := p.RefreshIndex(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || !strings.Contains(string(b), "- `svc` — The service.") {
+		t.Fatalf("AGENTS.md = %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md was created")
+	}
+}

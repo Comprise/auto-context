@@ -347,11 +347,12 @@ func runStatus(args []string, stdout, stderr io.Writer, cwd string) int {
 	if hidden > 0 {
 		fmt.Fprintf(stdout, "note: %d more file(s) under context/ belong to no unit (names not shown: too many or unusual characters)\n", hidden)
 	}
-	switch err := rootindex.Check(root); {
+	name := p.IndexFile()
+	switch err := rootindex.Check(root, name); {
 	case errors.Is(err, rootindex.ErrBrokenMarkers):
-		fmt.Fprintln(stdout, "warning: the auto-context:units markers in the root CLAUDE.md are unbalanced, so the units index is not updated")
+		fmt.Fprintf(stdout, "warning: the auto-context:units markers in the root %s are unbalanced, so the units index is not updated\n", name)
 	case err != nil:
-		fmt.Fprintf(stdout, "warning: the root CLAUDE.md cannot be used for the units index: %s\n", textx.Err(err))
+		fmt.Fprintf(stdout, "warning: the root %s cannot be used for the units index: %s\n", name, textx.Err(err))
 	}
 	if lang := p.Config().Language; lang != "" {
 		fmt.Fprintf(stdout, "note: write unit docs in language %s (language in %s)\n", lang, config.FileName)

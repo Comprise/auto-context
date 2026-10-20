@@ -58,7 +58,7 @@ func (s UnitStatus) NoteText() string {
 // Stale (a doc or sources that cannot be read). It updates c but does not
 // save it.
 func StatusOf(root string, t *units.Tree, c *hashing.Cache, unit string) UnitStatus {
-	_, ctx := units.DocPaths(unit)
+	ctx := units.ContextPath(unit)
 	st := UnitStatus{Unit: unit, ContextPath: ctx, State: Stale}
 	meta, body, err := frontmatter.Read(root, fsutil.Abs(root, ctx))
 	switch {
@@ -113,7 +113,7 @@ const (
 // Doc resolves unit's context doc and tells what it is; path is set for
 // DocPresent, err for DocUnreadable.
 func Doc(root, unit string) (kind DocKind, path string, err error) {
-	_, ctx := units.DocPaths(unit)
+	ctx := units.ContextPath(unit)
 	p, err := fsutil.ResolveDoc(root, fsutil.Abs(root, ctx))
 	if errors.Is(err, fsutil.ErrOutside) {
 		return DocRefused, "", nil

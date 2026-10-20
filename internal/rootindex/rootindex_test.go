@@ -33,7 +33,7 @@ func read(t *testing.T, root string) string {
 
 func TestUpdateCreatesFile(t *testing.T) {
 	root := t.TempDir()
-	ch, err := Update(root, entries)
+	ch, err := Update(root, "CLAUDE.md", entries)
 	if err != nil || !ch || read(t, root) != Render(entries) {
 		t.Fatalf("ch=%v err=%v got=%q", ch, err, read(t, root))
 	}
@@ -43,7 +43,7 @@ func TestUpdateAppendsWhenNoMarkers(t *testing.T) {
 	for _, tc := range []struct{ in, sep string }{{"# T\n", "\n"}, {"# T", "\n\n"}, {"# T\n\n", ""}} {
 		root := t.TempDir()
 		os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(tc.in), 0o644)
-		ch, err := Update(root, entries)
+		ch, err := Update(root, "CLAUDE.md", entries)
 		if err != nil || !ch {
 			t.Fatal(ch, err)
 		}
@@ -58,7 +58,7 @@ func TestUpdateReplacesSection(t *testing.T) {
 	before, after := "# T\n\nintro\n\n", "\ntail\n"
 	old := "<!-- auto-context:units -->\n- `old` — x\n<!-- /auto-context:units -->\n"
 	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(before+old+after), 0o644)
-	ch, err := Update(root, entries)
+	ch, err := Update(root, "CLAUDE.md", entries)
 	if err != nil || !ch {
 		t.Fatal(ch, err)
 	}
@@ -69,8 +69,8 @@ func TestUpdateReplacesSection(t *testing.T) {
 
 func TestUpdateNoChange(t *testing.T) {
 	root := t.TempDir()
-	Update(root, entries)
-	ch, err := Update(root, entries)
+	Update(root, "CLAUDE.md", entries)
+	ch, err := Update(root, "CLAUDE.md", entries)
 	if err != nil || ch {
 		t.Fatalf("ch=%v err=%v", ch, err)
 	}
@@ -84,7 +84,7 @@ func TestUpdateRefusesBrokenMarkers(t *testing.T) {
 	} {
 		root := t.TempDir()
 		os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(in), 0o644)
-		ch, err := Update(root, entries)
+		ch, err := Update(root, "CLAUDE.md", entries)
 		if !errors.Is(err, ErrBrokenMarkers) || ch || read(t, root) != in {
 			t.Errorf("in %q: ch=%v err=%v", in, ch, err)
 		}
@@ -98,7 +98,7 @@ func TestUpdateMarkerInSummary(t *testing.T) {
 	e := []Entry{{"pkg", "sum <!-- /auto-context:units --> tail"}}
 	var sizes []int
 	for i := 0; i < 3; i++ {
-		if _, err := Update(root, e); err != nil {
+		if _, err := Update(root, "CLAUDE.md", e); err != nil {
 			t.Fatal(err)
 		}
 		sizes = append(sizes, len(read(t, root)))
@@ -129,7 +129,7 @@ func TestUpdateKeepsUserHeader(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(cur), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update(root, entries); err != nil {
+	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
 		t.Fatal(err)
 	}
 	want := "# P\n\n<!-- auto-context:units -->\n## Юниты\n- `src/auth` — JWT.\n- `cmd/api`\n<!-- /auto-context:units -->\n"
@@ -146,7 +146,7 @@ func TestUpdateKeepsTextAfterFirstClose(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(cur), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update(root, entries); err != nil {
+	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, root); !strings.Contains(got, "user text") {
@@ -162,7 +162,7 @@ func TestUpdateMarkerEdgeCases(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(in), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update(root, entries); err != nil {
+	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, root)
@@ -181,7 +181,7 @@ func TestUpdateKeepsMode(t *testing.T) {
 	if err := os.WriteFile(p, []byte("# T\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update(root, entries); err != nil {
+	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
 		t.Fatal(err)
 	}
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
@@ -191,7 +191,7 @@ func TestUpdateKeepsMode(t *testing.T) {
 
 func TestCheck(t *testing.T) {
 	root := t.TempDir()
-	if err := Check(root); err != nil {
+	if err := Check(root, "CLAUDE.md"); err != nil {
 		t.Errorf("no CLAUDE.md: %v", err)
 	}
 	p := filepath.Join(root, "CLAUDE.md")
@@ -204,8 +204,45 @@ func TestCheck(t *testing.T) {
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := Check(root); !errors.Is(err, want) && err != want {
+		if err := Check(root, "CLAUDE.md"); !errors.Is(err, want) && err != want {
 			t.Errorf("%q: %v, want %v", content, err, want)
 		}
+	}
+}
+
+func TestUpdateAgents(t *testing.T) {
+	root := t.TempDir()
+	ch, err := Update(root, "AGENTS.md", entries)
+	if err != nil || !ch {
+		t.Fatalf("ch=%v err=%v", ch, err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || string(b) != Render(entries) {
+		t.Fatalf("AGENTS.md = %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
+		t.Error("CLAUDE.md was created")
+	}
+	if err := Check(root, "AGENTS.md"); err != nil {
+		t.Errorf("Check: %v", err)
+	}
+}
+
+func TestUpdateThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("# T\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("CLAUDE.md", filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Skip("symlinks unsupported:", err)
+	}
+	if _, err := Update(root, "AGENTS.md", entries); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(filepath.Join(root, "AGENTS.md")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("AGENTS.md link replaced: %v %v", fi, err)
+	}
+	if got := read(t, root); !strings.Contains(got, Render(entries)) {
+		t.Errorf("CLAUDE.md lacks the section: %q", got)
 	}
 }

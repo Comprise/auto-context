@@ -38,7 +38,7 @@ func (p *Project) WriteChanges(w io.Writer, unit string) error {
 	if unit != units.RootUnit {
 		spec = ":(literal)" + unit
 	}
-	_, ctx := units.DocPaths(unit)
+	ctx := units.ContextPath(unit)
 	since, why := ackDate(root, ctx)
 
 	if _, err := gitx.Run(root, 0, "rev-parse", "--is-inside-work-tree"); err != nil {

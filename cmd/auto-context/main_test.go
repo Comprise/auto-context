@@ -995,3 +995,14 @@ func TestStatusConfigIgnoredCorruptIndex(t *testing.T) {
 		t.Errorf("out=%q", out)
 	}
 }
+
+func TestStatusBrokenMarkersAgents(t *testing.T) {
+	root := repo(t)
+	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	write(t, root, "AGENTS.md", "<!-- auto-context:units -->\nx\n")
+	_, out, _ := do(root, "", "status")
+	want := "warning: the auto-context:units markers in the root AGENTS.md are unbalanced, so the units index is not updated"
+	if !strings.Contains(out, want) {
+		t.Errorf("status output lacks %q:\n%s", want, out)
+	}
+}

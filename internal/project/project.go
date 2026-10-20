@@ -24,7 +24,7 @@ import (
 // regular file inside the repo. A bare context/ directory is too common a name
 // to count. Inactive projects are never written to.
 func Active(root string) bool {
-	_, ctx := units.DocPaths(units.RootUnit)
+	ctx := units.ContextPath(units.RootUnit)
 	for _, m := range []string{config.FileName, ctx} {
 		p, err := fsutil.Resolve(root, fsutil.Abs(root, m))
 		if err != nil {
@@ -41,7 +41,7 @@ func Active(root string) bool {
 // that exists but is not used: it links outside the repo or into .git, is not
 // a regular file, or cannot be inspected, so the plugin stays off.
 func ActivationRefused(root string) bool {
-	_, ctx := units.DocPaths(units.RootUnit)
+	ctx := units.ContextPath(units.RootUnit)
 	for _, m := range []string{config.FileName, ctx} {
 		full := fsutil.Abs(root, m)
 		if _, err := os.Lstat(full); err != nil {
@@ -103,6 +103,9 @@ func Open(root string) (*Project, error) {
 // ErrConfigBroken refuses an operation that would act on the default units
 // while the config cannot be read or parsed.
 var ErrConfigBroken = errors.New(config.FileName + " cannot be read or parsed; fix it first")
+
+// IndexFile is the name of the per-unit index file from the config.
+func (p *Project) IndexFile() string { return p.cfg.IndexFile }
 
 // ConfigBroken reports a config that could not be read or parsed at all: the
 // defaults apply, so the unit tree may not be the user's.
@@ -251,7 +254,7 @@ func (p *Project) AckTouched(touched []string, now time.Time) (acked []string, f
 	return acked, failed, indexErr
 }
 
-// UpdateIndex rewrites the root CLAUDE.md units index from sts, which must be
+// UpdateIndex rewrites the root index file units index from sts, which must be
 // the statuses of every unit (a partial list drops units from the index), and
 // reports whether the file changed.
 func (p *Project) UpdateIndex(sts []docstate.UnitStatus) (bool, error) {
@@ -262,7 +265,7 @@ func (p *Project) UpdateIndex(sts []docstate.UnitStatus) (bool, error) {
 	for _, s := range sts {
 		entries = append(entries, rootindex.Entry{Unit: s.Unit, Summary: s.Summary})
 	}
-	return rootindex.Update(p.root, entries)
+	return rootindex.Update(p.root, p.IndexFile(), entries)
 }
 
 // RefreshIndex recomputes the statuses and rewrites the root index.

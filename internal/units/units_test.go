@@ -220,12 +220,62 @@ func TestDiscoverSkipsSymlinkDirs(t *testing.T) {
 	}
 }
 
-func TestDocPaths(t *testing.T) {
-	if a, b := DocPaths("_root"); a != "CLAUDE.md" || b != "context/_root.md" {
-		t.Fatal(a, b)
+func TestContextPath(t *testing.T) {
+	if got := ContextPath("_root"); got != "context/_root.md" {
+		t.Fatal(got)
 	}
-	if a, b := DocPaths("svc/auth"); a != "svc/auth/CLAUDE.md" || b != "context/svc/auth.md" {
-		t.Fatal(a, b)
+	if got := ContextPath("src/a"); got != "context/src/a.md" {
+		t.Fatal(got)
+	}
+}
+
+func agentsCfg() config.Config {
+	cfg := config.Default()
+	cfg.IndexFile = config.IndexAgents
+	return cfg
+}
+
+func TestClassifyIndexFile(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "src/a/go.mod", "src/a/main.go", "src/a/AGENTS.md", "src/a/CLAUDE.md", "AGENTS.md", "CLAUDE.md")
+	for _, tc := range []struct {
+		cfg        config.Config
+		idx, other string
+	}{{agentsCfg(), "AGENTS.md", "CLAUDE.md"}, {config.Default(), "CLAUDE.md", "AGENTS.md"}} {
+		tr := discover(t, root, tc.cfg)
+		for _, c := range []struct {
+			in   string
+			kind Kind
+			unit string
+		}{
+			{tc.idx, KindIndexDoc, "_root"},
+			{"src/a/" + tc.idx, KindIndexDoc, "src/a"},
+			{"src/a/" + tc.other, KindIgnore, ""},
+			{tc.other, KindIgnore, ""},
+		} {
+			if k, u := tr.Classify(c.in); k != c.kind || u != c.unit {
+				t.Errorf("%s: Classify(%s) = %v,%q want %v,%q", tc.idx, c.in, k, u, c.kind, c.unit)
+			}
+		}
+	}
+}
+
+func TestDiscoverTracksIndexFile(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "src/a/go.mod", "src/a/main.go", "src/a/AGENTS.md", "src/a/CLAUDE.md")
+	ag := discover(t, root, agentsCfg())
+	cl := discover(t, root, config.Default())
+	if !slices.Contains(ag.Tracked(), "src/a/AGENTS.md") || slices.Contains(ag.Tracked(), "src/a/CLAUDE.md") {
+		t.Errorf("agents tracked = %v", ag.Tracked())
+	}
+	if !slices.Contains(cl.Tracked(), "src/a/CLAUDE.md") || slices.Contains(cl.Tracked(), "src/a/AGENTS.md") {
+		t.Errorf("claude tracked = %v", cl.Tracked())
+	}
+	if !slices.Equal(paths(ag.Units()), paths(cl.Units())) {
+		t.Errorf("units differ: %v vs %v", paths(ag.Units()), paths(cl.Units()))
+	}
+	if ag.IndexFile() != "AGENTS.md" || cl.IndexFile() != "CLAUDE.md" {
+		t.Errorf("IndexFile = %q, %q", ag.IndexFile(), cl.IndexFile())
 	}
 }
 

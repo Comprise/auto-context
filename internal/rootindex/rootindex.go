@@ -1,4 +1,5 @@
-// Package rootindex maintains the units index section in the root CLAUDE.md.
+// Package rootindex maintains the units index section in the root index file (CLAUDE.md or
+// AGENTS.md).
 package rootindex
 
 import (
@@ -22,10 +23,10 @@ type Entry struct {
 	Unit, Summary string
 }
 
-var ErrBrokenMarkers = errors.New("root CLAUDE.md has unbalanced auto-context:units markers")
+var ErrBrokenMarkers = errors.New("unbalanced auto-context:units markers in the root index file")
 
 // maxSummary caps a unit summary in the index (runes); MaxSize caps the root
-// CLAUDE.md we read.
+// index file we read.
 const (
 	maxSummary = 200
 	MaxSize    = 2 << 20
@@ -82,9 +83,9 @@ func markers(lines []string) (oi, ci int) {
 }
 
 // Check reports, without writing, what Update would refuse: ErrBrokenMarkers,
-// or a root CLAUDE.md that links outside the repo (fsutil.ErrOutside).
-func Check(root string) error {
-	path, err := fsutil.ResolveDoc(root, filepath.Join(root, "CLAUDE.md"))
+// or a root index file (name) that links outside the repo (fsutil.ErrOutside).
+func Check(root, name string) error {
+	path, err := fsutil.ResolveDoc(root, filepath.Join(root, name))
 	if err != nil {
 		return err
 	}
@@ -101,13 +102,13 @@ func Check(root string) error {
 	return nil
 }
 
-// Update rewrites the section in <root>/CLAUDE.md and reports whether the file
+// Update rewrites the section in <root>/<name> and reports whether the file
 // changed. Markers count only as whole lines; a heading line right after the
 // open marker is the user's and is kept.
-func Update(root string, entries []Entry) (bool, error) {
-	// A CLAUDE.md linking outside the repo, into .git or to a non-.md file is
+func Update(root, name string, entries []Entry) (bool, error) {
+	// An index file linking outside the repo, into .git or to a non-.md file is
 	// neither read nor written; a link to another .md in the repo is followed.
-	path, err := fsutil.ResolveDoc(root, filepath.Join(root, "CLAUDE.md"))
+	path, err := fsutil.ResolveDoc(root, filepath.Join(root, name))
 	if err != nil {
 		return false, err
 	}
