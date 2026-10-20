@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate Codex manifests
-        run: jq -e . .codex-plugin/plugin.json .agents/plugins/marketplace.json hooks/codex.json
+        run: sh .github/scripts/check-manifests.sh .
       - name: Validate plugin and marketplace manifests
         run: npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate .
       - name: Validate the shipped tree strictly
@@ -62,7 +62,8 @@ jobs:
         run: |
           tree="$RUNNER_TEMP/tree"
           mkdir -p "$tree"
-          cp -r .claude-plugin .codex-plugin .agents hooks skills bin README.md LICENSE "$tree/"
+          cp -r .claude-plugin .codex-plugin .agents hooks skills bin README.md README.ru.md LICENSE "$tree/"
           jq '.version="0.0.0-ci"' .claude-plugin/plugin.json > "$tree/.claude-plugin/plugin.json"
           jq '.version="0.0.0-ci"' .codex-plugin/plugin.json > "$tree/.codex-plugin/plugin.json"
+          sh .github/scripts/check-manifests.sh "$tree" 0.0.0-ci
           cd "$tree" && npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate --strict .

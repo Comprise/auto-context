@@ -4,6 +4,9 @@ include:
 # Packaging files are not code by extension but are part of the root unit.
 track:
   - .claude-plugin/*
+  - .codex-plugin/*
+  - .agents/plugins/*
+  - .github/scripts/*
   - .github/workflows/*
   - bin/*
   - hooks/*

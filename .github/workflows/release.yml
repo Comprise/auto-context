@@ -90,12 +90,16 @@ jobs:
       - name: Archive and checksums
         run: |
           chmod +x libexec/* bin/auto-context
-          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md LICENSE
-          sha256sum libexec/* "auto-context-${GITHUB_REF_NAME}.tar.gz" > checksums.txt
+          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE
+          # flat names, so `sha256sum -c` works in a directory with the downloaded assets
+          (cd libexec && sha256sum auto-context-*) > checksums.txt
+          sha256sum "auto-context-${GITHUB_REF_NAME}.tar.gz" >> checksums.txt
       - name: Validate the tree users install
         run: |
           mkdir -p "$RUNNER_TEMP/tree"
           tar -xzf "auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$RUNNER_TEMP/tree"
+          sh .github/scripts/check-manifests.sh "$RUNNER_TEMP/tree" "${GITHUB_REF_NAME#v}"
+          test "$(ls "$RUNNER_TEMP/tree/libexec" | wc -l)" -eq 6
           # --strict: warnings (most broken skill frontmatter, an unknown hook
           # event) fail the release; without it validate exits 0 on them.
           # TestSkillsFrontmatter covers the YAML the validator lets through.
@@ -123,7 +127,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git rm -rq --cached .
-          git add -f .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md LICENSE
+          git add -f .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE
           tree=$(git write-tree)
           parents=""
           if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
@@ -141,4 +145,4 @@ jobs:
           fi
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "auto-context-${GITHUB_REF_NAME}.tar.gz" checksums.txt --generate-notes $prerelease
+          gh release create "$GITHUB_REF_NAME" "auto-context-${GITHUB_REF_NAME}.tar.gz" checksums.txt libexec/* --generate-notes $prerelease

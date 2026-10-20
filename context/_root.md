@@ -1,6 +1,6 @@
 ---
 unit: _root
-source_hash: sha256:94b1a141d1d6ea40407263917878b5d1db3c708ba409958a8903f828b3cf4683
+source_hash: sha256:f70b00f96abbcde2a8a632cc47ee2d50dffb9924ae6a38af3a8c0324060779bd
 updated: "2026-10-20"
 ---
 # _root
@@ -31,10 +31,10 @@ updated: "2026-10-20"
 - Плагин: `.claude-plugin/plugin.json` и `hooks/hooks.json` (Claude Code), `.codex-plugin/plugin.json` и `hooks/codex.json` (Codex; команды с `--agent codex`), `.agents/plugins/marketplace.json` (маркетплейс Codex: источник `local`, `./`, потому что Codex молча игнорирует github-источник из `.claude-plugin/marketplace.json`), общие навыки в `skills/`, POSIX sh-shim
   `bin/auto-context`, выбирающий бинарник `libexec/auto-context-<os>-<arch>` (в main бинарников нет).
 - `.github/workflows/`: `ci.yml` (тесты на Linux/macOS/Windows, `claude plugin validate`),
-  `release.yml` (оба проверяют и ставят `.codex-plugin` и `.agents`; по тегу `vX.Y.Z[-pre]` с коммита из main: 6 бинарников, provenance, строгая
+  `release.yml`; обе проверяют манифесты Claude и Codex скриптом `.github/scripts/check-manifests.sh` (в релизе — на собранном дереве, с версией тега), и релиз кладёт `.codex-plugin`, `.agents` и `README.ru.md` в дерево. По тегу `vX.Y.Z[-pre]` с коммита из main: 6 бинарников, provenance, строгая
   проверка дерева плагина, ветка `release` с файлами плагина — новый коммит поверх прежнего, без
   истории main и без force-push, только к более высокой версии; затем GitHub Release; теги с `-`
-  ветку не трогают).
+  ветку не трогают). Релиз прикладывает шесть бинарников и `checksums.txt` с плоскими именами (`sha256sum -c` работает в каталоге скачанных файлов).
 
 ## Инварианты и подводные камни
 - Хуки всегда завершаются с кодом 0 (шим гасит даже фатальный выход Go с кодом 2, который Claude Code
@@ -61,4 +61,4 @@ updated: "2026-10-20"
 ## Связи
 Модуль Go `auto-context`; зависимости: `gopkg.in/yaml.v3`, `github.com/bmatcuk/doublestar/v4`; во
 время работы — `git` (необязательно). Сборка — `Makefile`
-(`make test`, `make dist`).
+(`make test` — `go vet ./...` и `go test ./...`; `make dist`).

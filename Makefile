@@ -4,6 +4,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 win
 .PHONY: test dist
 
 test:
+	go vet ./...
 	go test ./...
 
 dist:
