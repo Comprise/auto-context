@@ -2,7 +2,7 @@ package hooks
 
 import (
 	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 )
 
@@ -52,10 +52,12 @@ var pluginRootSafe = regexp.MustCompile(`^/[A-Za-z0-9_./-]*$`)
 // CLI is how texts for this agent name the plugin binary. Codex's shell tool
 // has no plugin bin/ on PATH, so it gets the absolute path under
 // CLAUDE_PLUGIN_ROOT; an unset or unsafe root falls back to the bare name.
+// The root is a POSIX path (pluginRootSafe), so it is joined with "/" on
+// every OS: the text goes to a POSIX shell, not to the filesystem API.
 func (a Agent) CLI() string {
 	if a == Codex {
 		if root := os.Getenv("CLAUDE_PLUGIN_ROOT"); pluginRootSafe.MatchString(root) {
-			return filepath.Join(root, "bin", "auto-context")
+			return path.Join(root, "bin", "auto-context")
 		}
 	}
 	return "auto-context"

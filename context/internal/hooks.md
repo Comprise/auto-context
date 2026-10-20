@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:1ebe8e08d9dea6546c3551ea75fde63e685b977a7cf5141a7c97cf47bb1e4d13
+source_hash: sha256:5193df7cb3d3f8d006fd0ff19516c409f94159f1648400feb1ca4e1ddc8a29a8
 updated: "2026-10-20"
 ---
 # internal/hooks
@@ -41,7 +41,7 @@ updated: "2026-10-20"
 - Текст конфига и логов в контекст Claude не попадает — только числа и фиксированные категории; исключение — `language`, проверенный код языка (`LanguageNote`). Причина неудачного авто-ack или отказа SessionStart — фиксированная категория (`errCategory`; для `units.ErrGitTimeout`/`ErrListTooLarge` — совет про `.gitignore`), полный текст ошибки — только в логе.
 - При заданном `language` SessionStart выводит `LanguageNote` всегда, даже когда доки актуальны. Stop добавляет его к напоминаниям о коде и новых юнитах.
 - `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
-- `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context`, а при пустой переменной или пути вне `A-Za-z0-9_./-` — `auto-context`. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту абсолютную форму (ровно свой путь, остальные правила те же), без проверки `shadowed`.
+- `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context`, а при пустой переменной или пути вне `A-Za-z0-9_./-` — `auto-context`. Путь склеивается через `/` (`path.Join`) на любой ОС: это текст для POSIX-shell, а не путь для файловой системы. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту абсолютную форму (ровно свой путь, остальные правила те же), без проверки `shadowed`.
 
 ## Связи
 Зависит от: `internal/config`, `internal/docstate`, `internal/fsutil`, `internal/logx`, `internal/project`, `internal/rootindex`, `internal/session`, `internal/units`.

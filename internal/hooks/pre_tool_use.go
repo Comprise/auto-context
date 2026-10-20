@@ -45,7 +45,7 @@ func approvable(env Env, in Input) bool {
 	}
 	cmd := in.Command()
 	if env.Agent == Codex {
-		if abs := Codex.CLI(); filepath.IsAbs(abs) {
+		if abs := Codex.CLI(); abs != "auto-context" {
 			if rest, ok := strings.CutPrefix(cmd, abs+" "); ok {
 				return allowedCommand("auto-context " + rest)
 			}
