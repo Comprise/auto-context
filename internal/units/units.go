@@ -6,6 +6,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode"
 
 	"auto-context/internal/config"
 )
@@ -170,3 +171,18 @@ func ContextPath(unit string) string { return "context/" + unit + ".md" }
 // IndexFile is the name of the per-unit index file (CLAUDE.md or AGENTS.md),
 // taken from the config Discover was given.
 func (t *Tree) IndexFile() string { return t.cfg.IndexFile }
+
+// SafeName reports whether a repo path may be shown as is: unit names end up
+// in the root index file, in Claude's context and in suggested commands, so
+// only letters, digits, marks, spaces and "._-@+/" are allowed.
+func SafeName(p string) bool {
+	if p == RootUnit {
+		return false
+	}
+	for _, r := range p {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) && !strings.ContainsRune("._-@+/ ", r) {
+			return false
+		}
+	}
+	return true
+}

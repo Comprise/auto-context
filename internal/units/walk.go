@@ -1,7 +1,6 @@
 package units
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,11 +14,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode"
 
 	"auto-context/internal/config"
 	"auto-context/internal/fsutil"
-	"auto-context/internal/gitx"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -41,352 +38,6 @@ func (t *Tree) excluded(rel string) bool { return t.excludes.match(rel) }
 // .gitignore.
 func (t *Tree) untracked(rel string) bool {
 	return t.excludedPath(rel) || t.gitIgnored(rel, false)
-}
-
-// patternSet is a compiled list of doublestar patterns. The common shapes are
-// matched with string operations: a literal path, "X/**" (X and everything
-// under it) and "**/X/**" (a directory named X at any depth).
-type patternSet struct {
-	exact    map[string]bool
-	under    []string // X, with underSl holding "X/"
-	underSl  []string
-	anyDepth []string // X, with anySl holding "/X/"
-	anySl    []string
-	globs    []string
-}
-
-func compilePatterns(patterns []string) patternSet {
-	s := patternSet{exact: map[string]bool{}}
-	literal := func(p string) bool { return p != "" && !strings.ContainsAny(p, "*?[]{}\\") }
-	for _, p := range patterns {
-		if x, ok := strings.CutSuffix(p, "/**"); ok {
-			if y, ok := strings.CutPrefix(x, "**/"); ok && literal(y) && !strings.Contains(y, "/") {
-				s.anyDepth = append(s.anyDepth, y)
-				s.anySl = append(s.anySl, "/"+y+"/")
-				continue
-			}
-			if literal(x) {
-				s.under = append(s.under, x)
-				s.underSl = append(s.underSl, x+"/")
-				continue
-			}
-		}
-		if literal(p) {
-			s.exact[p] = true
-			continue
-		}
-		s.globs = append(s.globs, p)
-	}
-	return s
-}
-
-func (s patternSet) match(rel string) bool {
-	if s.exact[rel] {
-		return true
-	}
-	for i, x := range s.under {
-		if rel == x || strings.HasPrefix(rel, s.underSl[i]) {
-			return true
-		}
-	}
-	for i, x := range s.anyDepth {
-		sl := s.anySl[i] // "/X/"
-		if rel == x || strings.HasPrefix(rel, sl[1:]) || strings.HasSuffix(rel, sl[:len(sl)-1]) || strings.Contains(rel, sl) {
-			return true
-		}
-	}
-	return matchesAny(s.globs, rel)
-}
-
-// gitIgnored checks rel against the .gitignore of every ancestor directory,
-// each relative to its own directory. As in git, the deepest file with a
-// matching rule decides, and within a file the last matching rule.
-func (t *Tree) gitIgnored(rel string, isDir bool) bool {
-	for i := len(rel) - 1; i >= -1; i-- {
-		if i >= 0 && rel[i] != '/' {
-			continue
-		}
-		dir := "."
-		if i >= 0 {
-			dir = rel[:i]
-		}
-		gi, ok := t.ignores[dir]
-		if !ok {
-			continue
-		}
-		ignored, matched := gi.match(rel[i+1:], isDir, &t.globBudget)
-		if t.globBudget <= 0 && !t.budgetWarned {
-			t.budgetWarned = true
-			t.warn(".gitignore pattern rules took too long; the rest were skipped, so some paths may be tracked or ignored wrongly")
-		}
-		if matched {
-			return ignored
-		}
-	}
-	return false
-}
-
-// ignoreRule is one .gitignore line.
-type ignoreRule struct {
-	pattern  string // as written; for glob rules { and } escaped (literal in git)
-	negated  bool   // "!": re-includes
-	dirOnly  bool   // trailing "/"
-	anchored bool   // contains "/": matched against the path, else the base name
-	glob     bool   // has *, ? or [ ; else an exact name or path
-	under    bool   // ends in "/**": what is inside X, not X itself
-	// head and tail are literal text every match starts and ends with, mid
-	// the longest literal run it contains: cheap tests before doublestar.
-	head, mid, tail string
-	suffix          string // the literal after "*" of a suffix rule, unescaped
-}
-
-// ignoreFile is one parsed .gitignore. Rules that need no glob matching (an
-// exact base name, or "*" plus a literal suffix) are indexed, so a long file
-// of simple rules costs a map lookup and a few suffix checks per path.
-type ignoreFile struct {
-	rules   []ignoreRule
-	exact   map[string][]int // base name -> indices of unanchored exact rules
-	ext     map[string][]int // extension -> indices of unanchored "*.ext" rules
-	suffix  []int            // other unanchored "*<literal>" rules
-	other   []int            // everything else, matched with doublestar
-	invalid int              // lines doublestar cannot parse or too long, dropped
-}
-
-// maxGlobWork bounds doublestar work per Discover (pattern × path length
-// summed over calls, about a second): past it the remaining pattern rules are
-// skipped, with a warning. A variable so tests can lower it.
-var maxGlobWork = 300_000_000
-
-// maxRuleLen caps a pattern rule: doublestar's cost grows with its length.
-const maxRuleLen = 512
-
-// globMeta are the characters that end a literal run in a pattern; "]"
-// too, so a class body ("[cod]") is never taken for literal text.
-const globMeta = "*?[]\\{}"
-
-// parseIgnore parses .gitignore lines.
-func parseIgnore(lines []string) ignoreFile {
-	f := ignoreFile{exact: map[string][]int{}, ext: map[string][]int{}}
-	for _, l := range lines {
-		l = strings.TrimRight(l, "\r")
-		if l == "" || strings.HasPrefix(l, "#") {
-			continue
-		}
-		// Trailing spaces are dropped unless escaped.
-		for strings.HasSuffix(l, " ") && !strings.HasSuffix(l, "\\ ") {
-			l = l[:len(l)-1]
-		}
-		var r ignoreRule
-		if rest, ok := strings.CutPrefix(l, "!"); ok {
-			r.negated, l = true, rest
-		} else if strings.HasPrefix(l, "\\!") || strings.HasPrefix(l, "\\#") {
-			l = l[1:]
-		}
-		if rest, ok := strings.CutSuffix(l, "/"); ok {
-			r.dirOnly, l = true, rest
-		}
-		if rest, ok := strings.CutPrefix(l, "/"); ok {
-			r.anchored, l = true, rest
-		}
-		if rest, ok := strings.CutPrefix(l, "**/"); ok && !strings.Contains(rest, "/") {
-			l, r.anchored = rest, false // "**/x" and "/**/x" are "x" at any depth
-		}
-		if l == "" {
-			continue
-		}
-		r.anchored = r.anchored || strings.Contains(l, "/")
-		r.glob = strings.ContainsAny(l, "*?[\\")
-		r.under = strings.HasSuffix(l, "/**")
-		p := l
-		if r.glob {
-			// Braces are literal in git but alternatives in doublestar.
-			p = strings.NewReplacer("{", "\\{", "}", "\\}").Replace(l)
-			if len(p) > maxRuleLen || !doublestar.ValidatePattern(p) {
-				f.invalid++
-				continue
-			}
-		}
-		r.pattern = p
-		r.suffix = l[1:]
-		if k := strings.IndexAny(p, globMeta); k >= 0 {
-			r.head = p[:k]
-			t := strings.LastIndexAny(p, globMeta)
-			r.tail = p[t+1:]
-			// "**/" may stand for no directory at all: "**/a/b" matches "a/b".
-			if strings.HasSuffix(p[:t+1], "**") {
-				r.tail = strings.TrimPrefix(r.tail, "/")
-			}
-			// A leading "/" may be the one "**/" stands for: drop it too.
-			r.mid = strings.TrimPrefix(longestLiteral(p), "/")
-		}
-		idx := len(f.rules)
-		f.rules = append(f.rules, r)
-		switch {
-		case !r.anchored && !r.glob:
-			f.exact[l] = append(f.exact[l], idx)
-		case !r.anchored && strings.HasPrefix(l, "*") && !strings.ContainsAny(l[1:], "*?[\\"):
-			if e := l[1:]; strings.HasPrefix(e, ".") && strings.Count(e, ".") == 1 {
-				f.ext[e] = append(f.ext[e], idx) // "*.log": looked up by extension
-			} else {
-				f.suffix = append(f.suffix, idx)
-			}
-		default:
-			f.other = append(f.other, idx)
-		}
-	}
-	return f
-}
-
-// longestLiteral returns the longest run of literal text in pattern p, outside
-// character classes and escapes: every match must contain it.
-func longestLiteral(p string) string {
-	best, start, inClass := "", -1, false
-	flush := func(end int) {
-		if start >= 0 && end-start > len(best) {
-			best = p[start:end]
-		}
-		start = -1
-	}
-	for i := 0; i < len(p); i++ {
-		c := p[i]
-		switch {
-		case inClass:
-			if c == ']' {
-				inClass = false
-			}
-		case c == '[':
-			flush(i)
-			inClass = true
-		case c == '\\':
-			flush(i)
-			i++ // the escaped character ends the run too (conservative)
-		case strings.IndexByte(globMeta, c) >= 0:
-			flush(i)
-		default:
-			if start < 0 {
-				start = i
-			}
-		}
-	}
-	if !inClass {
-		flush(len(p))
-	}
-	return best
-}
-
-// match reports whether the last rule of f matching sub (a path relative to the
-// .gitignore's directory) ignores it, and whether any rule matched. budget is
-// the doublestar work left (pattern length × target length per call); at zero
-// the remaining glob rules are skipped.
-func (f *ignoreFile) match(sub string, isDir bool, budget *int) (ignored, matched bool) {
-	base := sub[strings.LastIndexByte(sub, '/')+1:]
-	best := -1
-	ok := func(i int) bool { return !f.rules[i].dirOnly || isDir }
-	for _, i := range f.exact[base] {
-		if i > best && ok(i) {
-			best = i
-		}
-	}
-	for _, i := range f.ext[path.Ext(base)] {
-		if i > best && ok(i) {
-			best = i
-		}
-	}
-	for _, i := range f.suffix {
-		if i > best && ok(i) && strings.HasSuffix(base, f.rules[i].suffix) {
-			best = i
-		}
-	}
-	// Later rules win: scan the glob rules from the end, down to best.
-	for k := len(f.other) - 1; k >= 0 && f.other[k] > best && *budget > 0; k-- {
-		i := f.other[k]
-		r := &f.rules[i]
-		if !ok(i) {
-			continue
-		}
-		target := base
-		if r.anchored {
-			target = sub
-		}
-		if !r.glob {
-			if target == r.pattern {
-				best = i
-				break
-			}
-			continue
-		}
-		if !strings.HasPrefix(target, r.head) || !strings.HasSuffix(target, r.tail) || !strings.Contains(target, r.mid) {
-			continue
-		}
-		*budget -= len(r.pattern) * len(target)
-		if !doublestar.MatchUnvalidated(r.pattern, target) {
-			continue
-		}
-		// doublestar's "X/**" also matches X; git's only what is inside X.
-		if r.under && doublestar.MatchUnvalidated(strings.TrimSuffix(r.pattern, "/**"), target) {
-			continue
-		}
-		best = i
-		break
-	}
-	if best < 0 {
-		return false, false
-	}
-	return !f.rules[best].negated, true
-}
-
-// Limits on .gitignore files, so a hostile repo cannot make every hook slow:
-// glob rules cost a doublestar match per path, the others a lookup.
-const (
-	maxGitignoreSize = 256 << 10
-	maxRulesPerFile  = 5000
-	maxRulesTotal    = 10000
-	maxGlobRules     = 1000 // rules matched by pattern (with "/" or a wildcard beyond "*<suffix>"), in all files
-)
-
-// loadGitignore parses dir/.gitignore, if any, into t.ignores. A file that is
-// not a regular in-repo file, or exceeds the limits, is skipped with a warning.
-func (t *Tree) loadGitignore(root, dir string) {
-	rel := path.Join(dir, ".gitignore")
-	full := fsutil.Abs(root, rel)
-	if _, err := os.Lstat(full); errors.Is(err, os.ErrNotExist) {
-		return // the common case: no full path resolution needed
-	}
-	data, err := fsutil.ReadFile(root, full, maxGitignoreSize)
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	if err != nil {
-		t.warn("skipped " + shown(rel) + ": " + errKind(err))
-		return
-	}
-	f := parseIgnore(strings.Split(strings.TrimPrefix(string(data), "\ufeff"), "\n"))
-	if f.invalid > 0 {
-		t.warn(fmt.Sprintf("%s: %d invalid or overlong rule(s) ignored", shown(rel), f.invalid))
-	}
-	rules := len(f.rules)
-	if rules > maxRulesPerFile || t.rules+rules > maxRulesTotal || t.globRules+len(f.other) > maxGlobRules {
-		t.warn(fmt.Sprintf("skipped %s: %d rules, %d matched by pattern (limits: %d per file, %d total, %d matched by pattern)", shown(rel), rules, len(f.other), maxRulesPerFile, maxRulesTotal, maxGlobRules))
-		return
-	}
-	t.rules += rules
-	t.globRules += len(f.other)
-	t.ignores[dir] = f
-}
-
-// SafeName reports whether a repo path may be shown as is: unit names end up
-// in the root index file, in Claude's context and in suggested commands, so
-// only letters, digits, marks, spaces and "._-@+/" are allowed.
-func SafeName(p string) bool {
-	if p == RootUnit {
-		return false
-	}
-	for _, r := range p {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) && !strings.ContainsRune("._-@+/ ", r) {
-			return false
-		}
-	}
-	return true
 }
 
 // skipDir reports whether the walk must not enter dir at all (memoized).
@@ -523,15 +174,31 @@ func (t *Tree) excludedPath(rel string) bool {
 	return false
 }
 
-// interesting reports whether addFile looks at rel at all: a context doc, a
-// index file, a module marker or a source.
-func (t *Tree) interesting(rel string) bool {
-	dir, name := path.Dir(rel), path.Base(rel)
-	if isContext(dir) || name == t.IndexFile() {
-		return true
-	}
-	return slices.Contains(t.cfg.ModuleMarkers, name) || t.isSource(rel)
+// fileClass is what a listed file can be to discovery.
+type fileClass struct {
+	ctxDoc   bool // a file in the top-level context/ directory
+	indexDoc bool // the index file (CLAUDE.md or the configured name)
+	marker   bool // a module marker, outside context/
+	source   bool // a source file, outside context/ and not an index file
 }
+
+func (c fileClass) any() bool { return c.ctxDoc || c.indexDoc || c.marker || c.source }
+
+// classifyFile tells what rel is: a context doc, an index file, a module
+// marker or a source.
+func (t *Tree) classifyFile(rel string) fileClass {
+	dir, name := path.Dir(rel), path.Base(rel)
+	var c fileClass
+	c.ctxDoc = isContext(dir)
+	c.indexDoc = name == t.IndexFile()
+	c.marker = !c.ctxDoc && slices.Contains(t.cfg.ModuleMarkers, name)
+	c.source = !c.ctxDoc && !c.indexDoc && t.isSource(rel)
+	return c
+}
+
+// interesting reports whether addFile looks at rel at all: a context doc, an
+// index file, a module marker or a source.
+func (t *Tree) interesting(rel string) bool { return t.classifyFile(rel).any() }
 
 // errNotStated marks a path parallelLstat skipped.
 var errNotStated = errors.New("not stated")
@@ -593,12 +260,10 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 // and stat'ed; an ignored or excluded marker makes no unit, as with git.
 // checked means the caller already applied excludes and .gitignore.
 func (t *Tree) addFile(rel string, dirs map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
-	dir, name := path.Dir(rel), path.Base(rel)
-	ctxDoc := isContext(dir)
-	isDoc := name == t.IndexFile()
-	isMarker := !ctxDoc && slices.Contains(t.cfg.ModuleMarkers, name)
-	isSrc := !ctxDoc && !isDoc && t.isSource(rel)
-	if !ctxDoc && !isDoc && !isMarker && !isSrc {
+	dir := path.Dir(rel)
+	c := t.classifyFile(rel)
+	ctxDoc, isDoc, isMarker, isSrc := c.ctxDoc, c.indexDoc, c.marker, c.source
+	if !c.any() {
 		return
 	}
 	// In git mode the caller already checked excludes (git applied .gitignore);
@@ -715,70 +380,6 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 		t.addFile(rel, dirs, false, d.Info)
 		return nil
 	})
-}
-
-// maxList caps the git file listing (about 2M paths). A variable so tests
-// can lower it.
-var maxList = 256 << 20
-
-// ErrGitTimeout stops discovery when git times out listing the files.
-var ErrGitTimeout = errors.New("git timed out listing the files; the repository is too large or slow for auto-context (add big generated directories to .gitignore)")
-
-// ErrListTooLarge stops discovery when git lists more than maxList: walking
-// such a tree instead would take longer than the hook timeouts.
-var ErrListTooLarge = errors.New("git ls-files lists more than 256 MiB of paths; the repository is too large for auto-context (add big generated directories to .gitignore)")
-
-// gitFiles lists tracked and untracked, not ignored files under root (slash
-// paths relative to root) when root is inside a git work tree. ok is false
-// outside git; a warning explains a git failure where git was expected (a
-// crash included). err is ErrGitTimeout or ErrListTooLarge.
-func gitFiles(root string) (files []string, ok bool, warning string, err error) {
-	res, gerr := gitx.Run(root, maxList, "ls-files", "-co", "--exclude-standard", "-z")
-	if gerr != nil {
-		_, statErr := os.Lstat(filepath.Join(root, ".git"))
-		// Quiet only without a .git in root: with one, "not a git repository"
-		// means a broken repo (e.g. a gitfile pointing nowhere).
-		notRepo := gitx.Code(gerr) == 128 && strings.Contains(gerr.Error(), "not a git repository")
-		if statErr != nil && (notRepo || gitx.NotRun(gerr)) {
-			return nil, false, "", nil // not a git repo, or no git: walk quietly
-		}
-		var ge *gitx.Error
-		if errors.As(gerr, &ge) && ge.TimedOut {
-			// Walking a tree git could not list in time would miss the hook timeout too.
-			return nil, false, "", ErrGitTimeout
-		}
-		return nil, false, "git ls-files failed (" + gitx.Brief(gerr) + "); walked the tree instead, so .git/info/exclude and global git excludes are not applied", nil
-	}
-	if res.Truncated {
-		return nil, false, "", ErrListTooLarge
-	}
-	// Entry by entry, without a string copy of the whole listing.
-	var prev []byte
-	for out := res.Out; len(out) > 0; {
-		f, rest, _ := bytes.Cut(out, []byte{0})
-		out = rest
-		if len(f) > 0 && !bytes.Equal(f, prev) { // unmerged entries repeat, next to each other
-			files = append(files, string(f))
-		}
-		prev = f
-	}
-	if len(files) == 0 {
-		// An empty listing can mean the root itself is ignored by the
-		// enclosing repository: git then lists nothing under it.
-		_, cerr := gitx.Run(root, 0, "check-ignore", "-q", ".")
-		var ge *gitx.Error
-		switch {
-		case cerr == nil:
-			return nil, false, "the root is ignored by the enclosing git repository; walked the tree instead", nil
-		case gitx.Code(cerr) == 1: // not ignored: the repository is empty
-		case errors.As(cerr, &ge) && ge.TimedOut:
-			return nil, false, "", ErrGitTimeout
-		default:
-			// An empty list would drop every unit (and the index with it).
-			return nil, false, "git check-ignore failed (" + gitx.Brief(cerr) + ") after an empty file list; walked the tree instead", nil
-		}
-	}
-	return files, true, "", nil
 }
 
 func matchesAny(patterns []string, p string) bool {
