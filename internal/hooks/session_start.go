@@ -114,7 +114,7 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 		if hidden > 0 {
 			shown = append(shown, fmt.Sprintf("%d more (run `auto-context status`)", hidden))
 		}
-		msg := "docs of units that no longer exist: " + strings.Join(shown, ", ") + "; ask the user, then handle them as the \"Unit removed\" rule of skill auto-context:auto-context-docs says."
+		msg := "docs of units that no longer exist: " + strings.Join(shown, ", ") + "; ask the user, then handle them as the \"Unit removed\" rule of skill " + env.Agent.Skill("auto-context-docs") + " says."
 		if p.ConfigProblems() != nil {
 			msg += " Fix " + config.FileName + " first: its ignored settings may be why."
 		}
@@ -123,15 +123,16 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 	if n := p.Tree().WarningCount(); n > 0 {
 		problems = append(problems, fmt.Sprintf("%d discovery warning(s) (e.g. a skipped .gitignore or a git failure, which change what is tracked); run `auto-context status` to see them.", n))
 	}
+	idx := p.IndexFile()
 	if _, err := p.UpdateIndex(statuses); err != nil {
 		logx.Errorf(env.Root, "root index: %v", err)
 		switch {
 		case errors.Is(err, rootindex.ErrBrokenMarkers):
-			problems = append(problems, "the auto-context:units markers in the root CLAUDE.md are unbalanced, so the units index is not updated; restore or remove the marker lines (not the list).")
+			problems = append(problems, "the auto-context:units markers in the root "+idx+" are unbalanced, so the units index is not updated; restore or remove the marker lines (not the list).")
 		case errors.Is(err, fsutil.ErrOutside):
-			problems = append(problems, "the root CLAUDE.md "+docstate.OutsideText+", so the units index is not updated.")
+			problems = append(problems, "the root "+idx+" "+docstate.OutsideText+", so the units index is not updated.")
 		default:
-			problems = append(problems, "the units index in the root CLAUDE.md could not be updated; ask the user to check .auto-context/log.")
+			problems = append(problems, "the units index in the root "+idx+" could not be updated; ask the user to check .auto-context/log.")
 		}
 	}
 	if err := p.SaveCache(); err != nil {
@@ -145,11 +146,11 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 	}
 	var parts []string
 	if len(stale)+len(missing) > 0 {
-		parts = append(parts, SessionNotice(stale, missing, p.Config().MaxSessionNotice))
+		parts = append(parts, SessionNotice(stale, missing, p.Config().MaxSessionNotice, env.Agent))
 	}
 	if lang != "" {
 		// Docs may be written at any time, not only after a notice.
-		parts = append(parts, "auto-context: "+LanguageNote(lang))
+		parts = append(parts, "auto-context: "+LanguageNote(lang, idx))
 	}
 	parts = append(parts, prefixed(problems)...)
 	return sessionNotice(parts, user)
@@ -246,7 +247,7 @@ func SessionFailure() []byte {
 }
 
 // SessionNotice builds the notice text, listing at most max units (stale first).
-func SessionNotice(stale, missing []string, max int) string {
+func SessionNotice(stale, missing []string, max int, a Agent) string {
 	total := len(stale) + len(missing)
 	if max < 0 {
 		max = 0
@@ -282,5 +283,5 @@ func SessionNotice(stale, missing []string, max int) string {
 		more = " (+" + strconv.Itoa(k) + " more)"
 	}
 	return "auto-context: " + strings.Join(parts, "; ") + more +
-		". Update them when working there (skill auto-context:auto-context-docs) or run /auto-context:status."
+		". Update them when working there (skill " + a.Skill("auto-context-docs") + ") or run " + a.Command("status") + "."
 }

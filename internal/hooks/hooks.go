@@ -25,8 +25,9 @@ type Input struct {
 
 // Env carries the resolved project root and the clock.
 type Env struct {
-	Root string
-	Now  func() time.Time
+	Root  string
+	Now   func() time.Time
+	Agent Agent // the zero value means Claude
 }
 
 // load prepares the state dir and opens the project. It reports nothing

@@ -43,7 +43,7 @@ func Stop(env Env, in Input) ([]byte, error) {
 	}
 	root, id := env.Root, in.SessionID
 	if p.ConfigBroken() {
-		return configPaused(root, id)
+		return configPaused(root, id, env.Agent)
 	}
 	tree := p.Tree()
 	cur := session.FromTree(tree.Stats())
@@ -125,7 +125,8 @@ func Stop(env Env, in Input) ([]byte, error) {
 		logx.Errorf(root, "stop: saving the journal, feedback dropped: %v", err)
 		return nil, nil
 	}
-	return stopFeedback(StopReason(f))
+	f.Agent, f.IndexFile = env.Agent, p.IndexFile()
+	return stopFeedback(StopReason(f), env.Agent)
 }
 
 // maxFeedbackUnits caps the units each Stop message names: a mass change must
@@ -157,9 +158,16 @@ func cmdArgs(us []string) []string {
 	return out
 }
 
-// stopFeedback is Stop's answer: additionalContext continues the conversation
-// like decision:block but is shown as hook feedback rather than a hook error.
-func stopFeedback(text string) ([]byte, error) {
+// stopFeedback is Stop's answer. For Claude, additionalContext continues the
+// conversation like decision:block but is shown as hook feedback rather than a
+// hook error. Codex only continues the turn on decision:block.
+func stopFeedback(text string, a Agent) ([]byte, error) {
+	if a == Codex {
+		return encodeJSON(struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason"`
+		}{"block", text})
+	}
 	var out stopOutput
 	out.Hook.EventName = "Stop"
 	out.Hook.AdditionalContext = text
@@ -170,7 +178,7 @@ func stopFeedback(text string) ([]byte, error) {
 // cannot be parsed (the units would be the defaults). The journal remembers
 // the notice; without a saved journal nothing is said, since the notice
 // continues the turn and would repeat on every Stop.
-func configPaused(root, id string) ([]byte, error) {
+func configPaused(root, id string, a Agent) ([]byte, error) {
 	j, err := session.LoadJournal(root, id)
 	if err != nil {
 		logx.Errorf(root, "stop: journal unreadable, starting empty: %v", err)
@@ -186,7 +194,7 @@ func configPaused(root, id string) ([]byte, error) {
 		logx.Errorf(root, "stop: saving the journal: %v", err)
 		return nil, nil
 	}
-	return stopFeedback("auto-context: " + config.FileName + " cannot be read or parsed, so docs tracking is paused until it is fixed; run `auto-context status` for the error. Changes made meanwhile are checked once it is fixed.")
+	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `auto-context status` for the error. Changes made meanwhile are checked once it is fixed.", a)
 }
 
 // recordTurn folds the changes between the turn-start snapshot and now into
@@ -207,7 +215,7 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, j *session.Journ
 			}
 			newestCode[unit] = mt
 		case units.KindContextDoc:
-			// Only context/<unit>.md counts as a docs update: a CLAUDE.md touch
+			// Only context/<unit>.md counts as a docs update: an index file touch
 			// (a typo fix, or our own root index rewrite) must not ack the unit.
 			docs[unit] = true
 		}
@@ -315,16 +323,24 @@ type Feedback struct {
 	Failed     map[string]string // unit -> why its auto-ack failed
 	// Language is the configured docs language code, or "".
 	Language string
+	// Agent selects how skills are named; the zero value is Claude.
+	Agent Agent
+	// IndexFile is the per-unit index file name; "" means CLAUDE.md.
+	IndexFile string
 }
 
 // StopReason builds the feedback text.
 func StopReason(f Feedback) string {
+	idx := f.IndexFile
+	if idx == "" {
+		idx = config.IndexClaude
+	}
 	var parts []string
 	if len(f.Changed) > 0 {
 		shown, more := capList(f.Changed)
 		parts = append(parts, "code changed in "+strings.Join(shown, ", ")+more+
 			" but docs not updated. If the change affects purpose, public API, structure or key behavior"+
-			" — update context/<unit>.md (and <unit>/CLAUDE.md if its purpose or key files changed) per skill auto-context:auto-context-docs."+
+			" — update context/<unit>.md (and <unit>/"+idx+" if its purpose or key files changed) per skill "+f.Agent.Skill("auto-context-docs")+"."+
 			" Otherwise run `auto-context ack "+strings.Join(cmdArgs(shown), " ")+"`.")
 	}
 	failed, more := capList(slices.Sorted(maps.Keys(f.Failed)))
@@ -354,7 +370,7 @@ func StopReason(f Feedback) string {
 	for _, u := range newUnits {
 		if u == units.RootUnit {
 			// The root unit cannot be excluded.
-			parts = append(parts, "New unit _root: create context/_root.md (and the root CLAUDE.md purpose line).")
+			parts = append(parts, "New unit _root: create context/_root.md (and the root "+idx+" purpose line).")
 			continue
 		}
 		parts = append(parts, "New unit "+u+": ask the user, then create its docs or run `auto-context ack --exclude "+cmdArg(u)+"`.")
@@ -363,12 +379,12 @@ func StopReason(f Feedback) string {
 		parts = append(parts, "More new units"+moreNew+"; run `auto-context status`.")
 	}
 	if f.Language != "" && len(f.Changed)+len(f.New) > 0 {
-		parts = append(parts, LanguageNote(f.Language))
+		parts = append(parts, LanguageNote(f.Language, idx))
 	}
 	return "auto-context: " + strings.Join(parts, " ")
 }
 
-// LanguageNote tells Claude the configured docs language (a validated code).
-func LanguageNote(lang string) string {
-	return "Write unit docs (CLAUDE.md, context/) in language " + lang + " (`language` in " + config.FileName + ")."
+// LanguageNote tells the agent the configured docs language (a validated code).
+func LanguageNote(lang, indexFile string) string {
+	return "Write unit docs (" + indexFile + ", context/) in language " + lang + " (`language` in " + config.FileName + ")."
 }

@@ -83,7 +83,7 @@ func TestSessionNotice(t *testing.T) {
 			"auto-context: docs stale for src/auth, cmd/api; missing for internal/billing. Update them when working there (skill auto-context:auto-context-docs) or run /auto-context:status."},
 	}
 	for _, c := range cases {
-		if got := SessionNotice(c.stale, c.missing, c.max); got != c.want {
+		if got := SessionNotice(c.stale, c.missing, c.max, Claude); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}
 	}
@@ -363,7 +363,7 @@ func TestSessionStartNamesDocsLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := decodeSession(t, out); v.Hook.AdditionalContext != "auto-context: "+LanguageNote("pt-BR") || v.SystemMessage != "" {
+	if v := decodeSession(t, out); v.Hook.AdditionalContext != "auto-context: "+LanguageNote("pt-BR", "CLAUDE.md") || v.SystemMessage != "" {
 		t.Errorf("out = %s", out)
 	}
 }
