@@ -1,6 +1,6 @@
 ---
 unit: internal/project
-source_hash: sha256:c7b05e733da5bfc0b812f85429ae174139a7d4c9fd12c7ea994a5d7d5b626d3b
+source_hash: sha256:8e46f51a2dfadbf7144261fb35e2b03a59441adf56fb70790f9c945f1942ca7a
 updated: "2026-10-20"
 ---
 # internal/project
@@ -11,7 +11,7 @@ updated: "2026-10-20"
 
 ## Публичный API / точки входа
 - `Active(root)` — проект включён: `.auto-context/config.yaml` или `context/_root.md`, обычный файл внутри репозитория; `ActivationRefused(root)` — метка есть, но ведёт наружу, не обычный файл или недоступна.
-- `Open(root)` → `*Project`, только для чтения (кроме кэша, загружаемого лениво); геттеры `Root()`, `Config()`, `Tree()`, `ConfigProblems()` — отброшенные настройки, `ConfigErr()` — конфиг не прочитан (`ConfigBroken()`).
+- `Open(root)` → `*Project`, только для чтения (кроме кэша, загружаемого лениво); геттеры `Root()`, `IndexFile()` — имя индексного файла из конфига, `Config()`, `Tree()`, `ConfigProblems()` — отброшенные настройки, `ConfigErr()` — конфиг не прочитан (`ConfigBroken()`).
 - `Cache()` — кэш отпечатков, загружается при первом обращении; `CacheErr()` — почему он непригоден. `ConfigIgnored()` — конфиг под `.gitignore`, ошибка — сбой git, кроме «не репозиторий» и «нет git»; `StateDirErr()` — `.auto-context` ведёт наружу.
 - `Prewarm(files)` — параллельное хеширование изменённых файлов с периодическим сохранением кэша; `ShowNames(paths)` — пути, которые можно показать Claude (`units.SafeName`, не больше 20), и число остальных.
 - Статусы, ack (`Ack`, `AckTouched` — для авто-ack: оглавление обновляется при любом затронутом доке — summary мог измениться без смены хеша, — его ошибка возвращается отдельно), оглавление (`UpdateIndex` с полным списком статусов, `RefreshIndex`), `Exclude`, `SaveCache`, доки-сироты (`Orphans`), отчёт `changes` (`WriteChanges`).

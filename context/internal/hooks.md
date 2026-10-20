@@ -1,13 +1,13 @@
 ---
 unit: internal/hooks
-source_hash: sha256:4d1661a31e2af515b22d810e9a42250a18e982285cadccd4f49ca7bb84fc7104
+source_hash: sha256:e02a122edc5bd474a8a8b4c3b9bd753b8dda9de821e6ae3b53e26fed1d2dd693
 updated: "2026-10-20"
 ---
 # internal/hooks
-Обработчики хуков Claude Code: жизненный цикл хода, обратная связь о доках.
+Обработчики хуков Claude Code и Codex: жизненный цикл хода, обратная связь о доках.
 
 ## Назначение
-Превращает JSON-событие Claude Code в необязательный JSON-ответ: напоминает обновить `context/<unit>.md` после правок кода и сообщает пользователю о проблемах, которые он должен исправить сам.
+Превращает JSON-событие Claude Code или Codex в необязательный JSON-ответ: напоминает обновить `context/<unit>.md` после правок кода и сообщает пользователю о проблемах, которые он должен исправить сам.
 
 ## Публичный API / точки входа
 Сигнатура `func(Env, Input) ([]byte, error)`; `nil, nil` — ничего не выводить.
@@ -15,7 +15,11 @@ updated: "2026-10-20"
 - `PromptSubmit` — снимок из `Tree.Stats()`, сброс журнала.
 - `Stop` — diff со снимком, журнал, авто-ack, обратная связь (`Feedback`, `StopReason`).
 - `PreToolUse` — `allow` для безопасных вызовов `auto-context`.
+- `PermissionRequest` (Codex) — `behavior: allow` для тех же вызовов, только когда Codex сам собрался спросить разрешение; иначе без вывода.
 - `SessionEnd` — удаляет снимок и журнал сессии без открытия проекта.
+
+## Агент
+`Env.Agent` (`Claude`, нулевое значение; `Codex`; `ParseAgent` для `--agent`) решает, как тексты называют навыки и команды: `Agent.Skill(name)` — `auto-context:<name>` или `$<name>`, `Agent.Command(name)` — `/auto-context:<name>` или `$<name>`. Имя индексного файла берётся из `Project.IndexFile()`. Stop у Codex отвечает `{"decision":"block","reason":…}` (только так Codex продолжает ход), у Claude — `additionalContext`. `Input.ToolInput` — сырой JSON; `Input.Command()` возвращает строку-команду или "", если `tool_input` другой формы (у Codex может быть массив): разбор не падает.
 
 ## Устройство Stop
 `Stop` — ввод-вывод вокруг чистых шагов `recordTurn` → авто-ack (`Project.AckTouched`) → `pendingUnits` → `buildFeedback`.
@@ -32,11 +36,11 @@ updated: "2026-10-20"
 - Напоминание — не чаще раза на юнит за ход (`AlreadyNotified`, сброс в PromptSubmit).
 - `stop_hook_active` игнорируется намеренно; от зацикливания защищает `AlreadyNotified`.
 - Без снимка Stop сохраняет новый и молчит; в лог пишет «this turn's changes are not tracked», только если state-dir уже был (иначе проект включили в этом ходе). Нечитаемый или повреждённый снимок заменяется с записью в лог. Сбой первой записи журнала логируется; если не записался журнал с отметкой о напоминании, Stop молчит: иначе то же напоминание продолжало бы ход на каждом Stop.
-- Правки `CLAUDE.md`, включая собственные перезаписи индекса, обновлением доков не считаются.
+- Правки индексного файла, включая собственные перезаписи индекса, обновлением доков не считаются.
 - SessionStart считает ошибки лога до своих записей и ставит отметку после (по часам ОС, как и время в логе): о своих проблемах он сообщает сам, а не как об ошибках хуков. Текст лога Claude не читает: лог может прийти из репозитория.
 - Текст конфига и логов в контекст Claude не попадает — только числа и фиксированные категории; исключение — `language`, проверенный код языка (`LanguageNote`). Причина неудачного авто-ack или отказа SessionStart — фиксированная категория (`errCategory`; для `units.ErrGitTimeout`/`ErrListTooLarge` — совет про `.gitignore`), полный текст ошибки — только в логе.
 - При заданном `language` SessionStart выводит `LanguageNote` всегда, даже когда доки актуальны. Stop добавляет его к напоминаниям о коде и новых юнитах.
-- `PreToolUse`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
+- `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
 
 ## Связи
 Зависит от: `internal/config`, `internal/docstate`, `internal/fsutil`, `internal/logx`, `internal/project`, `internal/rootindex`, `internal/session`, `internal/units`.

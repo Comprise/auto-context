@@ -1,10 +1,13 @@
 ---
 name: init
-description: This skill should be used when the user runs /auto-context:init to set up auto-context in a project — find units, confirm them and the docs language with the user, and create CLAUDE.md and context/ docs for each.
+description: This skill should be used when the user runs /auto-context:init (or $init in Codex) to set up auto-context in a project — find units, confirm them and the docs language with the user, and create the index files (CLAUDE.md, or AGENTS.md in Codex) and context/ docs for each.
 disable-model-invocation: true
 ---
-# /auto-context:init
+# /auto-context:init (Codex: $init)
 
+0. In Codex, first of all — before creating any docs — set `index_file: AGENTS.md` in
+   `.auto-context/config.yaml` (create the file and its directory if missing; keep existing content).
+   The index file of a unit (`index_file`, `CLAUDE.md` by default) is what "index file" means below.
 1. Run `auto-context units`. Each line is `<unit path>\t<reason>\t<file count>` (reason: `module`,
    `files`, `include` or `root`). Show the user a table: path, reason, number of files. Mention any
    `warning:` lines (config problems, skipped `.gitignore` files, a git failure). If it fails with
@@ -26,9 +29,9 @@ disable-model-invocation: true
      include:
        - path/to/dir
      ```
-3. Invoke the `auto-context:auto-context-docs` skill, then run `auto-context status --stale` and
+3. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context-docs`), then run `auto-context status --stale` and
    document each listed unit from its code, as that skill says:
-   - `missing` → create `context/<unit>.md` and `<unit>/CLAUDE.md` (edit an existing `CLAUDE.md` in
+   - `missing` → create `context/<unit>.md` and `<unit>/<index file>` (edit an existing index file in
      place, as the docs skill says — the root one usually holds the user's own content);
    - `stale` → a context doc exists (an earlier run, or written by hand): update it, do not rewrite;
    - `stale (…)` with a note → as "Status notes" of the docs skill says;
@@ -36,5 +39,5 @@ disable-model-invocation: true
      skill (ask the user first).
    For many units, work in batches and keep each batch's context small.
 4. Run `auto-context ack <unit…>` for the documented units — this also writes the
-   `auto-context:units` index into the root `CLAUDE.md` — then `auto-context status --stale` and
+   `auto-context:units` index into the root index file — then `auto-context status --stale` and
    confirm it says `all docs up to date`.

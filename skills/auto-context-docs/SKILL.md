@@ -1,17 +1,18 @@
 ---
 name: auto-context-docs
-description: This skill should be used when creating or updating a unit's CLAUDE.md or context/<unit>.md, when an auto-context hook reports "docs stale", "missing for", "New unit", "code changed ... but docs not updated", "auto-ack of ... failed" or "docs of units that no longer exist", when the user asks to "update the docs", "document this unit", "write the context doc", "refresh CLAUDE.md" or "are the docs still right after this change", or when deciding whether a code change needs a docs update or just `auto-context ack`.
+description: This skill should be used when creating or updating a unit's index file (CLAUDE.md, or AGENTS.md when `index_file` says so) or context/<unit>.md, when an auto-context hook reports "docs stale", "missing for", "New unit", "code changed ... but docs not updated", "auto-ack of ... failed" or "docs of units that no longer exist", when the user asks to "update the docs", "document this unit", "write the context doc", "refresh CLAUDE.md" or "are the docs still right after this change", or when deciding whether a code change needs a docs update or just `auto-context ack`.
 ---
 # auto-context docs
 
-Each unit has two docs (for `_root`: `CLAUDE.md` and `context/_root.md`):
-- `<unit>/CLAUDE.md` — a short index. Claude Code loads it whenever it works in the directory, so it
-  holds orientation only.
+Each unit has two docs (for `_root`: the root index file and `context/_root.md`):
+- `<unit>/<index file>` — a short index. The index file is `CLAUDE.md` by default; `index_file:
+  AGENTS.md` in `.auto-context/config.yaml` selects `AGENTS.md` (Codex). The agent loads it whenever
+  it works in the directory, so it holds orientation only. Below, "the index file" means this file.
 - `context/<unit>.md` — the details, read on demand.
 
 ## 1. Decide
 - Purpose, public API, file structure, key behavior or invariants changed → update `context/<unit>.md`
-  (and `<unit>/CLAUDE.md` if the purpose or key files changed), then run `auto-context ack <unit>`.
+  (and `<unit>/<index file>` if the purpose or key files changed), then run `auto-context ack <unit>`.
 - Anything else (internal renames not named in the docs, refactoring without behavior change, tests,
   formatting) → only `auto-context ack <unit>`.
 - New unit → ask the user whether to document it. If not: `auto-context ack --exclude <unit>` (asks
@@ -20,7 +21,7 @@ Each unit has two docs (for `_root`: `CLAUDE.md` and `context/_root.md`):
   defaults (`vendor/**`, `node_modules/**`, `**/testdata/**`, `dist/**`, `build/**`): a written list
   replaces them.
 - Unit removed (its directory deleted, or it no longer qualifies; `auto-context status` notes its doc
-  as `belongs to no unit`) → ask the user, then delete `context/<unit>.md`. If `<unit>/CLAUDE.md` still
+  as `belongs to no unit`) → ask the user, then delete `context/<unit>.md`. If `<unit>/<index file>` still
   exists, delete it only if it holds nothing but the purpose line, key files and the `Details:` link;
   otherwise remove just the `Details:` line. A `context/*.md` without a `unit:` frontmatter key is
   probably the user's own note, not a unit doc: ask before deleting it.
@@ -54,7 +55,7 @@ existing docs (the user's, if there are none). Translate the headings below.
   pitfalls. No introductions, recaps, praise, hedging, or retelling of functions, names and signatures.
   Short sentences, lists over prose, one fact per bullet.
 
-### `<unit>/CLAUDE.md` — at most 15 lines
+### `<unit>/<index file>` — at most 15 lines
 ```markdown
 # src/auth
 JWT authentication and sessions for the HTTP API.
@@ -67,7 +68,7 @@ Details: context/src/auth.md
 ```
 - Purpose line, key files, the `Details:` link. No code blocks, no internal logic.
 - If the file exists, change only the purpose line and the key-files list (add the `Details:` link if
-  it is missing); keep everything else. In the root `CLAUDE.md` the user's own content and the
+  it is missing); keep everything else. In the root index file the user's own content and the
   generated index are outside the 15 lines and are never shortened or rewritten.
 
 ### `context/<unit>.md` — at most ~150 lines; most units need far fewer
@@ -88,7 +89,7 @@ Details: context/src/auth.md
 ## Never
 - Edit the frontmatter (`unit`, `source_hash`, `updated`): `auto-context ack` writes it; leave it out
   of a new file.
-- Edit the `<!-- auto-context:units -->` section of the root `CLAUDE.md` (its heading line may be
+- Edit the `<!-- auto-context:units -->` section of the root index file (its heading line may be
   translated; the list is generated) — except to repair unbalanced markers when a hook or `auto-context status` reports them:
   restore or remove the marker lines, not the list.
 - Use `@`-imports.

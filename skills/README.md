@@ -1,13 +1,13 @@
 # skills/
 
-Skills плагина. Claude Code находит каждый по `skills/<name>/SKILL.md`; этот README не загружается.
+Skills плагина. Claude Code и Codex находят каждый по `skills/<name>/SKILL.md`; этот README не загружается.
 
-| Skill | Вызов | Назначение |
-|---|---|---|
-| `auto-context-docs` | Claude сам | правила ведения `<unit>/CLAUDE.md` и `context/<unit>.md`: когда обновлять, когда только `ack`, формат, язык |
-| `init` | `/auto-context:init` | первичная разметка: юниты, язык доков, создание доков |
-| `sync` | `/auto-context:sync` | обновить устаревшие и недостающие доки |
-| `status` | `/auto-context:status`, Claude сам | сводка состояния доков |
+| Skill | Вызов (Claude Code) | Вызов (Codex) | Назначение |
+|---|---|---|---|
+| `auto-context-docs` | Claude сам | агент сам, `$auto-context-docs` | правила ведения `<unit>/CLAUDE.md` и `context/<unit>.md`: когда обновлять, когда только `ack`, формат, язык |
+| `init` | `/auto-context:init` | `$init` (не встроенный `/init` Codex) | первичная разметка: юниты, язык доков, создание доков |
+| `sync` | `/auto-context:sync` | `$sync` | обновить устаревшие и недостающие доки |
+| `status` | `/auto-context:status`, Claude сам | `$status` | сводка состояния доков |
 
 - `disable-model-invocation: true` у `init` и `sync`: они меняют файлы проекта и запускаются только пользователем.
 - `allowed-tools` есть только у `sync` (`Bash(auto-context status --stale)` для `!`-вставки). Другие разрешения skills не выдают: `ack --exclude` правит конфиг и должен спрашивать.

@@ -1,5 +1,5 @@
 # auto-context
-Плагин Claude Code на Go: держит CLAUDE.md юнитов и библиотеку context/ в синхроне с кодом.
+Плагин Claude Code и Codex CLI на Go: держит индексные файлы юнитов и библиотеку context/ в синхроне с кодом.
 
 - `cmd/auto-context/` — бинарник (hook, ack, status, changes, units, version)
 - `internal/` — пакеты ядра; `hooks/`, `skills/`, `bin/`, `.claude-plugin/` — упаковка плагина
@@ -55,17 +55,17 @@ gives you structural context (callers, dependents, test coverage) that file sear
 
 <!-- auto-context:units -->
 ## Юниты (подробно — context/<unit>.md)
-- `cmd/auto-context` — CLI-бинарь: запуск хуков Claude Code и команды ack/status/changes/units/version.
+- `cmd/auto-context` — CLI-бинарь: запуск хуков Claude Code и Codex и команды ack/status/changes/units/version.
 - `internal/config` — Читает, валидирует и правит необязательный `.auto-context/config.yaml`, ищет корень репозитория.
 - `internal/docstate` — Определяет, актуальны ли context-документы юнитов, и фиксирует актуальность.
 - `internal/frontmatter` — Читает и пишет YAML-блок меты в контекстных файлах.
 - `internal/fsutil` — Политика доверия к путям, чтение с лимитом, атомарная запись, `.auto-context/state`.
 - `internal/gitx` — Единый запуск git для плагина с фиксированной защитой.
 - `internal/hashing` — Считает source_hash юнита по списку файлов с кешем mtime/size.
-- `internal/hooks` — Обработчики хуков Claude Code: жизненный цикл хода, обратная связь о доках.
+- `internal/hooks` — Обработчики хуков Claude Code и Codex: жизненный цикл хода, обратная связь о доках.
 - `internal/logx` — Дописывает ошибки хуков в `.auto-context/log`, никогда не падая.
 - `internal/project` — Сервисный слой: открывает репозиторий и даёт хукам и CLI общие операции.
-- `internal/rootindex` — Генерирует и обновляет секцию оглавления юнитов в корневом CLAUDE.md.
+- `internal/rootindex` — Генерирует и обновляет секцию оглавления юнитов в корневом индексном файле (CLAUDE.md или AGENTS.md).
 - `internal/session` — Файлы сессии одного хода: снимок отслеживаемых файлов и журнал Stop.
 - `internal/textx` — Очистка текста из репозитория перед выводом в лог, терминал или контекст Claude.
 - `internal/units` — Находит юниты документации в репозитории и классифицирует пути.

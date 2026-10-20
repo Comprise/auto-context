@@ -1,17 +1,18 @@
 ---
 unit: internal/rootindex
-source_hash: sha256:a7cd7c009172ffa8bc6a9302d1d1f49298d5f130070de7fd391aca8d386f00bd
+source_hash: sha256:5483f167bb072d92cc35144aff1a7c385f2c7208bbe2656e76ed8cde79c136ee
 updated: "2026-10-20"
 ---
 # internal/rootindex
-Генерирует и обновляет секцию оглавления юнитов в корневом CLAUDE.md.
+Генерирует и обновляет секцию оглавления юнитов в корневом индексном файле (CLAUDE.md или AGENTS.md).
 
 ## Назначение
 Список юнитов с однострочными описаниями — карта проекта для агента. Пакет владеет только участком между маркерами.
 
 ## Публичный API / точки входа
-- `Entry{Unit, Summary}`, `Render(entries)`, `Update(root, entries)`, `ErrBrokenMarkers`, `MaxSize` (2 МиБ).
-- `Check(root)` — без записи: что `Update` отклонил бы (битые маркеры, ссылка наружу), для `auto-context status`.
+- `Entry{Unit, Summary}`, `Render(entries)`, `Update(root, name, entries)`, `ErrBrokenMarkers`, `MaxSize` (2 МиБ).
+- `name` — имя индексного файла (`Project.IndexFile()`).
+- `Check(root, name)` — без записи: что `Update` отклонил бы (битые маркеры, ссылка наружу), для `auto-context status`.
 
 ## Устройство и потоки данных
 Маркеры `<!-- auto-context:units -->` и `<!-- /auto-context:units -->` — только целые строки; секция — от открывающего до первого закрывающего после него. Нет маркеров — секция дописывается в конец. Строка-заголовок сразу после открывающего маркера — заголовок пользователя, сохраняется; иначе `## Units (details: context/<unit>.md)`.

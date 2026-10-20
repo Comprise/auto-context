@@ -1,13 +1,13 @@
 ---
 unit: internal/docstate
-source_hash: sha256:ae04c671bd4f3de67e8daabbf8d9fd8b1ba39f3c09d965fd1120dc4ad4e81e7e
+source_hash: sha256:d2e98935249b8241091ce50df96dcf1981bd4a001a373c51b3bcbcfd2352faef
 updated: "2026-10-20"
 ---
 # internal/docstate
 Определяет, актуальны ли context-документы юнитов, и фиксирует актуальность.
 
 ## Назначение
-Сравнивает отпечаток исходников юнита с `source_hash` из frontmatter его `context/<unit>.md`.
+Сравнивает отпечаток исходников юнита с `source_hash` из frontmatter его `context/<unit>.md`. Индексный файл юнита (`CLAUDE.md` или `AGENTS.md`) в отпечаток не входит.
 
 ## Публичный API / точки входа
 - `StatusOf(root, t, c, unit)` — статус одного юнита (все юниты обходит `Project.Statuses`).
