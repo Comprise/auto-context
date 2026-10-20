@@ -1,0 +1,20 @@
+{
+  "name": "auto-context",
+  "interface": {
+    "displayName": "auto-context"
+  },
+  "plugins": [
+    {
+      "name": "auto-context",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,15 +1,18 @@
 ---
 name: sync
-description: This skill should be used when the user runs /auto-context:sync to check auto-context docs now and bring stale or missing unit docs up to date (after git pull, branch switches or manual edits between sessions).
+description: This skill should be used when the user runs /auto-context:sync (or $auto-context:sync in Codex) to check auto-context docs now and bring stale or missing unit docs up to date (after git pull, branch switches or manual edits between sessions).
 disable-model-invocation: true
 allowed-tools: Bash(auto-context status --stale)
 ---
-# /auto-context:sync
+# /auto-context:sync (Codex: $auto-context:sync)
+
+In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
 
 Current state (`auto-context status --stale`):
 !`auto-context status --stale`
 
-1. Read the state above, including any `warning:` and `note:` lines (report them).
+1. Read the state above (if there is no `auto-context status --stale` output above, as in Codex,
+   run `auto-context status --stale` yourself), including any `warning:` and `note:` lines (report them).
    - It starts with `error:`, or shows neither a `UNIT` table nor `all docs up to date` (and is not the
      paused message below): run `auto-context status --stale` via Bash; if that fails too, report the
      error and stop.
@@ -17,9 +20,9 @@ Current state (`auto-context status --stale`):
      be read or parsed, and
      `ack` refuses. Tell the user to fix `.auto-context/config.yaml` and stop.
    - `all docs up to date` and no `belongs to no unit` note: say so and stop.
-2. Invoke the `auto-context:auto-context-docs` skill; follow it for every doc.
+2. Invoke the `auto-context:auto-context-docs` skill (Codex: `$auto-context:auto-context-docs`); follow it for every doc.
 3. `missing` units: ask the user once, listing them all, which to document (step "1. Decide"). `_root` cannot be
-   excluded: if it is missing, create `context/_root.md` (and the root `CLAUDE.md` purpose line).
+   excluded: if it is missing, create `context/_root.md` (and the root index file purpose line).
 4. `note: … belongs to no unit`: apply the "Unit removed" rule of the docs skill (it asks the user first).
    Do this before the stale units: a removed unit's code may now belong to a stale parent.
 5. Units with a note (`stale (…)`): handle them as "Status notes" of the docs skill says; the

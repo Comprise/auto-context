@@ -1,0 +1,19 @@
+{
+  "name": "auto-context",
+  "description": "Keeps per-directory CLAUDE.md/AGENTS.md indexes and a context/ knowledge library in sync with code",
+  "author": {
+    "name": "Elia Samoylov"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/Comprise/auto-context",
+  "repository": "https://github.com/Comprise/auto-context",
+  "keywords": [
+    "documentation",
+    "claude-md",
+    "context",
+    "docs-sync",
+    "hooks"
+  ],
+  "hooks": "./hooks/codex.json",
+  "version": "0.0.2"
+}

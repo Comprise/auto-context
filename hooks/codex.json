@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook session-start --agent codex", "timeout": 60 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook prompt-submit --agent codex", "timeout": 30 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook stop --agent codex", "timeout": 60 }] }],
+    "PermissionRequest": [{ "matcher": "^Bash$", "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook permission-request --agent codex", "timeout": 10 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/auto-context hook session-end --agent codex", "timeout": 3 }] }]
+  }
+}
