@@ -247,17 +247,17 @@ func SessionFailure(a Agent) []byte {
 	return data
 }
 
-// SessionNotice builds the notice text, listing at most max units (stale first).
-func SessionNotice(stale, missing []string, max int, a Agent) string {
+// SessionNotice builds the notice text, listing at most limit units (stale first).
+func SessionNotice(stale, missing []string, limit int, a Agent) string {
 	total := len(stale) + len(missing)
-	if max < 0 {
-		max = 0
+	if limit < 0 {
+		limit = 0
 	}
-	if total < max {
-		max = total
+	if total < limit {
+		limit = total
 	}
 	var s, m []string
-	left := max
+	left := limit
 	for _, u := range stale {
 		if left == 0 {
 			break
@@ -280,7 +280,7 @@ func SessionNotice(stale, missing []string, max int, a Agent) string {
 		parts = append(parts, "missing for "+strings.Join(m, ", "))
 	}
 	more := ""
-	if k := total - max; k > 0 {
+	if k := total - limit; k > 0 {
 		more = " (+" + strconv.Itoa(k) + " more)"
 	}
 	return "auto-context: " + strings.Join(parts, "; ") + more +

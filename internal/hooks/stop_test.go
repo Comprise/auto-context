@@ -41,16 +41,6 @@ func stop(t *testing.T, env Env) []byte {
 	return out
 }
 
-// stopActive is a Stop following feedback: Claude Code sets stop_hook_active.
-func stopActive(t *testing.T, env Env) []byte {
-	t.Helper()
-	out, err := Stop(env, Input{SessionID: stopSID, StopHookActive: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
 // feedback asserts out is Stop feedback via additionalContext and returns its text.
 func feedback(t *testing.T, out []byte) string {
 	t.Helper()
@@ -109,14 +99,14 @@ func TestStopCodexGolden(t *testing.T) {
 	checkGolden(t, "stop_codex.golden.json", stop(t, env))
 }
 
-// Claude Code sets stop_hook_active on every Stop after feedback; docs edits
-// made in response must still be processed and auto-acked.
+// Claude Code sends stop_hook_active on every Stop after feedback; Stop does
+// not read it, so docs edits made in response must still be auto-acked.
 func TestStopHookActiveAfterFeedbackAutoAcks(t *testing.T) {
 	env := turn(t)
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
 	if st := unitState(t, env, "svc"); st != docstate.OK {
@@ -129,7 +119,7 @@ func TestStopHookActiveFlagsNewChange(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	testutil.WriteFile(t, env.Root, "tool.go", "package main\n")
-	r := feedback(t, stopActive(t, env))
+	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "code changed in _root ") || strings.Contains(r, "svc") {
 		t.Errorf("reason = %q, want only _root", r)
 	}
@@ -167,7 +157,7 @@ func TestStopCleanThenEditGivesFeedback(t *testing.T) {
 		t.Fatalf("first stop out=%q", out)
 	}
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// later edit\n")
-	if r := feedback(t, stopActive(t, env)); !strings.Contains(r, "code changed in svc ") {
+	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason = %q", r)
 	}
 }
@@ -283,7 +273,7 @@ func TestStopSecondCallAllowsAfterNotify(t *testing.T) {
 	env := turn(t)
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("second Stop out=%q, want nil", out)
 	}
 }
@@ -293,7 +283,7 @@ func TestStopAllowsAfterDocsEdited(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
 	if st := unitState(t, env, "svc"); st != docstate.OK {
@@ -321,7 +311,7 @@ func TestStopAckFlow(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	ack(t, env, "svc")
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
 }
@@ -343,7 +333,7 @@ func TestStopNewUnitAndExclude(t *testing.T) {
 		t.Fatal(err)
 	}
 	// pkg/new files now belong to _root, which was already notified.
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Errorf("second Stop out = %s", out)
 	}
 }
@@ -413,7 +403,7 @@ func TestStopEndToEnd(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
 	if st := unitState(t, env, "svc"); st != docstate.OK {
@@ -435,7 +425,7 @@ func TestStopIgnoresOwnRootIndexRewrite(t *testing.T) {
 	if !strings.Contains(r, "code changed in _root ") {
 		t.Fatalf("Stop1 reason lacks _root: %q", r)
 	}
-	if out := stopActive(t, env); out != nil {
+	if out := stop(t, env); out != nil {
 		t.Fatalf("Stop2 out=%q, want nil (_root already notified)", out)
 	}
 	if st := unitState(t, env, "_root"); st != docstate.Stale {
@@ -462,7 +452,7 @@ func TestStopIgnoresSessionStartRootIndexRewrite(t *testing.T) {
 	env := turn(t)
 	testutil.WriteFile(t, env.Root, "tool.go", "package main\n")
 	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nA different service summary.\n")
-	if _, err := SessionStart(env, Input{SessionID: stopSID, Source: "compact"}); err != nil {
+	if _, err := SessionStart(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
 	r := feedback(t, stop(t, env))

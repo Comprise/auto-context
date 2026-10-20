@@ -1,6 +1,6 @@
 ---
 unit: internal/textx
-source_hash: sha256:fe16edee643d7280be9fb90ebe4d06ab4383110fce04e3fec298c3bf0e3d7f2a
+source_hash: sha256:2804eaf2d2dbccf13a7b999f885f7a6878112330213488bf8c90590fee564c2f
 updated: "2026-10-20"
 ---
 # internal/textx

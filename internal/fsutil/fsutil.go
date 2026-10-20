@@ -188,26 +188,26 @@ func realPath(root string) (string, error) {
 }
 
 // ReadFile reads path, which must be inside root (see Resolve) and a regular
-// file of at most max bytes. A FIFO or device is refused before it is opened.
-func ReadFile(root, path string, max int64) ([]byte, error) {
+// file of at most limit bytes. A FIFO or device is refused before it is opened.
+func ReadFile(root, path string, limit int64) ([]byte, error) {
 	full, err := Resolve(root, path)
 	if err != nil {
 		return nil, err
 	}
-	return readRegular(full, max)
+	return readRegular(full, limit)
 }
 
 // ReadDoc is ReadFile with ResolveDoc; it also returns the resolved path.
-func ReadDoc(root, path string, max int64) (string, []byte, error) {
+func ReadDoc(root, path string, limit int64) (string, []byte, error) {
 	full, err := ResolveDoc(root, path)
 	if err != nil {
 		return "", nil, err
 	}
-	data, err := readRegular(full, max)
+	data, err := readRegular(full, limit)
 	return full, data, err
 }
 
-func readRegular(path string, max int64) ([]byte, error) {
+func readRegular(path string, limit int64) ([]byte, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -215,19 +215,19 @@ func readRegular(path string, max int64) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: %s", ErrNotRegular, path)
 	}
-	if fi.Size() > max {
-		return nil, fmt.Errorf("%w: %s (%d bytes, limit %d)", ErrTooLarge, path, fi.Size(), max)
+	if fi.Size() > limit {
+		return nil, fmt.Errorf("%w: %s (%d bytes, limit %d)", ErrTooLarge, path, fi.Size(), limit)
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > max {
+	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("%w: %s", ErrTooLarge, path)
 	}
 	return data, nil
@@ -265,7 +265,7 @@ func WriteState(root, path string, data []byte) error {
 	return writeAtomic(full, data, 0o644, false)
 }
 
-func writeAtomic(path string, data []byte, perm os.FileMode, sync bool) (err error) {
+func writeAtomic(path string, data []byte, perm os.FileMode, doSync bool) (err error) {
 	dir := filepath.Dir(path)
 	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -284,7 +284,7 @@ func writeAtomic(path string, data []byte, perm os.FileMode, sync bool) (err err
 	if _, err = f.Write(data); err != nil {
 		return err
 	}
-	if sync {
+	if doSync {
 		if err = f.Sync(); err != nil {
 			return err
 		}

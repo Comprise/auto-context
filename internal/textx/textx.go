@@ -18,18 +18,18 @@ func Clean(s string) string {
 	}, s)
 }
 
-// Cap keeps at most max runes of s and appends "…" when it cuts.
-func Cap(s string, max int) string {
-	if r := []rune(s); len(r) > max {
-		return string(r[:max]) + "…"
+// Cap keeps at most limit runes of s and appends "…" when it cuts.
+func Cap(s string, limit int) string {
+	if r := []rune(s); len(r) > limit {
+		return string(r[:limit]) + "…"
 	}
 	return s
 }
 
-// Line makes s one clean line of at most max runes, with runs of whitespace
+// Line makes s one clean line of at most limit runes, with runs of whitespace
 // collapsed.
-func Line(s string, max int) string {
-	return Cap(strings.Join(strings.Fields(Clean(s)), " "), max)
+func Line(s string, limit int) string {
+	return Cap(strings.Join(strings.Fields(Clean(s)), " "), limit)
 }
 
 // Err is err's text as one clean line for a message (at most 200 runes).

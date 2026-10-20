@@ -12,26 +12,22 @@ import (
 
 // Input is the JSON payload Claude Code passes to a hook on stdin.
 type Input struct {
-	SessionID      string          `json:"session_id"`
-	Cwd            string          `json:"cwd"`
-	HookEventName  string          `json:"hook_event_name"`
-	Source         string          `json:"source"`
-	StopHookActive bool            `json:"stop_hook_active"`
-	ToolName       string          `json:"tool_name"`
-	ToolInput      json.RawMessage `json:"tool_input"`
+	SessionID string          `json:"session_id"`
+	Cwd       string          `json:"cwd"`
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // Command is the Bash command of the tool call, or "" when tool_input has no
 // string command (an array in Codex, say): that must not fail the whole parse.
 func (in Input) Command() string {
 	var v struct {
-		Command any `json:"command"`
+		Command string `json:"command"`
 	}
 	if json.Unmarshal(in.ToolInput, &v) != nil {
 		return ""
 	}
-	cmd, _ := v.Command.(string)
-	return cmd
+	return v.Command
 }
 
 // Env carries the resolved project root and the clock.

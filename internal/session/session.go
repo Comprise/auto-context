@@ -223,8 +223,8 @@ func (j *Journal) Resume() {
 }
 
 // NotifyAckFailed records units whose failed auto-ack was reported.
-func (j *Journal) NotifyAckFailed(units ...string) {
-	j.AckFailNotified = AddUnique(j.AckFailNotified, units...)
+func (j *Journal) NotifyAckFailed(us ...string) {
+	j.AckFailNotified = AddUnique(j.AckFailNotified, us...)
 }
 
 // LoadJournal returns the session journal, its lists normalized to sorted sets. A
@@ -248,9 +248,9 @@ func LoadJournal(root, sessionID string) (Journal, error) {
 
 // AddCode, AddDocs and Notify add units to the journal's sets; use them
 // rather than appending, so the lists stay sorted and unique.
-func (j *Journal) AddCode(units ...string) { j.CodeChanged = AddUnique(j.CodeChanged, units...) }
-func (j *Journal) AddDocs(units ...string) { j.DocsTouched = AddUnique(j.DocsTouched, units...) }
-func (j *Journal) Notify(units ...string)  { j.AlreadyNotified = AddUnique(j.AlreadyNotified, units...) }
+func (j *Journal) AddCode(us ...string) { j.CodeChanged = AddUnique(j.CodeChanged, us...) }
+func (j *Journal) AddDocs(us ...string) { j.DocsTouched = AddUnique(j.DocsTouched, us...) }
+func (j *Journal) Notify(us ...string)  { j.AlreadyNotified = AddUnique(j.AlreadyNotified, us...) }
 
 // Save writes the journal atomically; nil slices are stored as [].
 func (j Journal) Save(root, sessionID string) error {
