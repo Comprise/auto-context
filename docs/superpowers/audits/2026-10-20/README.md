@@ -1,12 +1,14 @@
-# Аудит 2026-10-20 (без безопасности)
+# Audit 2026-10-20 (excluding security)
 
-Четыре отчёта по направлениям: `core.md` (корректность ядра), `integration.md` (Claude Code/Codex, упаковка, релиз),
-`tests.md` (тесты), `quality.md` (качество кода и точность доков). Безопасность в аудит не входила.
+**English** · [Русский](README.ru.md)
 
-Проверки координатора:
-- `tests.md` №5 ложная: `internal/hooks/testdata/permission_request.json` читает `cmd/auto-context/main_test.go:1051`.
-- `core.md` №2 воспроизведена: `auto-context ack typo` в неактивном git-репо выходит с кодом 1 и создаёт корневой
-  `CLAUDE.md` с пустой секцией `auto-context:units`.
-- Дубль: `integration.md` №6 и `quality.md` №2 — одна находка (`hooks/README.md` не знает `codex.json`).
+Four reports by area: `core.md` (core correctness), `integration.md` (Claude Code/Codex, packaging, release),
+`tests.md` (tests), `quality.md` (code quality and docs accuracy). Security was not part of the audit.
 
-План исправлений: `docs/superpowers/plans/2026-10-20-audit-fixes.md`.
+Coordinator checks:
+- `tests.md` no. 5 is false: `internal/hooks/testdata/permission_request.json` is read by `cmd/auto-context/main_test.go:1051`.
+- `core.md` no. 2 reproduced: `auto-context ack typo` in an inactive git repo exits with code 1 and creates a root
+  `CLAUDE.md` with an empty `auto-context:units` section.
+- Duplicate: `integration.md` no. 6 and `quality.md` no. 2 are one finding (`hooks/README.md` does not know `codex.json`).
+
+Fix plan: `docs/superpowers/plans/2026-10-20-audit-fixes.md`.

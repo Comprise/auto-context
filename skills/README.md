@@ -1,16 +1,18 @@
 # skills/
 
-Skills плагина. Claude Code и Codex находят каждый по `skills/<name>/SKILL.md`; этот README не загружается.
+**English** · [Русский](README.ru.md)
 
-| Skill | Вызов (Claude Code) | Вызов (Codex) | Назначение |
+The plugin's skills. Claude Code and Codex find each one at `skills/<name>/SKILL.md`; this README is not loaded.
+
+| Skill | Invocation (Claude Code) | Invocation (Codex) | Purpose |
 |---|---|---|---|
-| `auto-context-docs` | Claude сам | агент сам, `$auto-context:auto-context-docs` | правила ведения `<unit>/CLAUDE.md` и `context/<unit>.md`: когда обновлять, когда только `ack`, формат, язык |
-| `init` | `/auto-context:init` | `$auto-context:init` (не встроенный `/init` Codex) | первичная разметка: юниты, язык доков, создание доков |
-| `sync` | `/auto-context:sync` | `$auto-context:sync` | обновить устаревшие и недостающие доки |
-| `status` | `/auto-context:status`, Claude сам | `$auto-context:status` | сводка состояния доков |
+| `auto-context-docs` | Claude itself | the agent itself, `$auto-context:auto-context-docs` | rules for maintaining `<unit>/CLAUDE.md` and `context/<unit>.md`: when to update, when only `ack`, format, language |
+| `init` | `/auto-context:init` | `$auto-context:init` (not Codex's built-in `/init`) | initial setup: units, docs language, creating the docs |
+| `sync` | `/auto-context:sync` | `$auto-context:sync` | update stale and missing docs |
+| `status` | `/auto-context:status`, Claude itself | `$auto-context:status` | summary of the docs state |
 
-- `disable-model-invocation: true` у `init` и `sync`: они меняют файлы проекта и запускаются только пользователем.
-- `allowed-tools` есть только у `sync` (`Bash(auto-context status --stale)` для `!`-вставки). Другие разрешения skills не выдают: `ack --exclude` правит конфиг и должен спрашивать.
-- Skills вызывают `auto-context` по имени: в Claude Code `bin/` плагина в PATH; в Codex его в PATH нет: команды выполняются тем путём, который дал хук (в кавычках, если он их поставил), а без него навык находит бинарник командой `ls -td …` (абзац в каждом навыке; сверяет `TestSkillsCodexLocate`). Git сами не запускают — для истории юнита есть `auto-context changes`.
-- Тексты, которые выводят хуки и CLI (`note:`, `warning:`, `stale (…)`), skills перечисляют дословно (`auto-context-docs` — «Status notes», а также `status` и `sync`): при их изменении в Go правьте и skills.
-- Вызовы `auto-context` одобряются без запроса, только если пути юнитов состоят из `A-Za-z0-9_./-`; для юнитов с пробелами или не-ASCII символами в имени Claude Code спросит разрешение.
+- `disable-model-invocation: true` on `init` and `sync`: they change project files and are run only by the user.
+- Only `sync` has `allowed-tools` (`Bash(auto-context status --stale)` for the `!` injection). Skills grant no other permissions: `ack --exclude` edits the config and must ask.
+- Skills call `auto-context` by name: in Claude Code the plugin's `bin/` is on PATH; in Codex it is not: commands run with the path the hook supplied (quoted if the hook quoted it), and without one the skill finds the binary with an `ls -td …` command (a paragraph in each skill; checked by `TestSkillsCodexLocate`). They do not run git themselves; for a unit's history there is `auto-context changes`.
+- The texts printed by hooks and the CLI (`note:`, `warning:`, `stale (…)`) are listed verbatim by the skills (`auto-context-docs` under "Status notes", and also `status` and `sync`): when you change them in Go, change the skills too.
+- `auto-context` calls are approved without a prompt only if the unit paths consist of `A-Za-z0-9_./-`; for units with spaces or non-ASCII characters in the name, Claude Code asks for permission.

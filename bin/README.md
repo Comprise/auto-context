@@ -1,10 +1,12 @@
 # bin/
 
-`auto-context` — POSIX sh-шим. Claude Code добавляет `bin/` плагина в PATH для Bash, поэтому skills вызывают `auto-context` по имени.
+**English** · [Русский](README.ru.md)
 
-- Выбирает бинарь `../libexec/auto-context-<os>-<arch>[.exe]` по `uname` (linux, darwin, windows через Git Bash/MSYS; amd64, arm64). Бинари собирает `make dist` или релиз.
-- Для `hook …` всегда выходит с 0: падение бинаря (Go fatal error выходит с 2, Claude Code считает это блокировкой) записывается через `hook-exit` в `.auto-context/log`. При падении SessionStart во включённом проекте шим выводит фиксированный JSON с `systemMessage` вместо частичного ответа бинаря.
-- «Включённый проект» шим определяет, как `config.FindRoot` (без проверки владельца): от `CLAUDE_PROJECT_DIR` (или `.`) вверх до каталога с `.git` или `.auto-context/config.yaml`, не выше `$HOME`; проект включён, если там есть `.auto-context/config.yaml` или `context/_root.md`.
-- Шим не читает stdin (его читает бинарь), поэтому включённость проверяет от `CLAUDE_PROJECT_DIR`, а без него — от рабочего каталога процесса (в Codex это cwd сессии), а не от `cwd` из JSON. Его уведомление о пропавшем или упавшем бинаре — best effort.
-- Нет бинаря для платформы: для `hook session-start` во включённом проекте — JSON с `systemMessage`, иначе для хуков тишина; для CLI — ошибка и код 1.
-- Поведение покрыто `cmd/auto-context/shim_test.go`.
+`auto-context` is a POSIX sh shim. Claude Code adds the plugin's `bin/` to PATH for Bash, so skills call `auto-context` by name.
+
+- Picks the binary `../libexec/auto-context-<os>-<arch>[.exe]` by `uname` (linux, darwin, windows via Git Bash/MSYS; amd64, arm64). The binaries are built by `make dist` or the release.
+- For `hook …` it always exits 0: a binary crash (a Go fatal error exits with 2, which Claude Code treats as a block) is recorded through `hook-exit` in `.auto-context/log`. If SessionStart crashes in an enabled project, the shim prints a fixed JSON with a `systemMessage` instead of the binary's partial output.
+- The shim determines an "enabled project" like `config.FindRoot` (without the owner check): from `CLAUDE_PROJECT_DIR` (or `.`) upward to a directory with `.git` or `.auto-context/config.yaml`, no higher than `$HOME`; the project is enabled if `.auto-context/config.yaml` or `context/_root.md` is there.
+- The shim does not read stdin (the binary does), so it checks whether the project is enabled from `CLAUDE_PROJECT_DIR`, or without it from the process's working directory (in Codex, the session's cwd), not from the `cwd` in the JSON. Its notice about a missing or crashed binary is best effort.
+- No binary for the platform: for `hook session-start` in an enabled project, a JSON with a `systemMessage`; otherwise silence for hooks; for the CLI, an error and exit code 1.
+- The behavior is covered by `cmd/auto-context/shim_test.go`.
