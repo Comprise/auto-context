@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:7c6a0fa8d49c97b0e0753d33b5e7aafc04d3a9a30b2aacd39fcf3e1a93cbb21a
+source_hash: sha256:15fd9b47cfafe7bc01391704e30f808eeb2674f2e85da9a4ea2097afab86d0b5
 updated: "2026-10-20"
 ---
 # internal/hooks
@@ -41,7 +41,7 @@ updated: "2026-10-20"
 - SessionStart считает ошибки лога до своих записей и ставит отметку после (по часам ОС, как и время в логе): о своих проблемах он сообщает сам, а не как об ошибках хуков. Текст лога Claude не читает: лог может прийти из репозитория.
 - Текст конфига и логов в контекст Claude не попадает — только числа и фиксированные категории; исключение — `language`, проверенный код языка (`LanguageNote`). Причина неудачного авто-ack или отказа SessionStart — фиксированная категория (`errCategory`; для `units.ErrGitTimeout`/`ErrListTooLarge` — совет про `.gitignore`), полный текст ошибки — только в логе.
 - При заданном `language` SessionStart выводит `LanguageNote` всегда, даже когда доки актуальны. Stop добавляет его к напоминаниям о коде и новых юнитах.
-- `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
+- `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает. На Windows автоодобрение вызовов `auto-context` не выполняется (`shadowed()` не подбирает расширения и не может сопоставить шим без расширения), поэтому там Claude Code спрашивает как обычно.
 - `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context` (чистая `codexCLI(root)`; при символах вне `A-Za-z0-9_./-` путь целиком в одинарных кавычках, `'` как `'\''`), а при пустой переменной, неабсолютном пути, невалидном UTF-8 или управляющих символах — `auto-context`. Путь склеивается через `/` (`path.Join`) на любой ОС: это текст для POSIX-shell, а не путь для файловой системы. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту форму (литеральный префикс `Codex.CLI()+" "`, в том числе в кавычках; остальные правила те же), без проверки `shadowed`.
 
 ## Связи

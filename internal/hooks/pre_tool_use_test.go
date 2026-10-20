@@ -146,6 +146,22 @@ func fakeCLI(t *testing.T, dir string) string {
 	return p
 }
 
+// Known fail-safe behaviour: on Windows shadowed() does not try PATHEXT
+// extensions, so even when PATH holds only the plugin's own bin it reports
+// shadowed and nothing is auto-approved.
+func TestShadowedFailSafeOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only behaviour")
+	}
+	plugin := t.TempDir()
+	fakeCLI(t, filepath.Join(plugin, "bin"))
+	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
+	t.Setenv("PATH", filepath.Join(plugin, "bin"))
+	if !shadowed() {
+		t.Error("shadowed() = false; the extensionless shim path cannot match on Windows")
+	}
+}
+
 // An auto-context earlier on PATH than the plugin's own is not auto-approved.
 func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 	plugin, fake := t.TempDir(), t.TempDir()
@@ -158,8 +174,10 @@ func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 	if out, _ := PreToolUse(env, preInput("Bash", "auto-context status")); out != nil {
 		t.Errorf("shadowed binary approved: %s", out)
 	}
-	// On Windows LookPath only finds PATHEXT files and the plugin's shim has
-	// no extension, so it is never resolved there: nothing to approve.
+	// On Windows shadowed() resolves <plugin>/bin/auto-context without trying
+	// PATHEXT extensions, so it cannot match the plugin's .bat and always
+	// refuses (see TestShadowedFailSafeOnWindows); the refusals above hold
+	// for that reason there, not because of the shadowing.
 	if runtime.GOOS == "windows" {
 		return
 	}
