@@ -11,6 +11,6 @@ Skills плагина. Claude Code и Codex находят каждый по `sk
 
 - `disable-model-invocation: true` у `init` и `sync`: они меняют файлы проекта и запускаются только пользователем.
 - `allowed-tools` есть только у `sync` (`Bash(auto-context status --stale)` для `!`-вставки). Другие разрешения skills не выдают: `ack --exclude` правит конфиг и должен спрашивать.
-- Skills вызывают `auto-context` по имени: `bin/` плагина в PATH. Git сами не запускают — для истории юнита есть `auto-context changes`.
+- Skills вызывают `auto-context` по имени: в Claude Code `bin/` плагина в PATH; в Codex его в PATH нет, и команды выполняются тем путём, который дал хук (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`). Git сами не запускают — для истории юнита есть `auto-context changes`.
 - Тексты, которые выводят хуки и CLI (`note:`, `warning:`, `stale (…)`), skills перечисляют дословно (`auto-context-docs` — «Status notes», а также `status` и `sync`): при их изменении в Go правьте и skills.
 - Вызовы `auto-context` одобряются без запроса, только если пути юнитов состоят из `A-Za-z0-9_./-`; для юнитов с пробелами или не-ASCII символами в имени Claude Code спросит разрешение.

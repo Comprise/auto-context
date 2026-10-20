@@ -4,6 +4,8 @@ description: This skill should be used when creating or updating a unit's index 
 ---
 # auto-context docs
 
+In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+
 Each unit has two docs (for `_root`: the root index file and `context/_root.md`):
 - `<unit>/<index file>` — a short index. The index file is `CLAUDE.md` by default; `index_file:
   AGENTS.md` in `.auto-context/config.yaml` selects `AGENTS.md` (Codex). The agent loads it whenever

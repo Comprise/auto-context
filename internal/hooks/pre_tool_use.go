@@ -25,7 +25,7 @@ type preToolUseOutput struct {
 // Anything else yields no output, leaving the normal permission flow. It never
 // writes (it only resolves PATH) and is not gated by activation.
 func PreToolUse(env Env, in Input) ([]byte, error) {
-	if !approvable(in) {
+	if !approvable(env, in) {
 		return nil, nil
 	}
 	var out preToolUseOutput
@@ -36,9 +36,22 @@ func PreToolUse(env Env, in Input) ([]byte, error) {
 }
 
 // approvable reports whether the tool call is a Bash run of the plugin's own
-// CLI that both agents' hooks may approve.
-func approvable(in Input) bool {
-	return in.ToolName == "Bash" && allowedCommand(in.Command()) && !shadowed()
+// CLI that both agents' hooks may approve. Codex runs it by absolute path (its
+// shell has no plugin bin/ on PATH); that path points at the plugin's binary
+// itself, so PATH shadowing does not matter for it.
+func approvable(env Env, in Input) bool {
+	if in.ToolName != "Bash" {
+		return false
+	}
+	cmd := in.Command()
+	if env.Agent == Codex {
+		if abs := Codex.CLI(); filepath.IsAbs(abs) {
+			if rest, ok := strings.CutPrefix(cmd, abs+" "); ok {
+				return allowedCommand("auto-context " + rest)
+			}
+		}
+	}
+	return allowedCommand(cmd) && !shadowed()
 }
 
 // allowedCommand matches the raw command exactly: no trimming, since bash does

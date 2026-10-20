@@ -6,6 +6,8 @@ allowed-tools: Bash(auto-context status --stale)
 ---
 # /auto-context:sync (Codex: $sync)
 
+In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+
 Current state (`auto-context status --stale`):
 !`auto-context status --stale`
 

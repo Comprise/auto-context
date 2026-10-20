@@ -194,7 +194,7 @@ func configPaused(root, id string, a Agent) ([]byte, error) {
 		logx.Errorf(root, "stop: saving the journal: %v", err)
 		return nil, nil
 	}
-	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `auto-context status` for the error. Changes made meanwhile are checked once it is fixed.", a)
+	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `"+a.CLI()+" status` for the error. Changes made meanwhile are checked once it is fixed.", a)
 }
 
 // recordTurn folds the changes between the turn-start snapshot and now into
@@ -331,6 +331,7 @@ type Feedback struct {
 
 // StopReason builds the feedback text.
 func StopReason(f Feedback) string {
+	cli := f.Agent.CLI()
 	idx := f.IndexFile
 	if idx == "" {
 		idx = config.IndexClaude
@@ -341,14 +342,14 @@ func StopReason(f Feedback) string {
 		parts = append(parts, "code changed in "+strings.Join(shown, ", ")+more+
 			" but docs not updated. If the change affects purpose, public API, structure or key behavior"+
 			" — update context/<unit>.md (and <unit>/"+idx+" if its purpose or key files changed) per skill "+f.Agent.Skill("auto-context-docs")+"."+
-			" Otherwise run `auto-context ack "+strings.Join(cmdArgs(shown), " ")+"`.")
+			" Otherwise run `"+cli+" ack "+strings.Join(cmdArgs(shown), " ")+"`.")
 	}
 	failed, more := capList(slices.Sorted(maps.Keys(f.Failed)))
 	for _, u := range failed {
-		parts = append(parts, "auto-ack of "+u+" failed: "+f.Failed[u]+". The docs edit was seen, but the hash could not be recorded; fix the cause, then run `auto-context ack "+cmdArg(u)+"`.")
+		parts = append(parts, "auto-ack of "+u+" failed: "+f.Failed[u]+". The docs edit was seen, but the hash could not be recorded; fix the cause, then run `"+cli+" ack "+cmdArg(u)+"`.")
 	}
 	if more != "" {
-		parts = append(parts, "More failed auto-acks"+more+"; run `auto-context status`.")
+		parts = append(parts, "More failed auto-acks"+more+"; run `"+cli+" status`.")
 	}
 	if refused, more := capList(f.Refused); len(refused) > 0 {
 		var ctxs []string
@@ -364,7 +365,7 @@ func StopReason(f Feedback) string {
 			ctx := units.ContextPath(u)
 			ctxs = append(ctxs, ctx)
 		}
-		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be read (e.g. permissions); fix it, then run `auto-context status`.")
+		parts = append(parts, strings.Join(ctxs, ", ")+more+" cannot be read (e.g. permissions); fix it, then run `"+cli+" status`.")
 	}
 	newUnits, moreNew := capList(f.New)
 	for _, u := range newUnits {
@@ -373,10 +374,10 @@ func StopReason(f Feedback) string {
 			parts = append(parts, "New unit _root: create context/_root.md (and the root "+idx+" purpose line).")
 			continue
 		}
-		parts = append(parts, "New unit "+u+": ask the user, then create its docs or run `auto-context ack --exclude "+cmdArg(u)+"`.")
+		parts = append(parts, "New unit "+u+": ask the user, then create its docs or run `"+cli+" ack --exclude "+cmdArg(u)+"`.")
 	}
 	if moreNew != "" {
-		parts = append(parts, "More new units"+moreNew+"; run `auto-context status`.")
+		parts = append(parts, "More new units"+moreNew+"; run `"+cli+" status`.")
 	}
 	if f.Language != "" && len(f.Changed)+len(f.New) > 0 {
 		parts = append(parts, LanguageNote(f.Language, idx))

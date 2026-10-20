@@ -4,6 +4,8 @@ description: This skill should be used when the user runs /auto-context:status o
 ---
 # /auto-context:status (Codex: $status)
 
+In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+
 Run `auto-context status` and summarize briefly (if it starts with `error:`, report it and stop):
 how many units are `ok`; the `stale` and `missing` ones with their doc paths. Do not edit docs or code. Also report:
 - `docs tracking is paused until … (see the warning above); no table is printed` —

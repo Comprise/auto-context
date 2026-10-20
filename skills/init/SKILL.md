@@ -5,6 +5,8 @@ disable-model-invocation: true
 ---
 # /auto-context:init (Codex: $init)
 
+In Codex, `auto-context` is not on PATH: run the commands below by the path the hook gave (`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context`).
+
 0. In Codex, first of all — before creating any docs — set `index_file: AGENTS.md` in
    `.auto-context/config.yaml` (create the file and its directory if missing; keep existing content).
    The index file of a unit (`index_file`, `CLAUDE.md` by default) is what "index file" means below.

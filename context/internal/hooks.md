@@ -1,6 +1,6 @@
 ---
 unit: internal/hooks
-source_hash: sha256:e02a122edc5bd474a8a8b4c3b9bd753b8dda9de821e6ae3b53e26fed1d2dd693
+source_hash: sha256:7db09f624d44c8940446100cb08bf7b75831a57eaad8a7d0e889c3da84e0463d
 updated: "2026-10-20"
 ---
 # internal/hooks
@@ -41,6 +41,7 @@ updated: "2026-10-20"
 - Текст конфига и логов в контекст Claude не попадает — только числа и фиксированные категории; исключение — `language`, проверенный код языка (`LanguageNote`). Причина неудачного авто-ack или отказа SessionStart — фиксированная категория (`errCategory`; для `units.ErrGitTimeout`/`ErrListTooLarge` — совет про `.gitignore`), полный текст ошибки — только в логе.
 - При заданном `language` SessionStart выводит `LanguageNote` всегда, даже когда доки актуальны. Stop добавляет его к напоминаниям о коде и новых юнитах.
 - `PreToolUse` и `PermissionRequest` делят `approvable`: точное совпадение `^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`, без trim, без `..` и без `--exclude`; не одобряет, если `auto-context` в PATH — не бинарь плагина (`CLAUDE_PLUGIN_ROOT`) или найден через относительный элемент PATH. Без `CLAUDE_PLUGIN_ROOT` или вне PATH эта проверка не работает.
+- `Agent.CLI()` — как тексты называют бинарь: у Claude `auto-context`; у Codex (в его shell `bin/` плагина не в PATH) абсолютный `$CLAUDE_PLUGIN_ROOT/bin/auto-context`, а при пустой переменной или пути вне `A-Za-z0-9_./-` — `auto-context`. Все предлагаемые команды (`StopReason`, `configPaused`, SessionStart) собираются через неё. `approvable` для Codex принимает и эту абсолютную форму (ровно свой путь, остальные правила те же), без проверки `shadowed`.
 
 ## Связи
 Зависит от: `internal/config`, `internal/docstate`, `internal/fsutil`, `internal/logx`, `internal/project`, `internal/rootindex`, `internal/session`, `internal/units`.

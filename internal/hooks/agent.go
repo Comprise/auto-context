@@ -1,5 +1,11 @@
 package hooks
 
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+)
+
 // Agent is the coding agent that runs the hooks. Its zero value means Claude.
 type Agent string
 
@@ -37,4 +43,20 @@ func (a Agent) Command(name string) string {
 		return codexSkillPrefix + name
 	}
 	return "/auto-context:" + name
+}
+
+// pluginRootSafe limits the plugin root put into suggested commands: the text
+// is pasted into a shell, so nothing but plain path characters may appear.
+var pluginRootSafe = regexp.MustCompile(`^/[A-Za-z0-9_./-]*$`)
+
+// CLI is how texts for this agent name the plugin binary. Codex's shell tool
+// has no plugin bin/ on PATH, so it gets the absolute path under
+// CLAUDE_PLUGIN_ROOT; an unset or unsafe root falls back to the bare name.
+func (a Agent) CLI() string {
+	if a == Codex {
+		if root := os.Getenv("CLAUDE_PLUGIN_ROOT"); pluginRootSafe.MatchString(root) {
+			return filepath.Join(root, "bin", "auto-context")
+		}
+	}
+	return "auto-context"
 }

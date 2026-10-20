@@ -73,17 +73,21 @@ codex plugin marketplace add Comprise/auto-context --ref release
 Затем в Codex:
 
 1. `/plugins` → установите `auto-context`.
-2. `/hooks` → доверьте хукам плагина. После обновления плагина Codex может спросить доверие снова.
+2. `/hooks` → доверьте хукам плагина. После обновления плагина Codex может спросить доверие снова. Хуки работают только в сессии, начатой после доверия.
 3. Начните новую сессию и выполните `$init` (не встроенный `/init` Codex). Навык сам запишет
    `index_file: AGENTS.md` в `.auto-context/config.yaml` до создания документов.
 
 Остальные навыки: `$sync`, `$status`. Напоминания в конце хода приходят как обычное продолжение
 хода.
 
-Без запроса ли идёт `auto-context ack`, зависит от режима одобрений Codex: хук `PermissionRequest`
-срабатывает, только когда Codex сам собрался спросить разрешение, и тогда одобряет вызовы CLI
-плагина (`ack`, `status`, `units`, `changes`, `version`; `ack --exclude` всегда спрашивает). Если
-режим и так ничего не спрашивает, хук не нужен.
+В Codex `auto-context` не в PATH: хуки предлагают команды с абсолютным путём
+(`~/.codex/plugins/cache/<marketplace>/auto-context/<version>/bin/auto-context ack …`), и навыки
+выполняют их так же. Бинарник плагина по абсолютному пути обычно запускается без запроса; если
+Codex всё же собрался спросить, хук `PermissionRequest` одобряет вызовы CLI плагина (`ack`,
+`status`, `units`, `changes`, `version`; `ack --exclude` всегда спрашивает).
+
+Маркетплейс для Codex описан в `.agents/plugins/marketplace.json` ветки `release`
+(источник `local`, `./`); идентификатор плагина — `auto-context@auto-context`.
 
 ## Быстрый старт
 

@@ -13,7 +13,7 @@ type permissionRequestOutput struct {
 // plugin CLI calls when Codex is about to ask for permission. Anything else
 // yields no output, leaving the normal approval prompt.
 func PermissionRequest(env Env, in Input) ([]byte, error) {
-	if !approvable(in) {
+	if !approvable(env, in) {
 		return nil, nil
 	}
 	var out permissionRequestOutput

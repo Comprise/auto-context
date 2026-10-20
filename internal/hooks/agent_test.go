@@ -112,3 +112,28 @@ func TestNonStringIndexFileNoClaudeMD(t *testing.T) {
 		t.Error("CLAUDE.md was created")
 	}
 }
+
+func TestCodexCLIPath(t *testing.T) {
+	const root = "/home/u/.codex/plugins/cache/m/auto-context/1.0.0"
+	f := Feedback{Agent: Codex, IndexFile: "AGENTS.md", Changed: []string{"src/auth"}}
+
+	t.Setenv("CLAUDE_PLUGIN_ROOT", root)
+	if got := StopReason(f); !strings.Contains(got, "`"+root+"/bin/auto-context ack src/auth`") {
+		t.Errorf("absolute path missing: %s", got)
+	}
+	if got := Claude.CLI(); got != "auto-context" {
+		t.Errorf("Claude.CLI = %q", got)
+	}
+	f.Agent = Claude
+	if got := StopReason(f); !strings.Contains(got, "`auto-context ack src/auth`") {
+		t.Errorf("claude text changed: %s", got)
+	}
+
+	f.Agent = Codex
+	for _, bad := range []string{"", "/home/u/my plugin", "relative/path", "/x;rm"} {
+		t.Setenv("CLAUDE_PLUGIN_ROOT", bad)
+		if got := StopReason(f); !strings.Contains(got, "`auto-context ack src/auth`") {
+			t.Errorf("root %q: want the bare name: %s", bad, got)
+		}
+	}
+}

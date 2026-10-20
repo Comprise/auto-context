@@ -46,21 +46,22 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 	// Counted before this hook logs anything, and the mark written after:
 	// what this hook logs it reports below as problems, not again as errors.
 	defer markSessionStart(env)
+	cli := env.Agent.CLI()
 	p, err := load(env)
 	if err != nil {
 		return failNotice(env, err)
 	}
 	// After load (which creates .auto-context/) and before anything is logged.
-	logProblems := logStatus(env.Root)
+	logProblems := logStatus(env.Root, cli)
 	var problems []string
 	user := "" // a config problem the user must fix, also shown to them
 	switch {
 	case p.ConfigErr() != nil:
 		logx.Errorf(env.Root, "config: %v", p.ConfigErr())
-		user = config.FileName + " could not be read or parsed, so docs tracking is paused; run `auto-context status` for the error and fix the file."
+		user = config.FileName + " could not be read or parsed, so docs tracking is paused; run `" + cli + " status` for the error and fix the file."
 	case p.ConfigProblems() != nil:
 		logx.Errorf(env.Root, "config: %v", p.ConfigProblems())
-		user = fmt.Sprintf("%s has %d invalid setting(s) that were ignored (the other settings apply); run `auto-context status` to see them and fix the file.", config.FileName, len(p.ConfigProblems()))
+		user = fmt.Sprintf("%s has %d invalid setting(s) that were ignored (the other settings apply); run `"+cli+" status` to see them and fix the file.", config.FileName, len(p.ConfigProblems()))
 	}
 	if p.ConfigBroken() {
 		// The units come from defaults: no statuses, index or cache update, which
@@ -75,7 +76,7 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 	}
 	if err := p.CacheErr(); err != nil {
 		logx.Errorf(env.Root, "hash cache: %v", err)
-		problems = append(problems, "the hash cache was unusable and is rebuilt (this session hashes everything once); see `auto-context status`.")
+		problems = append(problems, "the hash cache was unusable and is rebuilt (this session hashes everything once); see `"+cli+" status`.")
 	}
 	warnings := p.Warnings()
 	for _, w := range warnings {
@@ -107,12 +108,12 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 		}
 	}
 	if len(unusable) > 0 {
-		problems = append(problems, "context docs that updating alone will not fix: "+strings.Join(unusable, ", ")+"; run `auto-context status` for details.")
+		problems = append(problems, "context docs that updating alone will not fix: "+strings.Join(unusable, ", ")+"; run `"+cli+" status` for details.")
 	}
 	if o := p.Orphans(); len(o) > 0 {
 		shown, hidden := project.ShowNames(o)
 		if hidden > 0 {
-			shown = append(shown, fmt.Sprintf("%d more (run `auto-context status`)", hidden))
+			shown = append(shown, fmt.Sprintf("%d more (run `"+cli+" status`)", hidden))
 		}
 		msg := "docs of units that no longer exist: " + strings.Join(shown, ", ") + "; ask the user, then handle them as the \"Unit removed\" rule of skill " + env.Agent.Skill("auto-context-docs") + " says."
 		if p.ConfigProblems() != nil {
@@ -121,7 +122,7 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 		problems = append(problems, msg)
 	}
 	if n := p.Tree().WarningCount(); n > 0 {
-		problems = append(problems, fmt.Sprintf("%d discovery warning(s) (e.g. a skipped .gitignore or a git failure, which change what is tracked); run `auto-context status` to see them.", n))
+		problems = append(problems, fmt.Sprintf("%d discovery warning(s) (e.g. a skipped .gitignore or a git failure, which change what is tracked); run `"+cli+" status` to see them.", n))
 	}
 	idx := p.IndexFile()
 	if _, err := p.UpdateIndex(statuses); err != nil {
@@ -167,17 +168,17 @@ func prefixed(problems []string) []string {
 // logStatus reports what the log says about earlier hooks: errors since the
 // last SessionStart, and a log that cannot be read or written (its errors
 // would be lost). The log's text is never quoted: it may come from the repo.
-func logStatus(root string) []string {
+func logStatus(root, cli string) []string {
 	var out []string
 	n, err := errorsSinceLastSession(root)
 	if err != nil {
-		out = append(out, ".auto-context/log cannot be read, so hook errors go unreported; ask the user to fix or delete it (`auto-context status` shows the error).")
+		out = append(out, ".auto-context/log cannot be read, so hook errors go unreported; ask the user to fix or delete it (`"+cli+" status` shows the error).")
 	}
 	if werr := logx.Writable(root); werr != nil {
 		out = append(out, ".auto-context/log cannot be written, so hook errors are lost; ask the user to fix its permissions.")
 	}
 	if n > 0 {
-		out = append(out, fmt.Sprintf("%d hook error(s) since the last session; run `auto-context status` and ask the user to check .auto-context/log (do not read it yourself: it may come from the repository).", n))
+		out = append(out, fmt.Sprintf("%d hook error(s) since the last session; run `"+cli+" status` and ask the user to check .auto-context/log (do not read it yourself: it may come from the repository).", n))
 	}
 	return out
 }
@@ -231,7 +232,7 @@ func markSessionStart(env Env) {
 func failNotice(env Env, err error) ([]byte, error) {
 	logx.Errorf(env.Root, "session start: %v", err)
 	var out sessionOutput
-	out.SystemMessage = "auto-context: docs tracking is off for this session (" + errCategory(err) + "; run `auto-context status`)."
+	out.SystemMessage = "auto-context: docs tracking is off for this session (" + errCategory(err) + "; run `" + env.Agent.CLI() + " status`)."
 	out.Hook.EventName = "SessionStart"
 	return encodeJSON(out)
 }

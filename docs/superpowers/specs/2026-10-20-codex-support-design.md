@@ -164,3 +164,36 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 - `make test` на Linux/macOS/Windows в CI.
 - Ручной прогон в Codex 0.163: установка из маркетплейса, доверие хукам, `$init`, ход с правкой
   кода → напоминание `Stop`, `auto-context ack` без запроса, `SessionEnd` чистит файлы сессии.
+
+## Поправки по шагу 0 (2026-10-20)
+
+Живая проверка в Codex CLI 0.163:
+
+- Хуки из `.codex-plugin/plugin.json` → `hooks: "./hooks/codex.json"` загружаются; `hooks/hooks.json`
+  Codex не читает. Доверие (`/hooks`) хранится в `~/.codex/config.toml`
+  (`[hooks.state."<plugin>@<marketplace>:hooks/codex.json:<event>:0:0"] trusted_hash`); хуки
+  работают только в сессии, начатой после доверия.
+- `Stop` с `{"decision":"block","reason":…}` продолжает ход; при продолжении приходит
+  `stop_hook_active: true`.
+- stdin совпадает с документацией: общие `session_id`, `transcript_path`, `cwd`, `hook_event_name`,
+  `model`, `permission_mode`; `turn_id` у UserPromptSubmit/Stop; `source: "startup"` у SessionStart.
+- Окружение хука: `PLUGIN_ROOT`, `PLUGIN_DATA`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`; рабочий
+  каталог — cwd сессии.
+- Shell-инструмент Codex: `bin/` плагина не в PATH, `PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` там пусты.
+  Бинарник плагина по абсолютному пути в режиме по умолчанию запускается без запроса; `PermissionRequest`
+  при этом не приходит.
+- Вложенный `<unit>/AGENTS.md` Codex подгружает при работе с файлами юнита.
+- Навык виден как `probe (ac-probe)`, вызывается `$probe`; Claude-only поля frontmatter не мешают.
+
+Следствия:
+
+- Для Codex хуки предлагают команды с абсолютным путём `$CLAUDE_PLUGIN_ROOT/bin/auto-context`
+  (`Agent.CLI()`); при пустой переменной или небезопасном пути остаётся `auto-context`.
+- `allowedCommand`/`approvable` для Codex принимают и эту абсолютную форму (только путь из
+  `CLAUDE_PLUGIN_ROOT`, прочие правила прежние); `shadowed()` для неё не нужен.
+- `PermissionRequest` обычно не нужен; оставлен на режимы, где Codex спрашивает. Фикстура — по документации.
+- Вложенный `AGENTS.md` работает как рассчитано; вызов `$name` подтверждён.
+- Маркетплейс: Codex принимает `.claude-plugin/marketplace.json`, но молча игнорирует запись плагина
+  с `"source": "github"`. Поэтому в ветке `release` рядом лежит `.agents/plugins/marketplace.json`
+  с источником `local`, `./`. Установка: `codex plugin marketplace add Comprise/auto-context --ref release`,
+  идентификатор `auto-context@auto-context`. Проверяется.

@@ -1044,6 +1044,8 @@ func TestHookAgentFlagBad(t *testing.T) {
 	}
 }
 
+// The fixture follows the Codex documentation: PermissionRequest was not
+// observed live (Codex runs the plugin binary by absolute path without asking).
 func TestHookPermissionRequest(t *testing.T) {
 	dir := t.TempDir()
 	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "hooks", "testdata", "permission_request.json"))
@@ -1166,5 +1168,27 @@ func TestCodexHooksManifest(t *testing.T) {
 	}
 	if _, has := plugin["version"]; has {
 		t.Error("plugin.json on main must not carry a version")
+	}
+}
+
+func TestCodexMarketplace(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".agents", "plugins", "marketplace.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source struct {
+				Source string `json:"source"`
+				Path   string `json:"path"`
+			} `json:"source"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Plugins) != 1 || m.Plugins[0].Name != "auto-context" || m.Plugins[0].Source.Source != "local" || m.Plugins[0].Source.Path != "./" {
+		t.Errorf("plugins = %+v", m.Plugins)
 	}
 }

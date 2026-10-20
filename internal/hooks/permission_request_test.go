@@ -47,3 +47,31 @@ func TestPermissionRequestSilentWhenShadowed(t *testing.T) {
 		t.Errorf("shadowed binary approved: out=%q err=%v", out, err)
 	}
 }
+
+func TestPermissionRequestAbsolutePath(t *testing.T) {
+	const root = "/home/u/.codex/plugins/cache/m/auto-context/1.0.0"
+	t.Setenv("CLAUDE_PLUGIN_ROOT", root)
+	abs := root + "/bin/auto-context"
+	allow := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+
+	codex := testEnv(t.TempDir())
+	codex.Agent = Codex
+	if out, err := PermissionRequest(codex, preInput("Bash", abs+" ack src/auth")); err != nil || string(out) != allow {
+		t.Errorf("own absolute path: got %s, %v", out, err)
+	}
+	for _, cmd := range []string{
+		"/tmp/evil/bin/auto-context ack src/auth",
+		abs + " ack ../x",
+		abs + " ack --exclude x",
+		abs + " ack x; rm -rf /",
+		abs + "/../auto-context status",
+	} {
+		if out, err := PermissionRequest(codex, preInput("Bash", cmd)); err != nil || out != nil {
+			t.Errorf("%q: out=%q err=%v, want nothing", cmd, out, err)
+		}
+	}
+
+	if out, err := PermissionRequest(testEnv(t.TempDir()), preInput("Bash", abs+" ack src/auth")); err != nil || out != nil {
+		t.Errorf("claude approved the absolute form: out=%q err=%v", out, err)
+	}
+}
