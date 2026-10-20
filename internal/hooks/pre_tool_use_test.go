@@ -130,14 +130,9 @@ func TestPreToolUseRejectsEverythingElse(t *testing.T) {
 	}
 }
 
-// fakeCLI writes an executable stub auto-context into dir (auto-context.bat
-// on Windows, where LookPath only finds PATHEXT files) and returns its path.
-func fakeCLI(t *testing.T, dir string) string {
+// writeStub writes an executable file name into dir and returns its path.
+func writeStub(t *testing.T, dir, name, body string) string {
 	t.Helper()
-	name, body := "auto-context", "#!/bin/sh\n"
-	if runtime.GOOS == "windows" {
-		name, body = "auto-context.bat", "@echo off\r\n"
-	}
 	testutil.WriteFile(t, dir, name, body)
 	p := filepath.Join(dir, name)
 	if err := os.Chmod(p, 0o755); err != nil {
@@ -146,26 +141,40 @@ func fakeCLI(t *testing.T, dir string) string {
 	return p
 }
 
-// Known fail-safe behaviour: on Windows shadowed() does not try PATHEXT
-// extensions, so even when PATH holds only the plugin's own bin it reports
-// shadowed and nothing is auto-approved.
-func TestShadowedFailSafeOnWindows(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-only behaviour")
+// pluginShim writes the plugin's own bin/auto-context, as shipped: an
+// extensionless sh shim on every OS. On Windows exec.LookPath does not find
+// an extensionless file, so shadowed() sees nothing on PATH from the plugin.
+func pluginShim(t *testing.T, pluginRoot string) string {
+	t.Helper()
+	return writeStub(t, filepath.Join(pluginRoot, "bin"), "auto-context", "#!/bin/sh\n")
+}
+
+// fakeCLI writes a foreign auto-context into dir that LookPath finds on this
+// OS: an executable auto-context, or auto-context.bat on Windows (PATHEXT).
+func fakeCLI(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return writeStub(t, dir, "auto-context.bat", "@echo off\r\n")
 	}
+	return writeStub(t, dir, "auto-context", "#!/bin/sh\n")
+}
+
+// With only the plugin's own bin on PATH nothing shadows it (on Windows
+// LookPath ignores the extensionless shim, so there is nothing to compare).
+func TestShadowedOnWindowsPluginShimOnly(t *testing.T) {
 	plugin := t.TempDir()
-	fakeCLI(t, filepath.Join(plugin, "bin"))
+	pluginShim(t, plugin)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", filepath.Join(plugin, "bin"))
-	if !shadowed() {
-		t.Error("shadowed() = false; the extensionless shim path cannot match on Windows")
+	if shadowed() {
+		t.Error("shadowed() = true with only the plugin shim on PATH")
 	}
 }
 
 // An auto-context earlier on PATH than the plugin's own is not auto-approved.
 func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 	plugin, fake := t.TempDir(), t.TempDir()
-	fakeCLI(t, filepath.Join(plugin, "bin"))
+	pluginShim(t, plugin)
 	fakeCLI(t, fake)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	env := testEnv(t.TempDir())
@@ -174,10 +183,9 @@ func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 	if out, _ := PreToolUse(env, preInput("Bash", "auto-context status")); out != nil {
 		t.Errorf("shadowed binary approved: %s", out)
 	}
-	// On Windows shadowed() resolves <plugin>/bin/auto-context without trying
-	// PATHEXT extensions, so it cannot match the plugin's .bat and always
-	// refuses (see TestShadowedFailSafeOnWindows); the refusals above hold
-	// for that reason there, not because of the shadowing.
+	// On Windows LookPath ignores the extensionless plugin shim and would
+	// still find the fake .bat, so "plugin first" cannot be told apart there;
+	// TestShadowedOnWindowsPluginShimOnly covers approval on Windows.
 	if runtime.GOOS == "windows" {
 		return
 	}
@@ -190,7 +198,7 @@ func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 // An auto-context found through a relative PATH entry (".") is not approved.
 func TestPreToolUseRefusesRelativePath(t *testing.T) {
 	plugin, cwd := t.TempDir(), t.TempDir()
-	fakeCLI(t, filepath.Join(plugin, "bin"))
+	pluginShim(t, plugin)
 	fakeCLI(t, cwd)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", "."+string(os.PathListSeparator)+filepath.Join(plugin, "bin"))
@@ -200,7 +208,8 @@ func TestPreToolUseRefusesRelativePath(t *testing.T) {
 	}
 }
 
-// When the plugin's own shim cannot be resolved, nothing is approved.
+// When the plugin's own shim cannot be resolved (while another auto-context
+// is on PATH), nothing is approved.
 func TestPreToolUseRefusesWhenPluginShimMissing(t *testing.T) {
 	fake := t.TempDir()
 	fakeCLI(t, fake)

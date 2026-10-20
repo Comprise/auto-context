@@ -33,7 +33,7 @@ func TestPermissionRequestSilent(t *testing.T) {
 
 func TestPermissionRequestSilentWhenShadowed(t *testing.T) {
 	plugin, fake := t.TempDir(), t.TempDir()
-	fakeCLI(t, filepath.Join(plugin, "bin"))
+	pluginShim(t, plugin)
 	fakeCLI(t, fake)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", fake+string(os.PathListSeparator)+filepath.Join(plugin, "bin"))
