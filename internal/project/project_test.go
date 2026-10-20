@@ -235,6 +235,32 @@ func TestWriteChangesSinceAckDate(t *testing.T) {
 	}
 }
 
+// Commit subjects reach the terminal and the agent without escape sequences;
+// the rest of the line and the --stat lines stay as git wrote them.
+func TestWriteChangesStripsControls(t *testing.T) {
+	root := t.TempDir()
+	testutil.Git(t, root, "init", "-q")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-qm", "evil \x1b]0;pwned\x07\x1b[2Jsubject")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := p.WriteChanges(&b, "svc"); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.ContainsAny(out, "\x1b\x07") {
+		t.Errorf("control characters in output: %q", out)
+	}
+	if !strings.Contains(out, "evil ]0;pwned[2Jsubject\n") || !strings.Contains(out, " svc/a.go | 1 +\n") {
+		t.Errorf("out:\n%q", out)
+	}
+}
+
 func TestShowNames(t *testing.T) {
 	var many []string
 	for i := range 25 {

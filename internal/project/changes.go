@@ -95,10 +95,9 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	// filter git would use comes from a trusted scope (see trustedFilters).
 	// Submodules are not entered: their configs are not checked.
 	ok, reason := trustedFilters(root)
-	switch {
-	case !ok:
+	if !ok {
 		fmt.Fprintf(w, "(%s, so uncommitted changes are not listed; read the code against %s)\n", reason, ctx)
-	default:
+	} else {
 		if hasCommits {
 			sections = append(sections, section{"## uncommitted changes", []string{"diff", "--relative", "--no-ext-diff", "--no-textconv", "HEAD", "--stat", "--ignore-submodules=all"}})
 		}
@@ -114,7 +113,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		case len(res.Out) == 0:
 			fmt.Fprintln(w, "(none)")
 		}
-		w.Write(res.Out)
+		w.Write(textx.StripControls(res.Out)) // commit subjects may carry escape sequences
 		if res.Truncated {
 			fmt.Fprintf(w, "(output cut at %d KiB)\n", maxChangesOutput>>10)
 		}

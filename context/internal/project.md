@@ -1,6 +1,6 @@
 ---
 unit: internal/project
-source_hash: sha256:f839e56e4c3e59ca86e62b1016a885f9679b40376174ab4febde1970792df0a1
+source_hash: sha256:d973db53f1c8ca684a5545f3d46fa8ddf2c78002116ba8f6467fbd567a7ed62e
 updated: "2026-10-20"
 ---
 # internal/project
@@ -22,7 +22,7 @@ updated: "2026-10-20"
 - `SaveCache` ничего не пишет в неактивном проекте, при `.auto-context`, ведущем наружу (ошибка `StateDirErr`), и если кэш не загружался (PromptSubmit и большинство Stop).
 - `Exclude` принимает только существующий каталог, не `_root`; ошибка разрешения пути сообщается как есть.
 - `Open` ничего не пишет; state-dir готовит `hooks.load`.
-- `WriteChanges`: пути относительно корня (`:(literal)<unit>`, `.` для `_root`, `--relative` у `log`/`diff`); без коммитов — только `git status` (новые и изменённые файлы); сбой `rev-parse HEAD`, кроме «HEAD нет», — заметка `(git failed: …)`; первая ошибка записи в `w` возвращается. Сравнение с рабочим деревом — только если все `filter.*` из глобального конфига или командной строки (`trustedFilters`, `--includes`, при ошибке — отказ), без захода в сабмодули.
+- `WriteChanges`: пути относительно корня (`:(literal)<unit>`, `.` для `_root`, `--relative` у `log`/`diff`); без коммитов — только `git status` (новые и изменённые файлы); сбой `rev-parse HEAD`, кроме «HEAD нет», — заметка `(git failed: …)`; первая ошибка записи в `w` возвращается. Вывод git проходит через `textx.StripControls`: в темах коммитов могут быть escape-последовательности. Сравнение с рабочим деревом — только если все `filter.*` из глобального конфига или командной строки (`trustedFilters`, `--includes`, при ошибке — отказ), без захода в сабмодули.
 
 ## Связи
 Зависит от: `internal/config`, `internal/docstate`, `internal/frontmatter`, `internal/fsutil`, `internal/gitx`, `internal/hashing`, `internal/rootindex`, `internal/textx`, `internal/units`.
