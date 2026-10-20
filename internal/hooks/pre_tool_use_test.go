@@ -12,7 +12,7 @@ func preInput(tool, cmd string) Input {
 	var in Input
 	in.SessionID = "s"
 	in.ToolName = tool
-	in.ToolInput.Command = cmd
+	in.ToolInput, _ = json.Marshal(map[string]string{"command": cmd})
 	return in
 }
 

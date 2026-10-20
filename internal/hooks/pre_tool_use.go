@@ -25,7 +25,7 @@ type preToolUseOutput struct {
 // Anything else yields no output, leaving the normal permission flow. It never
 // writes (it only resolves PATH) and is not gated by activation.
 func PreToolUse(env Env, in Input) ([]byte, error) {
-	if in.ToolName != "Bash" || !allowedCommand(in.ToolInput.Command) || shadowed() {
+	if !approvable(in) {
 		return nil, nil
 	}
 	var out preToolUseOutput
@@ -33,6 +33,12 @@ func PreToolUse(env Env, in Input) ([]byte, error) {
 	out.Hook.Decision = "allow"
 	out.Hook.Reason = "auto-context CLI"
 	return encodeJSON(out)
+}
+
+// approvable reports whether the tool call is a Bash run of the plugin's own
+// CLI that both agents' hooks may approve.
+func approvable(in Input) bool {
+	return in.ToolName == "Bash" && allowedCommand(in.Command()) && !shadowed()
 }
 
 // allowedCommand matches the raw command exactly: no trimming, since bash does

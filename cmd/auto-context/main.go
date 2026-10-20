@@ -29,7 +29,8 @@ var version = "dev"
 const usage = `usage: auto-context <command>
 
 commands:
-  hook <session-start|prompt-submit|stop|pre-tool-use|session-end>
+  hook <session-start|prompt-submit|stop|pre-tool-use|session-end> [--agent codex]
+  hook permission-request --agent codex
   ack <unit>...
   ack --exclude <unit>
   status [--stale] [--exit-code]
@@ -67,11 +68,21 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string) i
 	rest := args[1:]
 	switch args[0] {
 	case "hook":
-		if len(rest) != 1 {
-			logHook(config.FindRoot(cwd), "hook: want 1 argument, got %d", len(rest))
+		agent := hooks.Claude
+		switch {
+		case len(rest) == 1:
+		case len(rest) == 3 && rest[1] == "--agent":
+			a, ok := hooks.ParseAgent(rest[2])
+			if !ok {
+				logHook(config.FindRoot(cwd), "hook: bad arguments")
+				return 0
+			}
+			agent = a
+		default:
+			logHook(config.FindRoot(cwd), "hook: bad arguments")
 			return 0
 		}
-		return runHook(rest[0], stdin, stdout, cwd)
+		return runHook(rest[0], agent, stdin, stdout, cwd)
 	case "ack":
 		return runAck(rest, stdout, stderr, cwd)
 	case "status":
@@ -102,6 +113,8 @@ var hookHandlers = map[string]func(hooks.Env, hooks.Input) ([]byte, error){
 	"stop":          hooks.Stop,
 	"pre-tool-use":  hooks.PreToolUse,
 	"session-end":   hooks.SessionEnd,
+
+	"permission-request": hooks.PermissionRequest,
 }
 
 // hookBudget is how long each hook may run git in total: a few seconds less
@@ -112,6 +125,21 @@ var hookBudget = map[string]time.Duration{
 	"stop":          55 * time.Second,
 	"pre-tool-use":  8 * time.Second,
 	"session-end":   8 * time.Second,
+
+	"permission-request": 8 * time.Second,
+}
+
+// codexSessionEndBudget is the Codex SessionEnd budget, shorter than the
+// Claude one.
+const codexSessionEndBudget = 2 * time.Second
+
+// budgetFor is the git budget of an event for an agent.
+func budgetFor(event string, a hooks.Agent) (time.Duration, bool) {
+	if a == hooks.Codex && event == "session-end" {
+		return codexSessionEndBudget, true
+	}
+	b, ok := hookBudget[event]
+	return b, ok
 }
 
 // maxHookInput caps the hook payload read from stdin.
@@ -135,12 +163,12 @@ func hookRoot(in hooks.Input, cwd string) string {
 }
 
 // runHook never fails: errors and panics go to the log, the exit code is 0.
-func runHook(event string, stdin io.Reader, stdout io.Writer, cwd string) int {
+func runHook(event string, agent hooks.Agent, stdin io.Reader, stdout io.Writer, cwd string) int {
 	// A hook is short-lived: trade some memory for less GC time, within a
 	// bound for very large repositories.
 	debug.SetGCPercent(400)
 	debug.SetMemoryLimit(512 << 20)
-	if b, ok := hookBudget[event]; ok {
+	if b, ok := budgetFor(event, agent); ok {
 		gitx.SetDeadline(time.Now().Add(b))
 		defer gitx.SetDeadline(time.Time{}) // in-process callers (tests) go on without it
 	}
@@ -168,7 +196,7 @@ func runHook(event string, stdin io.Reader, stdout io.Writer, cwd string) int {
 		if !ok {
 			return fmt.Errorf("unknown event")
 		}
-		out, err = h(hooks.Env{Root: root, Now: time.Now}, in)
+		out, err = h(hooks.Env{Root: root, Now: time.Now, Agent: agent}, in)
 		return err
 	}()
 	if err != nil {

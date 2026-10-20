@@ -15,6 +15,7 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/gitx"
+	"auto-context/internal/hooks"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1004,5 +1005,87 @@ func TestStatusBrokenMarkersAgents(t *testing.T) {
 	want := "warning: the auto-context:units markers in the root AGENTS.md are unbalanced, so the units index is not updated"
 	if !strings.Contains(out, want) {
 		t.Errorf("status output lacks %q:\n%s", want, out)
+	}
+}
+
+func TestHookAgentFlag(t *testing.T) {
+	root := repo(t)
+	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	if c, _, e := do(root, "", "ack", "_root", "svc"); c != 0 {
+		t.Fatalf("ack . code=%d %s", c, e)
+	}
+	in := `{"session_id":"s1","cwd":` + quote(root) + `}`
+	if c, out, _ := do(t.TempDir(), in, "hook", "prompt-submit", "--agent", "codex"); c != 0 || out != "" {
+		t.Fatalf("prompt-submit code=%d out=%q", c, out)
+	}
+	write(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
+	code, out, _ := do(t.TempDir(), in, "hook", "stop", "--agent", "codex")
+	if code != 0 || !strings.Contains(out, "$auto-context-docs") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+func TestHookAgentFlagBad(t *testing.T) {
+	for _, args := range [][]string{
+		{"hook", "stop", "--agent"},
+		{"hook", "stop", "--agent", "gpt"},
+		{"hook", "stop", "--x", "codex"},
+	} {
+		root := repo(t)
+		write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+		code, out, _ := do(root, `{}`, args...)
+		if code != 0 || out != "" {
+			t.Errorf("%v: code=%d out=%q", args, code, out)
+		}
+		data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "log"))
+		if !strings.Contains(string(data), "hook: bad arguments") {
+			t.Errorf("%v: log = %q", args, data)
+		}
+	}
+}
+
+func TestHookPermissionRequest(t *testing.T) {
+	dir := t.TempDir()
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "hooks", "testdata", "permission_request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["cwd"] = dir
+	in, _ := json.Marshal(payload)
+	want := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` + "\n"
+	if c, out, _ := do(dir, string(in), "hook", "permission-request", "--agent", "codex"); c != 0 || out != want {
+		t.Fatalf("code=%d out=%q", c, out)
+	}
+}
+
+func TestHookToolInputArray(t *testing.T) {
+	root := repo(t)
+	write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+	in := `{"tool_name":"Bash","tool_input":{"command":["auto-context","status"]},"cwd":` + quote(root) + `}`
+	if c, out, _ := do(root, in, "hook", "permission-request", "--agent", "codex"); c != 0 || out != "" {
+		t.Fatalf("code=%d out=%q", c, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "log")); len(data) != 0 {
+		t.Errorf("log = %q", data)
+	}
+}
+
+func TestBudgetFor(t *testing.T) {
+	for _, c := range []struct {
+		event string
+		agent hooks.Agent
+		want  time.Duration
+	}{
+		{"session-end", hooks.Codex, 2 * time.Second},
+		{"session-end", hooks.Claude, 8 * time.Second},
+		{"permission-request", hooks.Codex, 8 * time.Second},
+	} {
+		if got, ok := budgetFor(c.event, c.agent); !ok || got != c.want {
+			t.Errorf("budgetFor(%q, %q) = %v, %v; want %v", c.event, c.agent, got, ok, c.want)
+		}
 	}
 }
