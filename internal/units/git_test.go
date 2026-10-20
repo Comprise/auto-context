@@ -13,16 +13,12 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/gitx"
+	"auto-context/internal/testutil"
 )
 
 func gitInit(t *testing.T, root string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
+	testutil.Git(t, root, "init", "-q")
 }
 
 // fixture builds a tree exercising ignore rules, units, context docs and links.

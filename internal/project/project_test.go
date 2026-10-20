@@ -11,24 +11,14 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/testutil"
 )
-
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestOpenAckRefreshSave(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "include: [svc]\nexlude: [x]\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	write(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\nexlude: [x]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +42,7 @@ func TestOpenAckRefreshSave(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "svc", "a.go")); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, "svc/b.go", "package svc\n")
+	testutil.WriteFile(t, root, "svc/b.go", "package svc\n")
 	p, err = Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -69,9 +59,9 @@ func TestOpenAckRefreshSave(t *testing.T) {
 // A hook that hashes nothing never reads or writes the cache.
 func TestCacheIsLazy(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "include: [svc]\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	write(t, root, ".auto-context/cache.json", "garbage")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, ".auto-context/cache.json", "garbage")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +101,7 @@ func TestTrustedFiltersScopes(t *testing.T) {
 	})
 	t.Run("git cannot show scopes", func(t *testing.T) {
 		bin := t.TempDir()
-		write(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *--show-scope*) echo 'unknown option' >&2; exit 129;; esac\nexec '"+real+"' \"$@\"\n")
+		testutil.WriteFile(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *--show-scope*) echo 'unknown option' >&2; exit 129;; esac\nexec '"+real+"' \"$@\"\n")
 		if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -126,8 +116,8 @@ func TestTrustedFiltersScopes(t *testing.T) {
 // git a note.
 func TestWriteChanges(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "include: [svc]\n")
-	write(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +145,7 @@ func TestConfigCommittable(t *testing.T) {
 	if err := config.AddExclude(root, "gen/**"); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, ".auto-context/cache.json", "{}")
+	testutil.WriteFile(t, root, ".auto-context/cache.json", "{}")
 	ignored := func(rel string) bool {
 		return exec.Command("git", "-C", root, "check-ignore", "-q", rel).Run() == nil
 	}
@@ -170,7 +160,7 @@ func TestConfigCommittable(t *testing.T) {
 	if ign, err := p.ConfigIgnored(); ign || err != nil {
 		t.Error("config reported as ignored")
 	}
-	write(t, root, ".gitignore", ".auto-context/\n")
+	testutil.WriteFile(t, root, ".gitignore", ".auto-context/\n")
 	if ign, err := p.ConfigIgnored(); !ign || err != nil {
 		t.Error("config hidden by the user's .gitignore not detected")
 	}
@@ -179,7 +169,7 @@ func TestConfigCommittable(t *testing.T) {
 // The old location is not read: such a project is not enabled by it.
 func TestOldConfigLocationIgnored(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, ".auto-context.yaml", "include: [svc]\n")
 	if Active(root) {
 		t.Error(".auto-context.yaml enables the plugin")
 	}
@@ -195,7 +185,7 @@ func TestAckDate(t *testing.T) {
 		"# svc\nno frontmatter\n": "",
 	}
 	for content, want := range cases {
-		write(t, root, "context/svc.md", content)
+		testutil.WriteFile(t, root, "context/svc.md", content)
 		if since, why := ackDate(root, "context/svc.md"); since != want || (want == "" && why == "") {
 			t.Errorf("%q: since=%q why=%q, want %q", content, since, why, want)
 		}
@@ -213,21 +203,21 @@ func TestWriteChangesSinceAckDate(t *testing.T) {
 	root := t.TempDir()
 	git := func(env []string, args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 		cmd.Env = append(os.Environ(), env...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	git(nil, "init", "-q")
-	write(t, root, ".auto-context/config.yaml", "include: [svc]\n")
-	write(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	git(nil, "add", "-A")
 	old := []string{"GIT_AUTHOR_DATE=2020-01-01T00:00:00", "GIT_COMMITTER_DATE=2020-01-01T00:00:00"}
 	git(old, "commit", "-qm", "ancient change")
-	write(t, root, "svc/a.go", "package svc // new\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc // new\n")
 	git(nil, "commit", "-qam", "recent change")
-	write(t, root, "context/svc.md", "---\nunit: svc\nsource_hash: x\nupdated: \"2021-06-01\"\n---\n# svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "---\nunit: svc\nsource_hash: x\nupdated: \"2021-06-01\"\n---\n# svc\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -260,14 +250,12 @@ func committedRepo(t *testing.T) string {
 		t.Skip("git not installed")
 	}
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "min_files: 5\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"}} {
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 5\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-qm", "x"}} {
+		testutil.Git(t, root, args...)
 	}
-	write(t, root, ".git/index", "garbage")
+	testutil.WriteFile(t, root, ".git/index", "garbage")
 	return root
 }
 
@@ -286,8 +274,8 @@ func TestConfigIgnoredGitFailure(t *testing.T) {
 // Without git on PATH, ConfigIgnored says "not ignored" and no error.
 func TestConfigIgnoredWithoutGit(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "min_files: 5\n")
-	write(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 5\n")
+	testutil.WriteFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
 	t.Setenv("PATH", t.TempDir())
 	p, err := Open(root)
 	if err != nil {
@@ -300,11 +288,11 @@ func TestConfigIgnoredWithoutGit(t *testing.T) {
 
 func TestUpdateIndexUsesIndexFile(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
-	write(t, root, "context/_root.md", "# root\n\nRoot.\n")
-	write(t, root, "svc/go.mod", "module svc\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	write(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n\nRoot.\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +315,7 @@ func TestUpdateIndexUsesIndexFile(t *testing.T) {
 func TestUpdateIndexInactiveWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	for _, f := range []string{"f1", "f2", "f3", "f4", "f5"} {
-		write(t, root, "pkg/"+f+".go", "package pkg\n")
+		testutil.WriteFile(t, root, "pkg/"+f+".go", "package pkg\n")
 	}
 	p, err := Open(root)
 	if err != nil {

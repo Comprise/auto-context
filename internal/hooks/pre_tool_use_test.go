@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"auto-context/internal/testutil"
 )
 
 func preInput(tool, cmd string) Input {
@@ -56,7 +58,7 @@ func TestPreToolUseAllowsOwnCLI(t *testing.T) {
 
 func TestPreToolUseRejectsEverythingElse(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "min_files: 3\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 3\n")
 	env := testEnv(root)
 	before := snapshotTree(t, root)
 	rejected := []string{
@@ -132,8 +134,8 @@ func TestPreToolUseRefusesShadowedBinary(t *testing.T) {
 		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
 	}
 	plugin, fake := t.TempDir(), t.TempDir()
-	write(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	write(t, fake, "auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
 	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(fake, "auto-context")} {
 		if err := os.Chmod(p, 0o755); err != nil {
 			t.Fatal(err)
@@ -158,8 +160,8 @@ func TestPreToolUseRefusesRelativePath(t *testing.T) {
 		t.Skip("LookPath only finds PATHEXT files")
 	}
 	plugin, cwd := t.TempDir(), t.TempDir()
-	write(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	write(t, cwd, "auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, cwd, "auto-context", "#!/bin/sh\n")
 	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(cwd, "auto-context")} {
 		if err := os.Chmod(p, 0o755); err != nil {
 			t.Fatal(err)
@@ -179,7 +181,7 @@ func TestPreToolUseRefusesWhenPluginShimMissing(t *testing.T) {
 		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
 	}
 	fake := t.TempDir()
-	write(t, fake, "auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
 	if err := os.Chmod(filepath.Join(fake, "auto-context"), 0o755); err != nil {
 		t.Fatal(err)
 	}

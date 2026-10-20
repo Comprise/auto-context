@@ -67,6 +67,7 @@ gives you structural context (callers, dependents, test coverage) that file sear
 - `internal/project` — Сервисный слой: открывает репозиторий и даёт хукам и CLI общие операции.
 - `internal/rootindex` — Генерирует и обновляет секцию оглавления юнитов в корневом индексном файле (CLAUDE.md или AGENTS.md).
 - `internal/session` — Файлы сессии одного хода: снимок отслеживаемых файлов и журнал Stop.
+- `internal/testutil` — Общие хелперы тестов: чистое окружение, запись файлов, запуск git.
 - `internal/textx` — Очистка текста из репозитория перед выводом в лог, терминал или контекст Claude.
 - `internal/units` — Находит юниты документации в репозитории и классифицирует пути.
 <!-- /auto-context:units -->

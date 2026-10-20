@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"auto-context/internal/fsutil"
+	"auto-context/internal/testutil"
 )
 
 // A context dir that cannot be searched makes the doc unreadable, not absent.
@@ -18,7 +19,7 @@ func TestDocUnreadable(t *testing.T) {
 		t.Skip("root ignores permissions")
 	}
 	root := t.TempDir()
-	write(t, root, "context/a.md", "# a\n")
+	testutil.WriteFile(t, root, "context/a.md", "# a\n")
 	dir := filepath.Join(root, "context")
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatal(err)
@@ -33,7 +34,7 @@ func TestDocUnreadable(t *testing.T) {
 func TestAckRefusesDocLinkedOutside(t *testing.T) {
 	root, tr := setup(t)
 	outside := t.TempDir()
-	write(t, outside, "o.md", "# o\n\nOutside.\n")
+	testutil.WriteFile(t, outside, "o.md", "# o\n\nOutside.\n")
 	if err := os.MkdirAll(filepath.Join(root, "context"), 0o755); err != nil {
 		t.Fatal(err)
 	}

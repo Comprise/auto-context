@@ -10,25 +10,15 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/hashing"
+	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
-
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func setup(t *testing.T) (string, *units.Tree) {
 	t.Helper()
 	root := t.TempDir()
 	for _, u := range []string{"ok", "stale", "svc", "bad"} {
-		write(t, root, u+"/a.go", "package x\n")
+		testutil.WriteFile(t, root, u+"/a.go", "package x\n")
 	}
 	cfg := config.Default()
 	cfg.Include = []string{"ok", "stale", "svc", "bad"}
@@ -44,13 +34,13 @@ func TestComputeStates(t *testing.T) {
 	c := cache(root)
 	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for _, u := range []string{"ok", "stale"} {
-		write(t, root, "context/"+u+".md", "# "+u+"\n\nSummary of "+u+".\n")
+		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nSummary of "+u+".\n")
 		if err := Ack(root, tr, c, u, now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(t, root, "context/bad.md", "---\nunit: [\n---\n# bad\n\nText.\n")
-	write(t, root, "stale/a.go", "package x\n// changed\n")
+	testutil.WriteFile(t, root, "context/bad.md", "---\nunit: [\n---\n# bad\n\nText.\n")
+	testutil.WriteFile(t, root, "stale/a.go", "package x\n// changed\n")
 
 	st := computeAll(root, tr, c)
 	got := map[string]UnitStatus{}
@@ -76,7 +66,7 @@ func TestComputeStates(t *testing.T) {
 
 func TestComputeNoFrontmatterIsStale(t *testing.T) {
 	root, tr := setup(t)
-	write(t, root, "context/svc.md", "# svc\n\nHi.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nHi.\n")
 	st := computeAll(root, tr, cache(root))
 	for _, s := range st {
 		if s.Unit == "svc" && (s.State != Stale || s.Note != NoteNotAcked) {
@@ -117,8 +107,8 @@ func statusOf(t *testing.T, root string, tr *units.Tree, unit string) UnitStatus
 func TestComputeRefusesLinkedDocs(t *testing.T) {
 	root, tr := setup(t)
 	outside := filepath.Join(t.TempDir(), "o.md")
-	write(t, filepath.Dir(outside), "o.md", "# o\n\nSECRET outside\n")
-	write(t, root, ".env", "# Settings\nAPI_KEY=secret\n")
+	testutil.WriteFile(t, filepath.Dir(outside), "o.md", "# o\n\nSECRET outside\n")
+	testutil.WriteFile(t, root, ".env", "# Settings\nAPI_KEY=secret\n")
 	if err := os.MkdirAll(filepath.Join(root, "context"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +134,7 @@ func TestComputeUnreadableFileIsPerUnit(t *testing.T) {
 	root, tr := setup(t)
 	c := cache(root)
 	for _, u := range []string{"ok", "svc"} {
-		write(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
+		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
 		if err := Ack(root, tr, c, u, time.Now()); err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +159,7 @@ func cache(root string) *hashing.Cache {
 // Adding or removing a unit makes the root docs stale, even with no files.
 func TestRootHashCoversUnitList(t *testing.T) {
 	root, tr := setup(t)
-	write(t, root, "context/_root.md", "# r\n\nR.\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# r\n\nR.\n")
 	c := cache(root)
 	if err := Ack(root, tr, c, units.RootUnit, time.Now()); err != nil {
 		t.Fatal(err)
@@ -193,7 +183,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 
 func TestNotAckedNote(t *testing.T) {
 	root, tr := setup(t)
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	if s := StatusOf(root, tr, cache(root), "svc"); s.State != Stale || s.Note != NoteNotAcked {
 		t.Errorf("%+v", s)
 	}
@@ -203,7 +193,7 @@ func TestNotAckedNote(t *testing.T) {
 // repeated auto-ack must not look like a docs edit).
 func TestAckIsIdempotent(t *testing.T) {
 	root, tr := setup(t)
-	write(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
 	if err := Ack(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
@@ -220,7 +210,7 @@ func TestAckIsIdempotent(t *testing.T) {
 
 func TestDocKinds(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "context/a.md", "# a\n")
+	testutil.WriteFile(t, root, "context/a.md", "# a\n")
 	if k, p, err := Doc(root, "a"); k != DocPresent || p == "" || err != nil {
 		t.Errorf("present: %v %q %v", k, p, err)
 	}
@@ -255,7 +245,7 @@ func TestNoteText(t *testing.T) {
 // An ack with the same hash but another unit name rewrites the frontmatter.
 func TestAckRewritesForeignUnit(t *testing.T) {
 	root, tr := setup(t)
-	write(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
 	if err := Ack(root, tr, c, "ok", time.Now()); err != nil {
 		t.Fatal(err)

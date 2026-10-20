@@ -16,6 +16,7 @@ import (
 	"auto-context/internal/docstate"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/session"
+	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
 
@@ -98,9 +99,9 @@ func unitState(t *testing.T, env Env, unit string) docstate.State {
 // made in response must still be processed and auto-acked.
 func TestStopHookActiveAfterFeedbackAutoAcks(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
 	if out := stopActive(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
@@ -111,9 +112,9 @@ func TestStopHookActiveAfterFeedbackAutoAcks(t *testing.T) {
 
 func TestStopHookActiveFlagsNewChange(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
-	write(t, env.Root, "tool.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "tool.go", "package main\n")
 	r := feedback(t, stopActive(t, env))
 	if !strings.Contains(r, "code changed in _root ") || strings.Contains(r, "svc") {
 		t.Errorf("reason = %q, want only _root", r)
@@ -151,7 +152,7 @@ func TestStopCleanThenEditGivesFeedback(t *testing.T) {
 	if out := stop(t, env); out != nil {
 		t.Fatalf("first stop out=%q", out)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// later edit\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// later edit\n")
 	if r := feedback(t, stopActive(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason = %q", r)
 	}
@@ -170,9 +171,9 @@ func setMtime(t *testing.T, root, rel string, base time.Time, d time.Duration) {
 func TestStopDocsBeforeCodeIsNotDocsUpdate(t *testing.T) {
 	env := turn(t)
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited first.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited first.\n")
 	setMtime(t, env.Root, "context/svc.md", base, 0)
-	write(t, env.Root, "svc/main.go", "package main\nfunc New() {}\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\nfunc New() {}\n")
 	setMtime(t, env.Root, "svc/main.go", base, time.Second)
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason = %q", r)
@@ -186,8 +187,8 @@ func TestStopDocsBeforeCodeIsNotDocsUpdate(t *testing.T) {
 // silence the feedback.
 func TestStopFailedAutoAckGivesFeedback(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
-	write(t, env.Root, "notes.txt", "# svc\n\nx\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "notes.txt", "# svc\n\nx\n")
 	ctx := filepath.Join(env.Root, "context", "svc.md")
 	if err := os.Remove(ctx); err != nil {
 		t.Fatal(err)
@@ -209,13 +210,13 @@ func TestStopAckFailureIsReported(t *testing.T) {
 	}
 	env := turn(t)
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "svc/extra.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "svc/extra.go", "package main\n")
 	if err := os.Chmod(filepath.Join(env.Root, "svc", "extra.go"), 0); err != nil {
 		t.Fatal(err)
 	}
 	defer os.Chmod(filepath.Join(env.Root, "svc", "extra.go"), 0o644)
 	setMtime(t, env.Root, "svc/extra.go", base, 0)
-	write(t, env.Root, "context/svc.md", "# svc\n\nUpdated.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nUpdated.\n")
 	setMtime(t, env.Root, "context/svc.md", base, time.Second)
 	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "auto-ack of svc failed") || strings.Contains(r, "docs not updated") {
@@ -230,8 +231,8 @@ func TestStopNoFeedbackWhenDocsStillMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// temporary\n")
-	write(t, env.Root, "svc/main.go", string(orig))
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// temporary\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", string(orig))
 	setMtime(t, env.Root, "svc/main.go", time.Now().Add(time.Hour), 0)
 	if out := stop(t, env); out != nil {
 		t.Errorf("out = %s", out)
@@ -250,7 +251,7 @@ func TestStopWithoutSnapshotLogs(t *testing.T) {
 
 func TestStopFeedbackOnCodeEdit(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	out := stop(t, env)
 	want := `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"auto-context: code changed in svc `
 	if !strings.HasPrefix(string(out), want) {
@@ -266,7 +267,7 @@ func TestStopFeedbackOnCodeEdit(t *testing.T) {
 
 func TestStopSecondCallAllowsAfterNotify(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	if out := stopActive(t, env); out != nil {
 		t.Fatalf("second Stop out=%q, want nil", out)
@@ -275,9 +276,9 @@ func TestStopSecondCallAllowsAfterNotify(t *testing.T) {
 
 func TestStopAllowsAfterDocsEdited(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
 	if out := stopActive(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
@@ -288,7 +289,7 @@ func TestStopAllowsAfterDocsEdited(t *testing.T) {
 
 func TestStopBashRename(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "svc/a.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "svc/a.go", "package main\n")
 	ack(t, env, "svc")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
@@ -303,7 +304,7 @@ func TestStopBashRename(t *testing.T) {
 
 func TestStopAckFlow(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
 	ack(t, env, "svc")
 	if out := stopActive(t, env); out != nil {
@@ -314,7 +315,7 @@ func TestStopAckFlow(t *testing.T) {
 func TestStopNewUnitAndExclude(t *testing.T) {
 	env := turn(t)
 	for _, n := range []string{"a", "b", "c", "d", "e"} {
-		write(t, env.Root, "pkg/new/"+n+".go", "package new\n")
+		testutil.WriteFile(t, env.Root, "pkg/new/"+n+".go", "package new\n")
 	}
 	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "auto-context ack --exclude pkg/new") {
@@ -335,8 +336,8 @@ func TestStopNewUnitAndExclude(t *testing.T) {
 
 func TestStopUnitDirDeleted(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "svc/auth/go.mod", "module auth\n")
-	write(t, env.Root, "svc/auth/auth.go", "package auth\n")
+	testutil.WriteFile(t, env.Root, "svc/auth/go.mod", "module auth\n")
+	testutil.WriteFile(t, env.Root, "svc/auth/auth.go", "package auth\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestStopUnitDirDeleted(t *testing.T) {
 
 func TestSessionStartReportsOrphanDocs(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "context/gone.md", "# gone\n\nOld.\n")
+	testutil.WriteFile(t, env.Root, "context/gone.md", "# gone\n\nOld.\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +386,7 @@ func TestStopReasonText(t *testing.T) {
 
 func TestStopOutputNotHTMLEscaped(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	out := stop(t, env)
 	if !strings.Contains(string(out), "<unit>/CLAUDE.md") || strings.HasSuffix(string(out), "\n") {
 		t.Errorf("unexpected encoding: %q", out)
@@ -395,9 +396,9 @@ func TestStopOutputNotHTMLEscaped(t *testing.T) {
 // Spec п. 16 end-to-end: edit code, feedback, edit docs, quiet stop, quiet SessionStart.
 func TestStopEndToEnd(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env))
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, now longer.\n")
 	if out := stopActive(t, env); out != nil {
 		t.Fatalf("out=%q, want nil", out)
 	}
@@ -413,9 +414,9 @@ func TestStopEndToEnd(t *testing.T) {
 // Stop's own root index rewrite must not auto-ack a stale _root on the next Stop.
 func TestStopIgnoresOwnRootIndexRewrite(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
-	write(t, env.Root, "context/svc.md", "# svc\n\nA different service summary.\n")
-	write(t, env.Root, "tool.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nA different service summary.\n")
+	testutil.WriteFile(t, env.Root, "tool.go", "package main\n")
 	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "code changed in _root ") {
 		t.Fatalf("Stop1 reason lacks _root: %q", r)
@@ -431,7 +432,7 @@ func TestStopIgnoresOwnRootIndexRewrite(t *testing.T) {
 // Deleting context/<u>.md is not a docs update: the unit stays pending as a new unit.
 func TestStopDeletedContextIsNotDocsUpdate(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	if err := os.Remove(filepath.Join(env.Root, "context", "svc.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -445,8 +446,8 @@ func TestStopDeletedContextIsNotDocsUpdate(t *testing.T) {
 // not treat that as a _root docs edit.
 func TestStopIgnoresSessionStartRootIndexRewrite(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "tool.go", "package main\n")
-	write(t, env.Root, "context/svc.md", "# svc\n\nA different service summary.\n")
+	testutil.WriteFile(t, env.Root, "tool.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nA different service summary.\n")
 	if _, err := SessionStart(env, Input{SessionID: stopSID, Source: "compact"}); err != nil {
 		t.Fatal(err)
 	}
@@ -463,8 +464,8 @@ func TestStopIgnoresSessionStartRootIndexRewrite(t *testing.T) {
 // unit or suppress the feedback.
 func TestStopClaudeMDOnlyIsNotDocsUpdate(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\nfunc NewPublicAPI() {}\n")
-	write(t, env.Root, "svc/CLAUDE.md", "# svc\ntypo fix\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\nfunc NewPublicAPI() {}\n")
+	testutil.WriteFile(t, env.Root, "svc/CLAUDE.md", "# svc\ntypo fix\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason lacks svc: %q", r)
 	}
@@ -477,8 +478,8 @@ func TestStopClaudeMDOnlyIsNotDocsUpdate(t *testing.T) {
 func TestStopEqualMtimesCount(t *testing.T) {
 	env := turn(t)
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "svc/main.go", "package main\nfunc G() {}\n")
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\nfunc G() {}\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary.\n")
 	setMtime(t, env.Root, "svc/main.go", base, 0)
 	setMtime(t, env.Root, "context/svc.md", base, 0)
 	if out := stop(t, env); out != nil {
@@ -493,9 +494,9 @@ func TestStopEqualMtimesCount(t *testing.T) {
 func TestStopRefreshesIndexAfterAutoAck(t *testing.T) {
 	env := turn(t)
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "svc/main.go", "package main\nfunc H() {}\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\nfunc H() {}\n")
 	setMtime(t, env.Root, "svc/main.go", base, 0)
-	write(t, env.Root, "context/svc.md", "# svc\n\nA brand new summary.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nA brand new summary.\n")
 	setMtime(t, env.Root, "context/svc.md", base, time.Second)
 	stop(t, env)
 	data, _ := os.ReadFile(filepath.Join(env.Root, "CLAUDE.md"))
@@ -506,11 +507,11 @@ func TestStopRefreshesIndexAfterAutoAck(t *testing.T) {
 
 func TestStopNamesDocsLanguage(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "language: ru\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "language: ru\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "in language ru") {
 		t.Errorf("reason = %q", r)
 	}
@@ -521,11 +522,11 @@ func TestStopNamesDocsLanguage(t *testing.T) {
 func TestStopActivationTurnLogsNothing(t *testing.T) {
 	root := t.TempDir()
 	env := testEnv(root)
-	write(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, "context/_root.md", "# root\n\nRoot.\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n\nRoot.\n")
 	stop(t, env)
 	if data, err := os.ReadFile(filepath.Join(root, ".auto-context", "log")); err == nil {
 		t.Errorf("log = %q", data)
@@ -540,8 +541,8 @@ func TestStopActivationTurnLogsNothing(t *testing.T) {
 // turn's changes are checked once the config is fixed.
 func TestStopBrokenConfigPausesTracking(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "docs tracking is paused") || strings.Contains(r, "code changed") {
 		t.Errorf("reason = %q", r)
 	}
@@ -564,14 +565,14 @@ func TestStopBrokenConfigPausesTracking(t *testing.T) {
 // that would fail with "unknown unit".
 func TestStopSkipsUnitThatIsGone(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env)) // svc is reported once
 	// Another code change, then svc stops being a unit.
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// again\n")
-	write(t, env.Root, ".auto-context/config.yaml", "exclude: [svc/**]\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// again\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "exclude: [svc/**]\n")
 	if out := stop(t, env); out != nil {
 		t.Errorf("out = %s", out)
 	}
@@ -589,14 +590,14 @@ func TestStopReasonUnreadable(t *testing.T) {
 // between two code edits of the unit do not count.
 func TestStopUsesNewestCodeEdit(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/b.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "svc/b.go", "package main\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(time.Minute)
-	write(t, env.Root, "svc/main.go", "package main\n// a\n")
-	write(t, env.Root, "svc/b.go", "package main\n// b\n")
-	write(t, env.Root, "context/svc.md", "# svc\n\nNew.\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// a\n")
+	testutil.WriteFile(t, env.Root, "svc/b.go", "package main\n// b\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nNew.\n")
 	for _, order := range [][2]string{{"svc/main.go", "svc/b.go"}, {"svc/b.go", "svc/main.go"}} {
 		setMtime(t, env.Root, order[0], base, 2*time.Second) // the newest code edit
 		setMtime(t, env.Root, order[1], base, 0)
@@ -728,7 +729,7 @@ func TestStopMovedInFileNotAutoAcked(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := turn(t)
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited.\n")
 	if err := os.Rename(old, filepath.Join(env.Root, "svc", "moved.go")); err != nil {
 		t.Skipf("rename across filesystems: %v", err)
 	}
@@ -749,9 +750,9 @@ func TestStopAutoAcksWithOldSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(time.Minute)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	setMtime(t, env.Root, "svc/main.go", base, 0)
-	write(t, env.Root, "context/svc.md", "# svc\n\nService summary, updated.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, updated.\n")
 	setMtime(t, env.Root, "context/svc.md", base, time.Second)
 	if out := stop(t, env); out != nil {
 		t.Errorf("feedback: %s", out)
@@ -768,7 +769,7 @@ func TestStopSymlinkedContextDoc(t *testing.T) {
 		t.Skip("symlinks need privileges on Windows")
 	}
 	env := newRepo(t, false)
-	write(t, env.Root, "docs/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, env.Root, "docs/svc.md", "# svc\n\nService summary.\n")
 	ctx := filepath.Join(env.Root, "context", "svc.md")
 	if err := os.Remove(ctx); err != nil {
 		t.Fatal(err)
@@ -781,9 +782,9 @@ func TestStopSymlinkedContextDoc(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(time.Minute)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	setMtime(t, env.Root, "svc/main.go", base, 0)
-	write(t, env.Root, "docs/svc.md", "# svc\n\nService summary, updated.\n")
+	testutil.WriteFile(t, env.Root, "docs/svc.md", "# svc\n\nService summary, updated.\n")
 	setMtime(t, env.Root, "docs/svc.md", base, time.Second)
 	if out := stop(t, env); out != nil {
 		t.Errorf("edit of the link target not seen: %s", out)
@@ -793,8 +794,8 @@ func TestStopSymlinkedContextDoc(t *testing.T) {
 // A config with one invalid setting is not "broken": Stop still works.
 func TestStopWorksWithConfigProblems(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "exlude: [x]\n")
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "exlude: [x]\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc") {
 		t.Errorf("reason = %q", r)
 	}
@@ -803,8 +804,8 @@ func TestStopWorksWithConfigProblems(t *testing.T) {
 // Editing CLAUDE.md next to the code is not a docs update.
 func TestStopClaudeMDWithCodeIsNotDocsUpdate(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
-	write(t, env.Root, "svc/CLAUDE.md", "# svc\nNew purpose.\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/CLAUDE.md", "# svc\nNew purpose.\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc") {
 		t.Errorf("reason = %q", r)
 	}
@@ -868,8 +869,8 @@ func TestStopReasonQuotesAndCaps(t *testing.T) {
 // the changes made meanwhile are reported.
 func TestStopConfigFixedBetweenTurns(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
-	write(t, env.Root, "svc/main.go", "package main\n// changed while broken\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed while broken\n")
 	feedback(t, stop(t, env)) // the paused notice
 	if err := os.Remove(filepath.Join(env.Root, ".auto-context", "config.yaml")); err != nil {
 		t.Fatal(err)
@@ -886,7 +887,7 @@ func TestStopConfigFixedBetweenTurns(t *testing.T) {
 // and no false "no turn-start snapshot" error is logged.
 func TestStopConfigBrokenFromStart(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +898,7 @@ func TestStopConfigBrokenFromStart(t *testing.T) {
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// changed after the fix\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed after the fix\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc") {
 		t.Errorf("reason = %q", r)
 	}
@@ -911,17 +912,17 @@ func TestStopConfigBrokenFromStart(t *testing.T) {
 // the next turn takes a fresh snapshot.
 func TestStopPauseResumeCycle(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// one\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// one\n")
 	feedback(t, stop(t, env)) // svc notified
 	cfg := filepath.Join(env.Root, ".auto-context", "config.yaml")
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "paused") {
 		t.Fatalf("no pause notice: %q", r)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// two\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// two\n")
 	if err := os.Remove(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +930,7 @@ func TestStopPauseResumeCycle(t *testing.T) {
 		t.Errorf("change during the pause hidden by the old notice: %q", r)
 	}
 	// Break again: the pause is announced again.
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "paused") {
 		t.Errorf("second pause not announced: %q", r)
 	}
@@ -955,11 +956,11 @@ func TestStopPauseResumeCycle(t *testing.T) {
 // PromptSubmit alone during the pause (no Stop) still keeps the snapshot.
 func TestPromptSubmitPauseWithoutStop(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// while broken\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// while broken\n")
 	if err := os.Remove(filepath.Join(env.Root, ".auto-context", "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
@@ -974,7 +975,7 @@ func TestPromptSubmitPauseWithoutStop(t *testing.T) {
 // An unreadable journal is logged and the snapshot kept.
 func TestPromptSubmitUnreadableJournal(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	journal := filepath.Join(env.Root, ".auto-context", "state", session.SanitizeID(stopSID)+".json")
 	if err := os.WriteFile(journal, []byte("{bad"), 0o644); err != nil {
 		t.Fatal(err)
@@ -993,8 +994,8 @@ func TestPromptSubmitUnreadableJournal(t *testing.T) {
 // Orphan names come from the repo: unusual ones are only counted.
 func TestSessionStartHidesUnsafeOrphanNames(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "context/gone.md", "# gone\n")
-	write(t, env.Root, "context/x`; run this.md", "# x\n")
+	testutil.WriteFile(t, env.Root, "context/gone.md", "# gone\n")
+	testutil.WriteFile(t, env.Root, "context/x`; run this.md", "# x\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -1010,7 +1011,7 @@ func TestSessionStartHidesUnsafeOrphanNames(t *testing.T) {
 // error, and the next turn reports code edits.
 func TestStopPausedWithoutSnapshot(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
@@ -1035,7 +1036,7 @@ func TestStopPausedWithoutSnapshot(t *testing.T) {
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	write(t, env.Root, "svc/main.go", "package main\n// next turn\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// next turn\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc") {
 		t.Errorf("reason = %q", r)
 	}
@@ -1045,7 +1046,7 @@ func TestStopPausedWithoutSnapshot(t *testing.T) {
 // fresh snapshot instead of keeping the broken one.
 func TestPromptSubmitPausedCorruptSnapshot(t *testing.T) {
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
@@ -1093,11 +1094,11 @@ func TestTurnNewUnits(t *testing.T) {
 func TestStopNewUnitWithDocsFlagsRoot(t *testing.T) {
 	env := turn(t)
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "pkg/go.mod", "module pkg\n")
-	write(t, env.Root, "pkg/a.go", "package pkg\n")
+	testutil.WriteFile(t, env.Root, "pkg/go.mod", "module pkg\n")
+	testutil.WriteFile(t, env.Root, "pkg/a.go", "package pkg\n")
 	setMtime(t, env.Root, "pkg/go.mod", base, 0)
 	setMtime(t, env.Root, "pkg/a.go", base, 0)
-	write(t, env.Root, "context/pkg.md", "# pkg\n\nPkg summary.\n")
+	testutil.WriteFile(t, env.Root, "context/pkg.md", "# pkg\n\nPkg summary.\n")
 	setMtime(t, env.Root, "context/pkg.md", base, time.Second)
 	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "code changed in _root ") {
@@ -1114,16 +1115,16 @@ func TestStopNewUnitWithDocsFlagsRoot(t *testing.T) {
 func TestStopSubdirBecomesUnitFlagsParent(t *testing.T) {
 	env := newRepo(t, false)
 	for _, n := range []string{"a", "b", "c", "d"} {
-		write(t, env.Root, "svc/sub/"+n+".go", "package sub\n")
+		testutil.WriteFile(t, env.Root, "svc/sub/"+n+".go", "package sub\n")
 	}
 	ack(t, env, "svc", "_root")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(time.Hour)
-	write(t, env.Root, "svc/sub/e.go", "package sub\n")
+	testutil.WriteFile(t, env.Root, "svc/sub/e.go", "package sub\n")
 	setMtime(t, env.Root, "svc/sub/e.go", base, 0)
-	write(t, env.Root, "context/svc/sub.md", "# sub\n\nSub summary.\n")
+	testutil.WriteFile(t, env.Root, "context/svc/sub.md", "# sub\n\nSub summary.\n")
 	setMtime(t, env.Root, "context/svc/sub.md", base, time.Second)
 	r := feedback(t, stop(t, env))
 	if !strings.Contains(r, "code changed in _root, svc ") {

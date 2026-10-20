@@ -10,18 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-)
 
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	p := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
+	"auto-context/internal/testutil"
+)
 
 func hex256(s string) string {
 	h := sha256.Sum256([]byte(s))
@@ -40,8 +31,8 @@ func mustHash(t *testing.T, root string, files []string, c *Cache) string {
 func TestSourceHashStable(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	for _, r := range []string{a, b} {
-		write(t, r, "x/a.go", "aaa")
-		write(t, r, "x/b.go", "bbb")
+		testutil.WriteFile(t, r, "x/a.go", "aaa")
+		testutil.WriteFile(t, r, "x/b.go", "bbb")
 	}
 	files := []string{"x/a.go", "x/b.go"}
 	ha := mustHash(t, a, files, NewCache())
@@ -64,9 +55,9 @@ func TestSourceHashStable(t *testing.T) {
 
 func TestSourceHashChangesOnContent(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "one")
+	testutil.WriteFile(t, r, "a.go", "one")
 	h1 := mustHash(t, r, []string{"a.go"}, NewCache())
-	write(t, r, "a.go", "three")
+	testutil.WriteFile(t, r, "a.go", "three")
 	h2 := mustHash(t, r, []string{"a.go"}, NewCache())
 	if h1 == h2 {
 		t.Fatal("hash did not change")
@@ -75,8 +66,8 @@ func TestSourceHashChangesOnContent(t *testing.T) {
 
 func TestSourceHashChangesOnRename(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "same")
-	write(t, r, "b.go", "same")
+	testutil.WriteFile(t, r, "a.go", "same")
+	testutil.WriteFile(t, r, "b.go", "same")
 	if mustHash(t, r, []string{"a.go"}, NewCache()) == mustHash(t, r, []string{"b.go"}, NewCache()) {
 		t.Fatal("hash ignores path")
 	}
@@ -90,7 +81,7 @@ func TestSourceHashMissingFile(t *testing.T) {
 
 func TestCacheAvoidsRead(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "content")
+	testutil.WriteFile(t, r, "a.go", "content")
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
 	e, ok := c.entries["a.go"]
@@ -107,10 +98,10 @@ func TestCacheAvoidsRead(t *testing.T) {
 
 func TestCacheInvalidatedOnChange(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "content")
+	testutil.WriteFile(t, r, "a.go", "content")
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
-	write(t, r, "a.go", "content-longer")
+	testutil.WriteFile(t, r, "a.go", "content-longer")
 	want := "sha256:" + hex256("a.go"+"\x00"+hex256("content-longer")+"\n")
 	if got := mustHash(t, r, []string{"a.go"}, c); got != want {
 		t.Fatalf("got %s want %s", got, want)
@@ -119,7 +110,7 @@ func TestCacheInvalidatedOnChange(t *testing.T) {
 
 func TestCacheRoundTrip(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "content")
+	testutil.WriteFile(t, r, "a.go", "content")
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
 	if err := c.Save(r); err != nil {
@@ -136,14 +127,14 @@ func TestLoadCacheMissingOrCorrupt(t *testing.T) {
 	if c, err := LoadCache(r); err != nil || len(c.entries) != 0 {
 		t.Fatalf("missing: %v %v", c, err)
 	}
-	write(t, r, ".auto-context/cache.json", "{not json")
+	testutil.WriteFile(t, r, ".auto-context/cache.json", "{not json")
 	c, err := LoadCache(r)
 	if err == nil || len(c.entries) != 0 {
 		t.Fatalf("corrupt: entries=%v err=%v, want empty and an error", c.entries, err)
 	}
 	c.entries["a"] = Entry{} // must be usable
 	// A cache of another version (sums made without CRLF normalization) is dropped.
-	write(t, r, ".auto-context/cache.json", `{"entries":{"a.go":{"sum":"x"}}}`)
+	testutil.WriteFile(t, r, ".auto-context/cache.json", `{"entries":{"a.go":{"sum":"x"}}}`)
 	if c, err := LoadCache(r); err != nil || len(c.entries) != 0 {
 		t.Errorf("old version kept: %v %v", c.entries, err)
 	}
@@ -152,15 +143,15 @@ func TestLoadCacheMissingOrCorrupt(t *testing.T) {
 // CRLF and LF checkouts of the same file hash the same.
 func TestSourceHashNormalizesLineEndings(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
-	write(t, a, "x.go", "package x\nfunc F() {}\n")
-	write(t, b, "x.go", "package x\r\nfunc F() {}\r\n")
+	testutil.WriteFile(t, a, "x.go", "package x\nfunc F() {}\n")
+	testutil.WriteFile(t, b, "x.go", "package x\r\nfunc F() {}\r\n")
 	if ha, hb := mustHash(t, a, []string{"x.go"}, NewCache()), mustHash(t, b, []string{"x.go"}, NewCache()); ha != hb {
 		t.Errorf("LF %s != CRLF %s", ha, hb)
 	}
 	// A lone CR, and one at a chunk boundary, are kept.
 	c := t.TempDir()
-	write(t, c, "x.go", "a\rb\r")
-	write(t, a, "y.go", "a\nb\n")
+	testutil.WriteFile(t, c, "x.go", "a\rb\r")
+	testutil.WriteFile(t, a, "y.go", "a\nb\n")
 	if mustHash(t, c, []string{"x.go"}, NewCache()) == mustHash(t, a, []string{"y.go"}, NewCache()) {
 		t.Error("lone CR treated as a line break")
 	}
@@ -189,7 +180,7 @@ func TestSourceHashExtra(t *testing.T) {
 // Save skips the write when nothing changed.
 func TestSaveOnlyWhenDirty(t *testing.T) {
 	r := t.TempDir()
-	write(t, r, "a.go", "x")
+	testutil.WriteFile(t, r, "a.go", "x")
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
 	if err := c.Save(r); err != nil {

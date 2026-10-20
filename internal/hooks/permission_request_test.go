@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"auto-context/internal/testutil"
 )
 
 func TestPermissionRequestAllows(t *testing.T) {
@@ -34,8 +36,8 @@ func TestPermissionRequestSilentWhenShadowed(t *testing.T) {
 		t.Skip("LookPath only finds PATHEXT files; the sh shim has no extension")
 	}
 	plugin, fake := t.TempDir(), t.TempDir()
-	write(t, plugin, "bin/auto-context", "#!/bin/sh\n")
-	write(t, fake, "auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, plugin, "bin/auto-context", "#!/bin/sh\n")
+	testutil.WriteFile(t, fake, "auto-context", "#!/bin/sh\n")
 	for _, p := range []string{filepath.Join(plugin, "bin", "auto-context"), filepath.Join(fake, "auto-context")} {
 		if err := os.Chmod(p, 0o755); err != nil {
 			t.Fatal(err)

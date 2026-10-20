@@ -11,44 +11,34 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
 
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	p := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDiffDetectsAll(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "same.go", "same")
-	write(t, root, "content.go", "aaaa")
-	write(t, root, "size.go", "aa")
-	write(t, root, "gone.go", "x")
-	write(t, root, "old.go", "y")
+	testutil.WriteFile(t, root, "same.go", "same")
+	testutil.WriteFile(t, root, "content.go", "aaaa")
+	testutil.WriteFile(t, root, "size.go", "aa")
+	testutil.WriteFile(t, root, "gone.go", "x")
+	testutil.WriteFile(t, root, "old.go", "y")
 	all := []string{"same.go", "content.go", "size.go", "gone.go", "old.go"}
 	before, err := take(root, all)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	write(t, root, "content.go", "bbbb")
+	testutil.WriteFile(t, root, "content.go", "bbbb")
 	future := time.Now().Add(time.Second)
 	if err := os.Chtimes(filepath.Join(root, "content.go"), future, future); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, "size.go", "aaaaaa")
+	testutil.WriteFile(t, root, "size.go", "aaaaaa")
 	os.Remove(filepath.Join(root, "gone.go"))
 	if err := os.Rename(filepath.Join(root, "old.go"), filepath.Join(root, "new.go")); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, "fresh.go", "z")
+	testutil.WriteFile(t, root, "fresh.go", "z")
 	after, err := take(root, []string{"same.go", "content.go", "size.go", "new.go", "fresh.go", "gone.go"})
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +57,7 @@ func TestDiffDetectsAll(t *testing.T) {
 
 func TestSnapshotRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "a/b.go", "hello")
+	testutil.WriteFile(t, root, "a/b.go", "hello")
 	s, err := take(root, []string{"a/b.go", "missing.go"})
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +224,7 @@ func TestRemoveStaleSkipsDirectories(t *testing.T) {
 	}
 	old := SnapshotPath(root, "old")
 	dir := filepath.Join(filepath.Dir(old), "somedir")
-	write(t, root, ".auto-context/state/somedir/inner.snapshot", "x")
+	testutil.WriteFile(t, root, ".auto-context/state/somedir/inner.snapshot", "x")
 	inner := filepath.Join(dir, "inner.snapshot")
 	past := time.Now().Add(-30 * 24 * time.Hour)
 	for _, p := range []string{old, inner, dir} {

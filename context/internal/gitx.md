@@ -1,6 +1,6 @@
 ---
 unit: internal/gitx
-source_hash: sha256:aa2366846f726295969d451e3cc7de65256e9361983a2f271ddc254b2b270643
+source_hash: sha256:745835be47710fed5584b57a762ca6557a1f4a416791f2d7e5678173387c6611
 updated: "2026-10-20"
 ---
 # internal/gitx

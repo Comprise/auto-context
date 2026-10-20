@@ -9,16 +9,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"auto-context/internal/testutil"
 )
 
 // Writes that would act on the default units are refused while the config
 // cannot be parsed.
 func TestBrokenConfigRefusesWrites(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "include: [svc\n")
-	write(t, root, "svc/go.mod", "module svc\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	write(t, root, "context/svc.md", "# svc\n\nThe service.\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -48,24 +50,22 @@ func TestWriteChangesLiteralPathspec(t *testing.T) {
 	root := t.TempDir()
 	git := func(args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		testutil.Git(t, root, args...)
 	}
 	git("init", "-q")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	write(t, root, ".auto-context/config.yaml", "include: [a1, a10, \"a[1]\"]\n")
-	write(t, root, "a1/own.go", "package a\n")
-	write(t, root, "a10/sibling.go", "package a\n")
-	write(t, root, "a[1]/bracket.go", "package a\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [a1, a10, \"a[1]\"]\n")
+	testutil.WriteFile(t, root, "a1/own.go", "package a\n")
+	testutil.WriteFile(t, root, "a10/sibling.go", "package a\n")
+	testutil.WriteFile(t, root, "a[1]/bracket.go", "package a\n")
 	git("add", "-A")
 	git("commit", "-qm", "first")
-	write(t, root, "a1/own.go", "package a // edited\n")
-	write(t, root, "a10/sibling.go", "package a // edited\n")
-	write(t, root, "a[1]/bracket.go", "package a // edited\n")
-	write(t, root, "a1/new.go", "package a\n")
-	write(t, root, "a10/new10.go", "package a\n")
-	write(t, root, "a[1]/newb.go", "package a\n")
+	testutil.WriteFile(t, root, "a1/own.go", "package a // edited\n")
+	testutil.WriteFile(t, root, "a10/sibling.go", "package a // edited\n")
+	testutil.WriteFile(t, root, "a[1]/bracket.go", "package a // edited\n")
+	testutil.WriteFile(t, root, "a1/new.go", "package a\n")
+	testutil.WriteFile(t, root, "a10/new10.go", "package a\n")
+	testutil.WriteFile(t, root, "a[1]/newb.go", "package a\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -91,9 +91,9 @@ func TestWriteChangesLiteralPathspec(t *testing.T) {
 // Prewarm's entries survive SaveCache and are there for the next Open.
 func TestPrewarmPersists(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "include: [svc]\n")
-	write(t, root, "svc/a.go", "package svc\n")
-	write(t, root, "svc/b.go", "package svc\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, "svc/b.go", "package svc\n")
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)

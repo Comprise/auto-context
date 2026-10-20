@@ -1,6 +1,6 @@
 ---
 unit: internal/session
-source_hash: sha256:170dd6751a7152e34ecc070f3bd56142d3fc3e905dfee04c53c43c631822de17
+source_hash: sha256:17cc27771e54e932635760fe96ce7d21cc2e20dc18fcf3857c6cfcd63da252ab
 updated: "2026-10-20"
 ---
 # internal/session

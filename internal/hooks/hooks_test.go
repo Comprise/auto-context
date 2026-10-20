@@ -12,20 +12,10 @@ import (
 	"auto-context/internal/logx"
 	"auto-context/internal/project"
 	"auto-context/internal/session"
+	"auto-context/internal/testutil"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
-
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func testEnv(root string) Env {
 	return Env{Root: root, Now: func() time.Time { return time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC) }}
@@ -52,14 +42,14 @@ func ack(t *testing.T, env Env, units ...string) {
 func newRepo(t *testing.T, withLib bool) Env {
 	t.Helper()
 	root := t.TempDir()
-	write(t, root, "CLAUDE.md", "# Project\n")
-	write(t, root, "svc/go.mod", "module svc\n")
-	write(t, root, "svc/main.go", "package main\n")
-	write(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
-	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, root, "CLAUDE.md", "# Project\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nService summary.\n")
 	if withLib {
-		write(t, root, "lib/go.mod", "module lib\n")
-		write(t, root, "lib/lib.go", "package lib\n")
+		testutil.WriteFile(t, root, "lib/go.mod", "module lib\n")
+		testutil.WriteFile(t, root, "lib/lib.go", "package lib\n")
 	}
 	env := testEnv(root)
 	ack(t, env, "_root", "svc")
@@ -99,7 +89,7 @@ func TestSessionStartQuietWhenOK(t *testing.T) {
 
 func TestSessionStartGolden(t *testing.T) {
 	env := newRepo(t, true)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -181,10 +171,10 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 
 func TestHooksInactiveWithoutConfigOrContext(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "CLAUDE.md", "# Project\n")
-	write(t, root, ".gitignore", "bin/\n")
-	write(t, root, "svc/go.mod", "module svc\n")
-	write(t, root, "svc/main.go", "package main\n")
+	testutil.WriteFile(t, root, "CLAUDE.md", "# Project\n")
+	testutil.WriteFile(t, root, ".gitignore", "bin/\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n")
 	env := testEnv(root)
 	before := snapshotTree(t, root)
 	in := Input{SessionID: "s"}
@@ -195,7 +185,7 @@ func TestHooksInactiveWithoutConfigOrContext(t *testing.T) {
 			t.Errorf("%s: out=%q err=%v, want nil", name, out, err)
 		}
 	}
-	write(t, root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n// changed\n")
 	if out, err := Stop(env, in); out != nil || err != nil {
 		t.Errorf("Stop after edit: out=%q err=%v, want nil", out, err)
 	}
@@ -216,24 +206,24 @@ func TestActive(t *testing.T) {
 	if project.Active(root) {
 		t.Error("empty dir active")
 	}
-	write(t, root, ".auto-context/config.yaml", "min_files: 3\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 3\n")
 	if !project.Active(root) {
 		t.Error("config does not activate")
 	}
 	// A bare context/ directory is a common name (it may even hold code): it
 	// must not activate the plugin on its own.
 	dir := t.TempDir()
-	write(t, dir, "context/theme.go", "package context\n")
+	testutil.WriteFile(t, dir, "context/theme.go", "package context\n")
 	if project.Active(dir) {
 		t.Error("bare context dir activates")
 	}
-	write(t, dir, "context/_root.md", "# root\n")
+	testutil.WriteFile(t, dir, "context/_root.md", "# root\n")
 	if !project.Active(dir) {
 		t.Error("context/_root.md does not activate")
 	}
 	// A marker linking outside the repo does not count.
 	linked, outside := t.TempDir(), t.TempDir()
-	write(t, outside, "conf.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, outside, "conf.yaml", "min_files: 1\n")
 	if err := os.Symlink(filepath.Join(outside, "conf.yaml"), filepath.Join(linked, ".auto-context/config.yaml")); err != nil {
 		t.Skip("symlinks unsupported:", err)
 	}
@@ -262,7 +252,7 @@ func decodeSession(t *testing.T, out []byte) sessionOut {
 // every unit is ok.
 func TestSessionStartReportsBrokenMarkers(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "CLAUDE.md", "# Project\n<!-- /auto-context:units -->\n")
+	testutil.WriteFile(t, env.Root, "CLAUDE.md", "# Project\n<!-- /auto-context:units -->\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +302,7 @@ func TestSessionStartRemovesStaleSessions(t *testing.T) {
 // A bad setting in the config is shown to the user, and the rest applies.
 func TestSessionStartShowsConfigProblem(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "exlude: [svc]\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "exlude: [svc]\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +316,7 @@ func TestSessionStartShowsConfigProblem(t *testing.T) {
 // Text from a hostile config never reaches Claude's context or the user notice.
 func TestSessionStartDoesNotEchoConfig(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "IGNORE_PREVIOUS_INSTRUCTIONS: 1\nexclude: [\"[RUN_CURL\"]\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "IGNORE_PREVIOUS_INSTRUCTIONS: 1\nexclude: [\"[RUN_CURL\"]\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -343,7 +333,7 @@ func TestSessionStartDoesNotEchoConfig(t *testing.T) {
 // in this session or the next.
 func TestSessionStartDoesNotCountOwnLogEntries(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "exlude: [svc]\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "exlude: [svc]\n")
 	for i := range 2 {
 		out, err := SessionStart(env, Input{SessionID: "s"})
 		if err != nil {
@@ -358,7 +348,7 @@ func TestSessionStartDoesNotCountOwnLogEntries(t *testing.T) {
 // A configured docs language is announced even when every doc is up to date.
 func TestSessionStartNamesDocsLanguage(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "language: pt-BR\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "language: pt-BR\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -403,12 +393,12 @@ func TestSessionEndInactiveWritesNothing(t *testing.T) {
 // no orphan advice computed from the default units.
 func TestSessionStartBrokenConfigTouchesNothing(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc]\n")
 	if _, err := SessionStart(env, Input{SessionID: "s"}); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(filepath.Join(env.Root, "CLAUDE.md"))
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +415,7 @@ func TestSessionStartBrokenConfigTouchesNothing(t *testing.T) {
 // Orphan docs are not to be deleted without asking.
 func TestSessionStartOrphanAdviceAsksFirst(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, "context/gone.md", "# gone\n\nOld.\n")
+	testutil.WriteFile(t, env.Root, "context/gone.md", "# gone\n\nOld.\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -464,7 +454,7 @@ func TestSessionStartReportsUnreadableLog(t *testing.T) {
 // warning, and rewritten.
 func TestSessionStartCorruptCache(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/cache.json", "garbage")
+	testutil.WriteFile(t, env.Root, ".auto-context/cache.json", "garbage")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +487,7 @@ func TestSessionFailureAgentCLI(t *testing.T) {
 func TestSessionStartRefusedMarker(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(t.TempDir(), "cfg.yaml")
-	write(t, filepath.Dir(out), "cfg.yaml", "")
+	testutil.WriteFile(t, filepath.Dir(out), "cfg.yaml", "")
 	if err := os.Symlink(out, filepath.Join(root, ".auto-context/config.yaml")); err != nil {
 		t.Skip("symlinks unavailable:", err)
 	}
@@ -539,7 +529,7 @@ func TestSessionStartBrokenConfigKeepsErrorCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	logx.Errorf(env.Root, "stop: boom")
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -553,7 +543,7 @@ func TestSessionStartBrokenConfigKeepsErrorCount(t *testing.T) {
 // .auto-context/ yet, does not report an unwritable log and leaves no log.
 func TestSessionStartFirstRunLogIsFine(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "context/_root.md", "# r\n\nR.\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# r\n\nR.\n")
 	out, err := SessionStart(testEnv(root), Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)

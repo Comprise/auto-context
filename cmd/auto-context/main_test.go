@@ -16,27 +16,17 @@ import (
 	"auto-context/internal/config"
 	"auto-context/internal/gitx"
 	"auto-context/internal/hooks"
+	"auto-context/internal/testutil"
 
 	"gopkg.in/yaml.v3"
 )
 
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func repo(t *testing.T) string {
 	root := t.TempDir()
-	write(t, root, "CLAUDE.md", "# Project\n")
-	write(t, root, "svc/go.mod", "module svc\n")
-	write(t, root, "svc/main.go", "package main\n")
-	write(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
+	testutil.WriteFile(t, root, "CLAUDE.md", "# Project\n")
+	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
 	return root
 }
 
@@ -81,13 +71,13 @@ func TestHookStopEndToEnd(t *testing.T) {
 	if c, out, _ := do(t.TempDir(), in, "hook", "prompt-submit"); c != 0 || out != "" {
 		t.Fatalf("prompt-submit code=%d out=%q", c, out)
 	}
-	write(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
 	code, out, _ := do(t.TempDir(), in, "hook", "stop")
 	if code != 0 || !strings.HasPrefix(out, `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"auto-context: New unit svc`) || !strings.HasSuffix(out, "\n") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 	// Claude writes the docs; the follow-up Stop carries stop_hook_active and auto-acks.
-	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nService summary.\n")
 	active := `{"session_id":"s1","stop_hook_active":true,"cwd":` + quote(root) + `}`
 	if c, out, _ := do(t.TempDir(), active, "hook", "stop"); c != 0 || out != "" {
 		t.Fatalf("post-feedback stop code=%d out=%q", c, out)
@@ -145,7 +135,7 @@ func TestStatusStaleFilter(t *testing.T) {
 
 func TestStatusAllUpToDate(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/svc.md", "# svc\n\nSummary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nSummary.\n")
 	do(root, "", "ack", ".", "svc")
 	_, out, _ := do(root, "", "status", "--stale")
 	if out != "all docs up to date\n" {
@@ -196,7 +186,7 @@ func TestHookGetwdFailureExits0(t *testing.T) {
 
 func TestHookInactiveRepoWritesNothing(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "svc/main.go", "package main\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n")
 	if code, out, _ := do(root, "not json", "hook", "stop"); code != 0 || out != "" {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
@@ -253,7 +243,7 @@ func TestHookPreToolUse(t *testing.T) {
 
 func TestAckRefreshesRootIndex(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nService summary.\n")
 	if code, _, errs := do(root, "", "ack", "_root", "svc"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
@@ -268,7 +258,7 @@ func TestAckRefreshesRootIndex(t *testing.T) {
 
 func TestStatusReportsLoggedErrors(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/log", "2026-10-19T00:00:00Z hook stop: first\n2026-10-20T00:00:00Z hook stop: last one\n")
+	testutil.WriteFile(t, root, ".auto-context/log", "2026-10-19T00:00:00Z hook stop: first\n2026-10-20T00:00:00Z hook stop: last one\n")
 	_, out, _ := do(root, "", "status")
 	if !strings.Contains(out, "note: 2 error(s) in .auto-context/log") {
 		t.Errorf("status lacks log note: %q", out)
@@ -282,7 +272,7 @@ func TestStatusReportsLoggedErrors(t *testing.T) {
 // --exit-code fails on missing docs too, and only when asked.
 func TestStatusExitCodeCases(t *testing.T) {
 	root := repo(t) // svc has no context doc: missing
-	write(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
+	testutil.WriteFile(t, root, "context/_root.md", "# root\n\nRoot summary.\n")
 	do(root, "", "ack", "_root")
 	if code, out, _ := do(root, "", "status", "--exit-code"); code != 1 || !strings.Contains(out, "UNIT") {
 		t.Errorf("missing only: code=%d out=%q", code, out)
@@ -290,7 +280,7 @@ func TestStatusExitCodeCases(t *testing.T) {
 	if code, _, _ := do(root, "", "status"); code != 0 {
 		t.Errorf("without --exit-code: code=%d", code)
 	}
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	do(root, "", "ack", "svc")
 	if code, out, _ := do(root, "", "status", "--exit-code"); code != 0 || !strings.Contains(out, "svc") {
 		t.Errorf("fresh, full table: code=%d out=%q", code, out)
@@ -302,7 +292,7 @@ func TestStatusExitCode(t *testing.T) {
 	if code, _, _ := do(root, "", "status", "--exit-code"); code != 1 {
 		t.Errorf("stale repo: code=%d, want 1", code)
 	}
-	write(t, root, "context/svc.md", "# svc\n\nSummary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nSummary.\n")
 	do(root, "", "ack", "_root", "svc")
 	if code, out, _ := do(root, "", "status", "--stale", "--exit-code"); code != 0 {
 		t.Errorf("fresh repo: code=%d out=%q, want 0", code, out)
@@ -365,8 +355,8 @@ func TestHooksJSONContract(t *testing.T) {
 // or write anything outside the repo.
 func TestSymlinkAttacksStayInsideRepo(t *testing.T) {
 	outside := t.TempDir()
-	write(t, outside, "rc", "RC\n")
-	write(t, outside, "ctx/_root.md", "# r\n\nsecret summary\n")
+	testutil.WriteFile(t, outside, "rc", "RC\n")
+	testutil.WriteFile(t, outside, "ctx/_root.md", "# r\n\nsecret summary\n")
 	snapshotOutside := func() map[string]string {
 		m := map[string]string{}
 		filepath.WalkDir(outside, func(p string, d os.DirEntry, err error) error {
@@ -386,38 +376,38 @@ func TestSymlinkAttacksStayInsideRepo(t *testing.T) {
 	}
 	setups := map[string]func(root string){
 		"CLAUDE.md -> file": func(root string) {
-			write(t, root, "context/_root.md", "# r\n\nx\n")
+			testutil.WriteFile(t, root, "context/_root.md", "# r\n\nx\n")
 			link(t, filepath.Join(outside, "rc"), filepath.Join(root, "CLAUDE.md"))
 		},
 		".auto-context -> dir": func(root string) {
 			// The config would be outside too: the project is enabled by its docs.
-			write(t, root, "context/_root.md", "# r\n\nx\n")
+			testutil.WriteFile(t, root, "context/_root.md", "# r\n\nx\n")
 			link(t, outside, filepath.Join(root, ".auto-context"))
 		},
 		".auto-context/log -> file": func(root string) {
-			write(t, root, ".auto-context/config.yaml", "min_files: \"$(sh a)\"\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: \"$(sh a)\"\n")
 			if err := os.MkdirAll(filepath.Join(root, ".auto-context"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			link(t, filepath.Join(outside, "rc"), filepath.Join(root, ".auto-context", "log"))
 		},
 		"context -> dir": func(root string) {
-			write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 1\n")
 			link(t, filepath.Join(outside, "ctx"), filepath.Join(root, "context"))
 		},
 		".gitignore -> file": func(root string) {
-			write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 1\n")
 			link(t, filepath.Join(outside, "rc"), filepath.Join(root, ".gitignore"))
 		},
 		"CLAUDE.md -> .git/config": func(root string) {
-			write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
-			write(t, root, ".git/config", "[core]\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+			testutil.WriteFile(t, root, ".git/config", "[core]\n")
 			link(t, ".git/config", filepath.Join(root, "CLAUDE.md"))
 		},
 		"context doc -> .env": func(root string) {
-			write(t, root, ".auto-context/config.yaml", "include: [svc]\n")
-			write(t, root, "svc/a.go", "package svc\n")
-			write(t, root, ".env", "# Settings\nAPI_KEY=secret\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+			testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+			testutil.WriteFile(t, root, ".env", "# Settings\nAPI_KEY=secret\n")
 			if err := os.MkdirAll(filepath.Join(root, "context"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -427,14 +417,14 @@ func TestSymlinkAttacksStayInsideRepo(t *testing.T) {
 	for name, setup := range setups {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			write(t, root, ".git/HEAD", "ref: refs/heads/main\n")
-			write(t, root, "main.go", "package main\n")
+			testutil.WriteFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+			testutil.WriteFile(t, root, "main.go", "package main\n")
 			setup(root)
 			in := `{"session_id":"s","cwd":` + quote(root) + `}`
 			for _, ev := range []string{"session-start", "prompt-submit", "stop"} {
 				do(root, in, "hook", ev)
 			}
-			write(t, root, "main.go", "package main\n// edit\n")
+			testutil.WriteFile(t, root, "main.go", "package main\n// edit\n")
 			do(root, in, "hook", "stop")
 			do(root, "", "ack", "_root")
 			do(root, "", "ack", "--exclude", "x")
@@ -467,7 +457,7 @@ func TestSymlinkAttacksStayInsideRepo(t *testing.T) {
 // Older logs hold multi-line entries; the note counts entries, not lines.
 func TestStatusLogNoteCountsEntries(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/log", "2026-10-19T00:00:00Z config: yaml: unmarshal errors:\n  line 1: cannot unmarshal\ngoroutine 1 [running]:\n2026-10-20T00:00:00+03:00 hook stop: last one\n")
+	testutil.WriteFile(t, root, ".auto-context/log", "2026-10-19T00:00:00Z config: yaml: unmarshal errors:\n  line 1: cannot unmarshal\ngoroutine 1 [running]:\n2026-10-20T00:00:00+03:00 hook stop: last one\n")
 	_, out, _ := do(root, "", "status")
 	if !strings.Contains(out, "note: 2 error(s) in .auto-context/log") {
 		t.Errorf("status note = %q", out)
@@ -481,11 +471,11 @@ func TestInRepoClaudeMDSymlink(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root, "AGENTS.md", "# Project\n")
+	testutil.WriteFile(t, root, "AGENTS.md", "# Project\n")
 	if err := os.Symlink("AGENTS.md", filepath.Join(root, "CLAUDE.md")); err != nil {
 		t.Skip("symlinks unsupported:", err)
 	}
-	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nService summary.\n")
 	in := `{"session_id":"s","cwd":` + quote(root) + `}`
 	do(root, in, "hook", "session-start")
 	if code, _, errs := do(root, "", "ack", "_root", "svc"); code != 0 || errs != "" {
@@ -507,8 +497,8 @@ func TestInRepoClaudeMDSymlink(t *testing.T) {
 // status and units must not write into a project the plugin is not active in.
 func TestStatusInactiveWritesNothing(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".git/HEAD", "ref: refs/heads/main\n")
-	write(t, root, "p/a.go", "package p\n")
+	testutil.WriteFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+	testutil.WriteFile(t, root, "p/a.go", "package p\n")
 	do(root, "", "status")
 	do(root, "", "units")
 	if _, err := os.Stat(filepath.Join(root, ".auto-context")); !os.IsNotExist(err) {
@@ -546,14 +536,14 @@ func TestAckExcludeRequiresDir(t *testing.T) {
 // nested repository or submodule.
 func TestHookRootFromProjectDir(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	do(root, "", "ack", "_root", "svc")
-	write(t, root, "sub/.git", "gitdir: x\n")
+	testutil.WriteFile(t, root, "sub/.git", "gitdir: x\n")
 	t.Setenv("CLAUDE_PROJECT_DIR", root)
 	start := `{"session_id":"s","cwd":` + quote(root) + `}`
 	drift := `{"session_id":"s","cwd":` + quote(filepath.Join(root, "sub")) + `}`
 	do(root, start, "hook", "prompt-submit")
-	write(t, root, "svc/main.go", "package main\n// edit\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n// edit\n")
 	if _, out, _ := do(root, drift, "hook", "stop"); !strings.Contains(out, "code changed in svc") {
 		t.Errorf("stop with drifted cwd: %q", out)
 	}
@@ -565,7 +555,7 @@ func TestFindRootStopsAtHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
-	write(t, home, ".auto-context/config.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, home, ".auto-context/config.yaml", "min_files: 1\n")
 	proj := filepath.Join(home, "proj", "src")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -589,22 +579,19 @@ func TestChangesListsUnitHistory(t *testing.T) {
 	root := repo(t)
 	git := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		testutil.Git(t, root, args...)
 	}
 	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
 		t.Fatal(err)
 	}
 	git("init", "-q")
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	do(root, "", "ack", "_root", "svc")
 	git("add", "-A")
 	git("commit", "-qm", "initial")
-	write(t, root, "svc/main.go", "package main\nfunc New() {}\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\nfunc New() {}\n")
 	git("commit", "-qam", "add New to svc")
-	write(t, root, "svc/extra.go", "package main\n")
+	testutil.WriteFile(t, root, "svc/extra.go", "package main\n")
 	code, out, errs := do(filepath.Join(root, "context"), "", "changes", "svc")
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
@@ -631,16 +618,14 @@ func TestChangesDoesNotRunGitFilters(t *testing.T) {
 	}
 	git := func(args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		testutil.Git(t, root, args...)
 	}
 	git("init", "-q")
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	git("add", "-A")
 	git("commit", "-qm", "initial")
-	write(t, root, ".gitattributes", "*.go filter=evil\n")
-	write(t, root, "svc/main.go", "package main\n// edit\n")
+	testutil.WriteFile(t, root, ".gitattributes", "*.go filter=evil\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n// edit\n")
 	// The filter may sit in .git/config or in the worktree config, which
 	// `git config --local` does not show.
 	for name, setup := range map[string][]string{
@@ -672,7 +657,7 @@ func TestChangesDoesNotRunGitFilters(t *testing.T) {
 		pwned := filepath.Join(t.TempDir(), "pwned")
 		// Quoted, with forward slashes: git config reads backslashes as escapes
 		// and an unquoted ";" as a comment.
-		write(t, root, ".git/evil.inc", "[filter \"evil\"]\n\tclean = \"touch '"+filepath.ToSlash(pwned)+"'; cat\"\n")
+		testutil.WriteFile(t, root, ".git/evil.inc", "[filter \"evil\"]\n\tclean = \"touch '"+filepath.ToSlash(pwned)+"'; cat\"\n")
 		git("config", "include.path", "evil.inc")
 		if code, out, _ := do(root, "", "changes", "svc"); code != 0 || !strings.Contains(out, "defines filter drivers") {
 			t.Errorf("code=%d out=%q", code, out)
@@ -691,14 +676,11 @@ func TestChangesDoesNotRunSubmoduleFilters(t *testing.T) {
 	}
 	run := func(dir string, args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		testutil.Git(t, dir, append([]string{"-c", "protocol.file.allow=always"}, args...)...)
 	}
 	sub := t.TempDir()
 	run(sub, "init", "-q")
-	write(t, sub, "lib.go", "package lib\n")
+	testutil.WriteFile(t, sub, "lib.go", "package lib\n")
 	run(sub, "add", "-A")
 	run(sub, "commit", "-qm", "sub")
 
@@ -707,7 +689,7 @@ func TestChangesDoesNotRunSubmoduleFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(root, "init", "-q")
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	run(root, "add", "-A")
 	run(root, "commit", "-qm", "initial")
 	run(root, "submodule", "add", "-q", sub, "svc/vendored")
@@ -716,9 +698,9 @@ func TestChangesDoesNotRunSubmoduleFilters(t *testing.T) {
 	pwned := filepath.Join(t.TempDir(), "pwned")
 	subDir := filepath.Join(root, "svc", "vendored")
 	run(subDir, "config", "filter.evil.clean", "touch "+pwned+"; cat")
-	write(t, subDir, ".gitattributes", "*.go filter=evil\n")
+	testutil.WriteFile(t, subDir, ".gitattributes", "*.go filter=evil\n")
 	// Same size as the committed file: git must read it through the filter.
-	write(t, subDir, "lib.go", "package xyz\n")
+	testutil.WriteFile(t, subDir, "lib.go", "package xyz\n")
 	future := time.Now().Add(time.Hour)
 	if err := os.Chtimes(filepath.Join(subDir, "lib.go"), future, future); err != nil {
 		t.Fatal(err)
@@ -752,9 +734,7 @@ func TestChangesWithoutCommits(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("%v %s", err, out)
-	}
+	testutil.Git(t, root, "init", "-q")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	code, out, errs := do(root, "", "changes", "svc")
 	if code != 0 || !strings.Contains(out, "no commits yet") || !strings.Contains(out, "svc/main.go") {
@@ -774,19 +754,17 @@ func TestChangesInSubdirectoryRoot(t *testing.T) {
 	top := t.TempDir()
 	g := func(args ...string) {
 		t.Helper()
-		if out, err := exec.Command("git", append([]string{"-C", top, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		testutil.Git(t, top, args...)
 	}
 	g("init", "-q")
 	for i := 0; i < 5; i++ {
-		write(t, top, fmt.Sprintf("pkg/f%d.go", i), "package p\n")
-		write(t, top, fmt.Sprintf("sub/pkg/f%d.go", i), "package p\n")
+		testutil.WriteFile(t, top, fmt.Sprintf("pkg/f%d.go", i), "package p\n")
+		testutil.WriteFile(t, top, fmt.Sprintf("sub/pkg/f%d.go", i), "package p\n")
 	}
-	write(t, top, "sub/.auto-context/config.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, top, "sub/.auto-context/config.yaml", "min_files: 1\n")
 	g("add", "-A")
 	g("commit", "-qm", "init")
-	write(t, top, "pkg/f0.go", "package p // outer\n")
+	testutil.WriteFile(t, top, "pkg/f0.go", "package p // outer\n")
 	g("commit", "-qam", "outer only")
 	_, out, _ := do(filepath.Join(top, "sub"), "", "changes", "pkg")
 	if strings.Contains(out, "outer only") {
@@ -803,7 +781,7 @@ func TestChangesInSubdirectoryRoot(t *testing.T) {
 
 func TestStatusNamesDocsLanguage(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "language: ru\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "language: ru\n")
 	if _, out, _ := do(root, "", "status"); !strings.Contains(out, "note: write unit docs in language ru") {
 		t.Errorf("out=%q", out)
 	}
@@ -843,8 +821,8 @@ func TestSkillsFrontmatter(t *testing.T) {
 // ack, units and changes refuse while the config cannot be parsed: the units come from defaults.
 func TestAckRefusesBrokenConfig(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/svc.md", "# svc\n\nS.\n")
-	write(t, root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc\n")
 	for _, args := range [][]string{{"ack", "svc"}, {"units"}, {"changes", "svc"}} {
 		if code, out, errs := do(root, "", args...); code != 1 || !strings.Contains(errs, "fix it first") || out != "" {
 			t.Errorf("%v: code=%d out=%q stderr=%q", args, code, out, errs)
@@ -859,13 +837,11 @@ func TestChangesHeadFailure(t *testing.T) {
 		t.Skip("needs git and a POSIX sh")
 	}
 	root := repo(t)
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"}} {
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-qm", "x"}} {
+		testutil.Git(t, root, args...)
 	}
 	bin := t.TempDir()
-	write(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *'--verify -q HEAD'*) echo 'fatal: detected dubious ownership' >&2; exit 128;; esac\nexec '"+real+"' \"$@\"\n")
+	testutil.WriteFile(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *'--verify -q HEAD'*) echo 'fatal: detected dubious ownership' >&2; exit 128;; esac\nexec '"+real+"' \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -879,7 +855,7 @@ func TestChangesHeadFailure(t *testing.T) {
 // only --exit-code fails, as the docs state is unknown.
 func TestStatusBrokenConfig(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc\n")
 	code, out, _ := do(root, "", "status")
 	if code != 0 || strings.Contains(out, "UNIT") || !strings.Contains(out, "no table is printed") {
 		t.Errorf("code=%d out=%q", code, out)
@@ -892,7 +868,7 @@ func TestStatusBrokenConfig(t *testing.T) {
 // An orphan doc with an unusual name is counted, not echoed into status.
 func TestStatusHidesUnusualOrphanName(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/x`; run this.md", "# x\n")
+	testutil.WriteFile(t, root, "context/x`; run this.md", "# x\n")
 	_, out, _ := do(root, "", "status")
 	if strings.Contains(out, "run this") || !strings.Contains(out, "1 more file(s)") {
 		t.Errorf("out=%q", out)
@@ -903,8 +879,8 @@ func TestStatusHidesUnusualOrphanName(t *testing.T) {
 // and names the YAML error without quoting yaml's own text.
 func TestStatusBrokenConfigLogNote(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "include: [svc\n")
-	write(t, root, ".auto-context/log", "2026-10-19T00:00:00Z hook stop: x\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, root, ".auto-context/log", "2026-10-19T00:00:00Z hook stop: x\n")
 	_, out, _ := do(root, "", "status")
 	for _, want := range []string{"1 error(s) in .auto-context/log", "no table is printed", "YAML syntax error"} {
 		if !strings.Contains(out, want) {
@@ -923,7 +899,7 @@ func TestStatusLogNotWritable(t *testing.T) {
 		t.Skip("needs POSIX permissions and a non-root user")
 	}
 	root := repo(t)
-	write(t, root, ".auto-context/log", "")
+	testutil.WriteFile(t, root, ".auto-context/log", "")
 	if err := os.Chmod(filepath.Join(root, ".auto-context", "log"), 0o444); err != nil {
 		t.Fatal(err)
 	}
@@ -931,7 +907,7 @@ func TestStatusLogNotWritable(t *testing.T) {
 		t.Errorf("out=%q", out)
 	}
 	inactive := t.TempDir()
-	write(t, inactive, "p/a.go", "package p\n")
+	testutil.WriteFile(t, inactive, "p/a.go", "package p\n")
 	if _, out, _ := do(inactive, "", "status"); strings.Contains(out, "cannot be written") {
 		t.Errorf("inactive out=%q", out)
 	}
@@ -964,9 +940,9 @@ func TestStatusConfigIgnoredGitFailure(t *testing.T) {
 		t.Skip("needs git and a POSIX sh")
 	}
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "min_files: 5\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 5\n")
 	bin := t.TempDir()
-	write(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *'check-ignore -q -- .auto-context'*) echo 'fatal: SECRET STDERR' >&2; exit 128;; esac\nexec '"+real+"' \"$@\"\n")
+	testutil.WriteFile(t, bin, "git", "#!/bin/sh\ncase \"$*\" in *'check-ignore -q -- .auto-context'*) echo 'fatal: SECRET STDERR' >&2; exit 128;; esac\nexec '"+real+"' \"$@\"\n")
 	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -984,13 +960,11 @@ func TestStatusConfigIgnoredCorruptIndex(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "min_files: 5\n")
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"}} {
-		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 5\n")
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-qm", "x"}} {
+		testutil.Git(t, root, args...)
 	}
-	write(t, root, ".git/index", "garbage")
+	testutil.WriteFile(t, root, ".git/index", "garbage")
 	_, out, _ := do(root, "", "status")
 	if !strings.Contains(out, "git could not tell whether") || strings.Contains(out, "index file") || strings.Contains(out, "fatal") {
 		t.Errorf("out=%q", out)
@@ -999,8 +973,8 @@ func TestStatusConfigIgnoredCorruptIndex(t *testing.T) {
 
 func TestStatusBrokenMarkersAgents(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
-	write(t, root, "AGENTS.md", "<!-- auto-context:units -->\nx\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	testutil.WriteFile(t, root, "AGENTS.md", "<!-- auto-context:units -->\nx\n")
 	_, out, _ := do(root, "", "status")
 	want := "warning: the auto-context:units markers in the root AGENTS.md are unbalanced, so the units index is not updated"
 	if !strings.Contains(out, want) {
@@ -1010,7 +984,7 @@ func TestStatusBrokenMarkersAgents(t *testing.T) {
 
 func TestHookAgentFlag(t *testing.T) {
 	root := repo(t)
-	write(t, root, "context/svc.md", "# svc\n\nService summary.\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nService summary.\n")
 	if c, _, e := do(root, "", "ack", "_root", "svc"); c != 0 {
 		t.Fatalf("ack . code=%d %s", c, e)
 	}
@@ -1018,7 +992,7 @@ func TestHookAgentFlag(t *testing.T) {
 	if c, out, _ := do(t.TempDir(), in, "hook", "prompt-submit", "--agent", "codex"); c != 0 || out != "" {
 		t.Fatalf("prompt-submit code=%d out=%q", c, out)
 	}
-	write(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
+	testutil.WriteFile(t, root, "svc/main.go", "package main\n\nfunc main() {}\n")
 	code, out, _ := do(t.TempDir(), in, "hook", "stop", "--agent", "codex")
 	if code != 0 || !strings.Contains(out, "$auto-context:auto-context-docs") {
 		t.Fatalf("code=%d out=%q", code, out)
@@ -1032,7 +1006,7 @@ func TestHookAgentFlagBad(t *testing.T) {
 		{"hook", "stop", "--x", "codex"},
 	} {
 		root := repo(t)
-		write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+		testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 1\n")
 		code, out, _ := do(root, `{}`, args...)
 		if code != 0 || out != "" {
 			t.Errorf("%v: code=%d out=%q", args, code, out)
@@ -1066,7 +1040,7 @@ func TestHookPermissionRequest(t *testing.T) {
 
 func TestHookToolInputArray(t *testing.T) {
 	root := repo(t)
-	write(t, root, ".auto-context/config.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 1\n")
 	in := `{"tool_name":"Bash","tool_input":{"command":["auto-context","status"]},"cwd":` + quote(root) + `}`
 	if c, out, _ := do(root, in, "hook", "permission-request", "--agent", "codex"); c != 0 || out != "" {
 		t.Fatalf("code=%d out=%q", c, out)
@@ -1195,7 +1169,7 @@ func TestCodexMarketplace(t *testing.T) {
 
 func writeFiles(t *testing.T, root, dir string) {
 	for _, f := range []string{"a", "b", "c", "d", "e"} {
-		write(t, root, dir+"/"+f+".go", "package x\n")
+		testutil.WriteFile(t, root, dir+"/"+f+".go", "package x\n")
 	}
 }
 
@@ -1228,7 +1202,7 @@ func TestAckAllFailKeepsIndex(t *testing.T) {
 func TestAckExcludeRefreshesIndex(t *testing.T) {
 	root := repo(t)
 	writeFiles(t, root, "newu")
-	write(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
+	testutil.WriteFile(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
 	if code, _, errs := do(root, "", "ack", "_root", "newu"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
@@ -1247,11 +1221,11 @@ func TestAckExcludeRefreshesIndex(t *testing.T) {
 
 func TestAckExcludeAgentsIndex(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
 	writeFiles(t, root, "keep")
 	writeFiles(t, root, "newu")
-	write(t, root, "context/keep.md", "# keep\n\nKept unit.\n")
-	write(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
+	testutil.WriteFile(t, root, "context/keep.md", "# keep\n\nKept unit.\n")
+	testutil.WriteFile(t, root, "context/newu.md", "# newu\n\nNew unit.\n")
 	if code, _, errs := do(root, "", "ack", "--exclude", "newu"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}

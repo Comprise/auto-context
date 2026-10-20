@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"auto-context/internal/docstate"
+	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
 
@@ -33,28 +34,23 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 		want  string
 	}{
 		{"config ignored by git", func(t *testing.T, root string) {
-			if _, err := exec.LookPath("git"); err != nil {
-				t.Skip("git not installed")
-			}
-			if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
-				t.Fatalf("git init: %v\n%s", err, out)
-			}
-			write(t, root, ".auto-context/config.yaml", "min_files: 3\n")
-			write(t, root, ".gitignore", ".auto-context/\n")
+			testutil.Git(t, root, "init", "-q")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 3\n")
+			testutil.WriteFile(t, root, ".gitignore", ".auto-context/\n")
 		}, "is ignored by git"},
 		{"discovery warning", func(t *testing.T, root string) {
-			write(t, root, ".gitignore", "[a\n")
+			testutil.WriteFile(t, root, ".gitignore", "[a\n")
 		}, "1 discovery warning(s)"},
 		{"hash cache unusable", func(t *testing.T, root string) {
-			write(t, root, ".auto-context/cache.json", "garbage")
+			testutil.WriteFile(t, root, ".auto-context/cache.json", "garbage")
 		}, "the hash cache was unusable and is rebuilt"},
 		{"broken frontmatter", func(t *testing.T, root string) {
-			write(t, root, "context/svc.md", "---\nunit: [\n---\n# svc\n\nText.\n")
+			testutil.WriteFile(t, root, "context/svc.md", "---\nunit: [\n---\n# svc\n\nText.\n")
 		}, "svc (broken frontmatter)"},
 		{"doc linked outside", func(t *testing.T, root string) {
 			symlinks(t)
 			outside := t.TempDir()
-			write(t, outside, "o.md", "# o\n\nOutside.\n")
+			testutil.WriteFile(t, outside, "o.md", "# o\n\nOutside.\n")
 			ctx := filepath.Join(root, "context", "svc.md")
 			if err := os.Remove(ctx); err != nil {
 				t.Fatal(err)
@@ -64,12 +60,12 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 			}
 		}, "svc (" + docstate.OutsideText + ")"},
 		{"orphans with config problems", func(t *testing.T, root string) {
-			write(t, root, ".auto-context/config.yaml", "exlude: [x]\n")
-			write(t, root, "context/gone.md", "# gone\n\nOld.\n")
+			testutil.WriteFile(t, root, ".auto-context/config.yaml", "exlude: [x]\n")
+			testutil.WriteFile(t, root, "context/gone.md", "# gone\n\nOld.\n")
 		}, "Fix .auto-context/config.yaml first"},
 		{"log not writable", func(t *testing.T, root string) {
 			noRoot(t)
-			write(t, root, ".auto-context/log", "")
+			testutil.WriteFile(t, root, ".auto-context/log", "")
 			if err := os.Chmod(filepath.Join(root, ".auto-context", "log"), 0o444); err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +73,7 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 		{"stale session files not removable", func(t *testing.T, root string) {
 			noRoot(t)
 			state := filepath.Join(root, ".auto-context", "state")
-			write(t, root, ".auto-context/state/old.snapshot", "x")
+			testutil.WriteFile(t, root, ".auto-context/state/old.snapshot", "x")
 			past := time.Now().Add(-30 * 24 * time.Hour)
 			if err := os.Chtimes(filepath.Join(state, "old.snapshot"), past, past); err != nil {
 				t.Fatal(err)
@@ -93,7 +89,7 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 			if err := os.Remove(filepath.Join(root, ".auto-context", "cache.json")); err != nil {
 				t.Fatal(err)
 			}
-			write(t, root, ".auto-context/cache.json/x", "")
+			testutil.WriteFile(t, root, ".auto-context/cache.json/x", "")
 		}, "the hash cache cannot be saved"},
 	}
 	for _, c := range cases {
@@ -127,7 +123,7 @@ func TestStopSeesSameSizeEdit(t *testing.T) {
 	if len(after) != len(before) || after == string(before) {
 		t.Fatalf("bad fixture %q", after)
 	}
-	write(t, env.Root, "svc/main.go", after)
+	testutil.WriteFile(t, env.Root, "svc/main.go", after)
 	setMtime(t, env.Root, "svc/main.go", time.Now().Add(time.Hour), 0)
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason = %q", r)
@@ -166,13 +162,11 @@ func TestSessionStartConfigIgnoredGitFailure(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "min_files: 5\n")
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"}} {
-		if out, err := exec.Command("git", append([]string{"-C", env.Root}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "min_files: 5\n")
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"commit", "-qm", "x"}} {
+		testutil.Git(t, env.Root, args...)
 	}
-	write(t, env.Root, ".git/index", "garbage")
+	testutil.WriteFile(t, env.Root, ".git/index", "garbage")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"auto-context/internal/testutil"
 )
 
 // When the journal cannot be saved, Stop says nothing rather than repeat the
@@ -16,7 +18,7 @@ func TestStopNoFeedbackLoopWhenJournalUnsaved(t *testing.T) {
 		t.Skip("root ignores permissions")
 	}
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	state := filepath.Join(env.Root, ".auto-context", "state")
 	if err := os.Chmod(state, 0o555); err != nil {
 		t.Fatal(err)
@@ -35,7 +37,7 @@ func TestConfigPausedNoLoopWhenJournalUnsaved(t *testing.T) {
 		t.Skip("root ignores permissions")
 	}
 	env := turn(t)
-	write(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "include: [svc\n")
 	state := filepath.Join(env.Root, ".auto-context", "state")
 	if err := os.Chmod(state, 0o555); err != nil {
 		t.Fatal(err)
@@ -54,9 +56,9 @@ func TestStopReportsAckFailureAfterNotice(t *testing.T) {
 		t.Skip("root ignores permissions")
 	}
 	env := turn(t)
-	write(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	feedback(t, stop(t, env)) // "code changed in svc"
-	write(t, env.Root, "context/svc.md", "# svc\n\nUpdated.\n")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nUpdated.\n")
 	ctx := filepath.Join(env.Root, "context")
 	if err := os.Chmod(ctx, 0o555); err != nil {
 		t.Fatal(err)

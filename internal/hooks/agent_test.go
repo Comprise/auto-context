@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"auto-context/internal/testutil"
 )
 
 func TestAgentRefs(t *testing.T) {
@@ -68,8 +70,8 @@ func TestStopFeedbackCodex(t *testing.T) {
 
 func TestSessionStartRootIndexAgents(t *testing.T) {
 	env := newRepo(t, false)
-	write(t, env.Root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
-	write(t, env.Root, "AGENTS.md", "# Project\n<!-- /auto-context:units -->\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
+	testutil.WriteFile(t, env.Root, "AGENTS.md", "# Project\n<!-- /auto-context:units -->\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +87,7 @@ func TestBrokenIndexFileNoClaudeMD(t *testing.T) {
 	if err := os.Remove(filepath.Join(env.Root, "CLAUDE.md")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	write(t, env.Root, ".auto-context/config.yaml", "index_file: agents.md\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "index_file: agents.md\n")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +106,7 @@ func TestNonStringIndexFileNoClaudeMD(t *testing.T) {
 	if err := os.Remove(filepath.Join(env.Root, "CLAUDE.md")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	write(t, env.Root, ".auto-context/config.yaml", "index_file: [AGENTS.md]\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "index_file: [AGENTS.md]\n")
 	if _, err := SessionStart(env, Input{SessionID: "s"}); err != nil {
 		t.Fatal(err)
 	}

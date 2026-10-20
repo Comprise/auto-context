@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"auto-context/internal/testutil"
 )
 
 // plugin lays out a plugin dir with the real shim and, if script is not
@@ -24,9 +26,9 @@ func plugin(t *testing.T, script string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, dir, "bin/auto-context", string(shim))
+	testutil.WriteFile(t, dir, "bin/auto-context", string(shim))
 	if script != "" {
-		write(t, dir, "libexec/auto-context-"+runtime.GOOS+"-"+runtime.GOARCH, "#!/bin/sh\n"+script+"\n")
+		testutil.WriteFile(t, dir, "libexec/auto-context-"+runtime.GOOS+"-"+runtime.GOARCH, "#!/bin/sh\n"+script+"\n")
 		if err := os.Chmod(filepath.Join(dir, "libexec", "auto-context-"+runtime.GOOS+"-"+runtime.GOARCH), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +56,7 @@ func shim(t *testing.T, dir, project string, args ...string) (int, string, strin
 func TestShimWithoutBinary(t *testing.T) {
 	dir := plugin(t, "")
 	active, inactive := t.TempDir(), t.TempDir()
-	write(t, active, ".auto-context/config.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, active, ".auto-context/config.yaml", "min_files: 1\n")
 
 	code, out, _ := shim(t, dir, active, "hook", "session-start")
 	if code != 0 || !strings.Contains(out, `"systemMessage":"auto-context: the binary`) {
@@ -92,7 +94,7 @@ func TestShimHookCrashExitsZero(t *testing.T) {
 func TestShimSessionStartCrashNotice(t *testing.T) {
 	dir := plugin(t, `[ "$1" = hook-exit ] && exit 0; echo '{"partial'; exit 2`)
 	active := t.TempDir()
-	write(t, active, "context/_root.md", "# root\n")
+	testutil.WriteFile(t, active, "context/_root.md", "# root\n")
 	code, out, _ := shim(t, dir, active, "hook", "session-start")
 	if code != 0 || !strings.Contains(out, "session-start hook crashed") || strings.Contains(out, "partial") {
 		t.Errorf("code=%d out=%q", code, out)
@@ -108,9 +110,9 @@ func TestShimSessionStartCrashNotice(t *testing.T) {
 func TestShimWithoutBinaryFindsRoot(t *testing.T) {
 	dir := plugin(t, "")
 	base := t.TempDir()
-	write(t, base, "repo/context/_root.md", "# root\n")
-	write(t, base, "repo/a/b/x.go", "package b\n")
-	write(t, base, "repo/nested/y.go", "package y\n")
+	testutil.WriteFile(t, base, "repo/context/_root.md", "# root\n")
+	testutil.WriteFile(t, base, "repo/a/b/x.go", "package b\n")
+	testutil.WriteFile(t, base, "repo/nested/y.go", "package y\n")
 	for _, d := range []string{"repo/.git", "repo/nested/.git"} {
 		if err := os.MkdirAll(filepath.Join(base, d), 0o755); err != nil {
 			t.Fatal(err)
