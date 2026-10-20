@@ -56,8 +56,8 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 
 ## 3. Принятые решения
 
-- Один бинарник, явный флаг агента в команде хука: `auto-context hook --agent codex <event>`.
-  Без флага — `claude`. Угадывание по stdin отвергнуто: общий `hooks/hooks.json` в Codex
+- Один бинарник, явный флаг агента после события: `auto-context hook <event> --agent codex`
+  (шим читает событие из `$2`, поэтому флаг идёт последним). Без флага — `claude`. Угадывание по stdin отвергнуто: общий `hooks/hooks.json` в Codex
   запускал бы `pre-tool-use` на каждый Bash и «одобрял» бы переписыванием.
 - Имя индексного файла — настройка репозитория (`index_file` в конфиге), а не свойство
   агента: CLI вне хука агента не знает, и результат не должен зависеть от того, кто запустил.
@@ -87,11 +87,11 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 
 | Событие | Команда | Таймаут | Отличия от Claude Code |
 |---|---|---|---|
-| SessionStart | `hook --agent codex session-start` | 60 | нет; `source: fork` трактуется как `startup` |
-| UserPromptSubmit | `hook --agent codex prompt-submit` | 30 | нет |
-| Stop | `hook --agent codex stop` | 60 | нет: `decision: block` + `reason` |
-| PermissionRequest (`matcher: ^Bash$`) | `hook --agent codex permission-request` | 10 | новый обработчик |
-| SessionEnd | `hook --agent codex session-end` | 3 | таймаут ≤ 3 с |
+| SessionStart | `hook session-start --agent codex` | 60 | нет (`source` хуки не читают) |
+| UserPromptSubmit | `hook prompt-submit --agent codex` | 30 | нет |
+| Stop | `hook stop --agent codex` | 60 | нет: `decision: block` + `reason` |
+| PermissionRequest (`matcher: ^Bash$`) | `hook permission-request --agent codex` | 10 | новый обработчик |
+| SessionEnd | `hook session-end --agent codex` | 3 | таймаут ≤ 3 с |
 
 - `permission-request` использует ту же проверку, что `PreToolUse` (`allowedCommand`,
   `shadowed`), и отвечает `{"hookSpecificOutput":{"hookEventName":"PermissionRequest",
@@ -101,15 +101,15 @@ Code — с `<unit>/CLAUDE.md`, под Codex — с `<unit>/AGENTS.md`. Ядро
 - Шим: при отсутствии `CLAUDE_PROJECT_DIR` уже берёт `.` — это `cwd` сессии Codex. JSON-ответы
   шима (`systemMessage` + `additionalContext`) Codex понимает.
 - Код: `hooks.Env` получает поле `Agent` (`claude` | `codex`); `main.go` разбирает `--agent`
-  до имени события, неизвестный агент — ошибка в лог, выход 0, как прочие ошибки хука.
+  после имени события, неизвестный агент — ошибка в лог, выход 0, как прочие ошибки хука.
 
 ## 6. Тексты под агента
 
 - Профиль агента — маленькая таблица в `internal/hooks`: ссылка на навык
   (`auto-context:auto-context-docs` → `$auto-context-docs`), команда синка
   (`/auto-context:sync` → `$sync`).
-- Слово «Claude» в текстах хуков, которые видит модель или пользователь, заменяется на
-  нейтральное («the agent»/без субъекта) для обоих агентов — так меньше ветвлений.
+- Строки хуков и CLI слова «Claude» не содержат (оно только в комментариях); меняются лишь
+  имя индексного файла и ссылки на навыки/команды.
 - Навыки: frontmatter Claude-only (`disable-model-invocation`, `allowed-tools`) остаётся —
   Codex незнакомые поля игнорирует (проверяется в шаге 0). В `init`, `sync`, `status`,
   `auto-context-docs` — короткие указания для Codex:
