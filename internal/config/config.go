@@ -68,6 +68,10 @@ func Default() Config {
 	}
 }
 
+// ErrBadIndexFile is what Load returns for an index_file other than the two
+// allowed names.
+var ErrBadIndexFile = errors.New("index_file must be " + IndexClaude + " or " + IndexAgents)
+
 // MaxSize caps the size of the config file we read.
 const MaxSize = 1 << 20
 
@@ -137,7 +141,7 @@ func Load(root string) (Config, Problems, error) {
 	}
 	if cfg.IndexFile != "" && cfg.IndexFile != IndexClaude && cfg.IndexFile != IndexAgents {
 		// Which file holds the index decides where every doc lives: no guessing.
-		return Default(), nil, errors.New("index_file must be " + IndexClaude + " or " + IndexAgents)
+		return Default(), nil, ErrBadIndexFile
 	}
 	pr = append(pr, cfg.fix()...)
 	if len(pr) == 0 {
@@ -178,6 +182,8 @@ func Describe(err error) string {
 		}
 	}
 	switch {
+	case errors.Is(err, ErrBadIndexFile):
+		return ErrBadIndexFile.Error()
 	case strings.HasPrefix(msg, "yaml: "):
 		return "a YAML syntax error"
 	case errors.Is(err, os.ErrPermission):

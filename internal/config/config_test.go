@@ -436,8 +436,11 @@ func TestIndexFile(t *testing.T) {
 			}
 			cfg, pr, err := Load(root)
 			if tc.wantErr != "" {
-				if err == nil || err.Error() != tc.wantErr {
+				if err == nil || err.Error() != tc.wantErr || !errors.Is(err, ErrBadIndexFile) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				if d := Describe(err); d != tc.wantErr {
+					t.Errorf("Describe = %q, want %q", d, tc.wantErr)
 				}
 			} else if err != nil || pr != nil {
 				t.Fatalf("err = %v, problems = %v", err, pr)
