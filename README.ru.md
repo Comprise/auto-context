@@ -167,7 +167,7 @@ exclude: [vendor/**, node_modules/**, "**/testdata/**", dist/**, build/**]
 track: []               # файлы без кодового расширения, которые тоже считать кодом юнита
 index_file: CLAUDE.md   # имя индексного файла юнитов: CLAUDE.md или AGENTS.md (Codex)
 language: ""            # язык документов: ru, en, pt-BR…; пусто — как в существующих доках
-max_session_notice: 10  # сколько юнитов перечислять в напоминании при старте
+max_session_notice: 10  # сколько юнитов перечислять в напоминании при старте (0 — только числа)
 code_extensions: [.go, .ts, .tsx, .mts, .cts, .js, .jsx, .mjs, .cjs, .vue, .svelte, .py, .rs, .java, .kt,
                   .scala, .swift, .dart, .rb, .php, .cs, .fs, .c, .h, .cc, .cpp, .cxx, .hh, .hpp, .m, .mm,
                   .ex, .exs, .erl, .hs, .clj, .lua, .zig, .sh, .sql, .proto, .graphql, .tf]

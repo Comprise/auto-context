@@ -28,7 +28,7 @@ Current state (`auto-context status --stale`):
 5. Units with a note (`stale (…)`): handle them as "Status notes" of the docs skill says; the
    `not acked yet` and `broken frontmatter` ones have no usable ack date: read the code against
    `context/<unit>.md`, then apply step "1. Decide". Each other `stale` unit: run
-   `auto-context changes <unit>` (commits since the ack day, uncommitted and untracked files; do not
-   run git yourself). If it shows nothing relevant or has no ack date, read the code against
-   `context/<unit>.md`. Then apply step "1. Decide" of the docs skill.
+   `auto-context changes <unit>` (commits since the acked commit, or since the ack day when its
+   title says so, uncommitted and untracked files; do not run git yourself). If it shows nothing
+   relevant or has no ack date, read the code against `context/<unit>.md`. Then apply step "1. Decide" of the docs skill.
 6. Run `auto-context status --stale` again and report the result briefly.
