@@ -1,11 +1,14 @@
 package logx
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestLogRotates(t *testing.T) {
@@ -251,5 +254,94 @@ func TestWritableReadOnlyDir(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(dir, 0o755) })
 	if err := Writable(root); err == nil {
 		t.Error("Writable = nil for a read-only dir")
+	}
+}
+
+// Parallel hooks rotating the same oversized log must not drop the rotated
+// content: only one of them rotates, the others append.
+func TestConcurrentRotationKeepsLog(t *testing.T) {
+	const writers = 8
+	for trial := range 30 {
+		root := t.TempDir()
+		dir := filepath.Join(root, ".auto-context")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := "2026-01-01T00:00:00Z OLD-MARKER\n"
+		old += strings.Repeat("x", maxSize+1-len(old)) + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "log"), []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		for i := range writers {
+			wg.Go(func() { Errorf(root, "w%d", i) })
+		}
+		wg.Wait()
+		var all string
+		for _, name := range []string{"log.1", "log"} {
+			data, _ := os.ReadFile(filepath.Join(dir, name))
+			all += string(data)
+		}
+		if !strings.Contains(all, "OLD-MARKER") {
+			t.Fatalf("trial %d: rotated log lost", trial)
+		}
+		for i := range writers {
+			if !strings.Contains(all, fmt.Sprintf(" w%d\n", i)) {
+				t.Fatalf("trial %d: entry w%d lost", trial, i)
+			}
+		}
+	}
+}
+
+// A rotation lock held elsewhere (a hung hook) delays a write by at most
+// lockWait: the entry is appended, the rotation is left for later.
+func TestRotationLockHeldDoesNotHang(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".auto-context")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "log"), make([]byte, maxSize+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock, ok, err := lock(filepath.Join(dir, "log.lock"))
+	if err != nil || !ok {
+		t.Fatalf("lock: %v %v", ok, err)
+	}
+	defer unlock()
+	start := time.Now()
+	Errorf(root, "late")
+	if d := time.Since(start); d > lockWait+time.Second {
+		t.Errorf("Errorf took %v", d)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "log"))
+	if !strings.HasSuffix(string(data), " late\n") {
+		t.Error("entry not appended")
+	}
+}
+
+// The O_EXCL fallback lock excludes a second holder, gives up after
+// lockWait, and replaces a stale lock file.
+func TestLockExcl(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "log.lock")
+	unlock, ok, err := lockExcl(p)
+	if err != nil || !ok {
+		t.Fatalf("first lock: %v %v", ok, err)
+	}
+	if _, ok, err := lockExcl(p); ok || err != nil {
+		t.Fatalf("second lock taken: %v %v", ok, err)
+	}
+	unlock()
+	unlock, ok, err = lockExcl(p)
+	if err != nil || !ok {
+		t.Fatalf("relock: %v %v", ok, err)
+	}
+	_ = unlock // left behind, as by a killed hook
+	old := time.Now().Add(-2 * lockStale)
+	if err := os.Chtimes(p, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := lockExcl(p); !ok || err != nil {
+		t.Fatalf("stale lock kept: %v %v", ok, err)
 	}
 }

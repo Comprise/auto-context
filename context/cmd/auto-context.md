@@ -1,7 +1,8 @@
 ---
 unit: cmd/auto-context
-source_hash: sha256:aa28f98c7bb2cd3931fc147b8f920a17f1e303479f3f4dc5fd7fc7e339a44bba
-updated: "2026-10-20"
+source_hash: sha256:3fef25ea934b931c73eb9434d3571b7219d03aa83794303eb178746a3fec83ea
+commit: 8d0d43e3b49995a76334e594a9e0ed70bfabb584
+updated: "2026-10-21"
 ---
 # cmd/auto-context
 CLI-бинарь: запуск хуков Claude Code и Codex и команды ack/status/changes/units/version.

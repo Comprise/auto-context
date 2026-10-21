@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/frontmatter"
 	"auto-context/internal/hashing"
 	"auto-context/internal/testutil"
 	"auto-context/internal/units"
@@ -35,7 +36,7 @@ func TestComputeStates(t *testing.T) {
 	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for _, u := range []string{"ok", "stale"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nSummary of "+u+".\n")
-		if err := Ack(root, tr, c, u, now); err != nil {
+		if err := Ack(root, tr, c, u, now, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,7 +78,7 @@ func TestComputeNoFrontmatterIsStale(t *testing.T) {
 
 func TestAckMissingDoc(t *testing.T) {
 	root, tr := setup(t)
-	err := Ack(root, tr, cache(root), "svc", time.Now())
+	err := Ack(root, tr, cache(root), "svc", time.Now(), nil)
 	if err == nil || !strings.Contains(err.Error(), "ack --exclude svc") {
 		t.Fatalf("err = %v", err)
 	}
@@ -85,7 +86,7 @@ func TestAckMissingDoc(t *testing.T) {
 
 func TestAckUnknownUnit(t *testing.T) {
 	root, tr := setup(t)
-	err := Ack(root, tr, cache(root), "nope", time.Now())
+	err := Ack(root, tr, cache(root), "nope", time.Now(), nil)
 	if err == nil || err.Error() != "unknown unit nope" {
 		t.Fatalf("err = %v", err)
 	}
@@ -135,7 +136,7 @@ func TestComputeUnreadableFileIsPerUnit(t *testing.T) {
 	c := cache(root)
 	for _, u := range []string{"ok", "svc"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
-		if err := Ack(root, tr, c, u, time.Now()); err != nil {
+		if err := Ack(root, tr, c, u, time.Now(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -161,7 +162,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/_root.md", "# r\n\nR.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, units.RootUnit, time.Now()); err != nil {
+	if err := Ack(root, tr, c, units.RootUnit, time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if s := StatusOf(root, tr, c, units.RootUnit); s.State != OK {
@@ -195,12 +196,12 @@ func TestAckIsIdempotent(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := Ack(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
 	before, _ := os.ReadFile(p)
-	if err := Ack(root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := Ack(root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := os.ReadFile(p); string(after) != string(before) {
@@ -247,7 +248,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, "ok", time.Now()); err != nil {
+	if err := Ack(root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
@@ -255,7 +256,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	if err := os.WriteFile(p, []byte(strings.Replace(string(data), "unit: ok", "unit: other", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Ack(root, tr, c, "ok", time.Now()); err != nil {
+	if err := Ack(root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(p); !strings.Contains(string(data), "unit: ok") {
@@ -270,4 +271,28 @@ func computeAll(root string, t *units.Tree, c *hashing.Cache) []UnitStatus {
 		out = append(out, StatusOf(root, t, c, u.Path))
 	}
 	return out
+}
+
+// Ack records the commit head returns, and asks for it only when it rewrites
+// the doc.
+func TestAckRecordsCommit(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	c := cache(root)
+	sha := strings.Repeat("1f", 20)
+	calls := 0
+	head := func() string { calls++; return sha }
+	if err := Ack(root, tr, c, "ok", time.Now(), head); err != nil {
+		t.Fatal(err)
+	}
+	if err := Ack(root, tr, c, "ok", time.Now(), head); err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "ok.md"))
+	if err != nil || m.Commit != sha {
+		t.Fatalf("m=%+v err=%v", m, err)
+	}
+	if calls != 1 {
+		t.Errorf("head called %d times, want 1", calls)
+	}
 }

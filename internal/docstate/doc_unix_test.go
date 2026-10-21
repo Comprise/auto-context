@@ -41,7 +41,7 @@ func TestAckRefusesDocLinkedOutside(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "o.md"), filepath.Join(root, "context", "ok.md")); err != nil {
 		t.Fatal(err)
 	}
-	err := Ack(root, tr, cache(root), "ok", time.Now())
+	err := Ack(root, tr, cache(root), "ok", time.Now(), nil)
 	if !errors.Is(err, fsutil.ErrOutside) {
 		t.Errorf("err = %v, want ErrOutside", err)
 	}

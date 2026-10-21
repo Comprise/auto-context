@@ -135,10 +135,11 @@ func Doc(root, unit string) (kind DocKind, path string, err error) {
 	return DocPresent, p, nil
 }
 
-// Ack records the current source hash of unit in its context file. A doc that
-// already records it is left untouched, so repeated acks (auto-ack on every
-// Stop, a parallel session) do not rewrite it.
-func Ack(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time) error {
+// Ack records the current source hash of unit in its context file, with the
+// commit head returns (nil or "" records none). A doc that already records the
+// hash is left untouched, commit included, so repeated acks (auto-ack on every
+// Stop, a parallel session) do not rewrite it; head is called only to rewrite.
+func Ack(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time, head func() string) error {
 	if !t.IsUnit(unit) {
 		return fmt.Errorf("unknown unit %s", unit)
 	}
@@ -158,5 +159,9 @@ func Ack(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Tim
 	if meta, _, err := frontmatter.Read(root, path); err == nil && meta.SourceHash == h && meta.Unit == unit {
 		return nil
 	}
-	return frontmatter.SetHash(root, path, unit, h, now)
+	commit := ""
+	if head != nil {
+		commit = head()
+	}
+	return frontmatter.SetHash(root, path, unit, h, commit, now)
 }

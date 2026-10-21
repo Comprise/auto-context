@@ -75,6 +75,10 @@ type Project struct {
 	cfgErr      error
 	// cacheErr explains an unusable hash cache (hashing restarts cold).
 	cacheErr error
+	// head is HEAD's commit for acks, looked up once on the first ack that
+	// writes (headDone); "" without git or commits.
+	head     string
+	headDone bool
 }
 
 // Root is the repository root the project was opened at.
@@ -232,7 +236,22 @@ func (p *Project) Ack(unit string, now time.Time) error {
 	if p.ConfigBroken() {
 		return ErrConfigBroken
 	}
-	return docstate.Ack(p.root, p.tree, p.Cache(), unit, now)
+	return docstate.Ack(p.root, p.tree, p.Cache(), unit, now, p.headCommit)
+}
+
+// headCommit returns HEAD's full commit id, or "" when git fails or there are
+// no commits: an ack never fails because of git. One git call per Project,
+// within the hook's deadline (gitx.SetDeadline).
+func (p *Project) headCommit() string {
+	if !p.headDone {
+		p.headDone = true
+		if res, err := gitx.Run(p.root, 0, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
+			if id := strings.TrimSpace(string(res.Out)); isCommitID(id) {
+				p.head = id
+			}
+		}
+	}
+	return p.head
 }
 
 // AckTouched acks the units among touched that are units with a usable

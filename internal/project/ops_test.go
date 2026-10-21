@@ -94,6 +94,14 @@ func TestPrewarmPersists(t *testing.T) {
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.WriteFile(t, root, "svc/b.go", "package svc\n")
+	// Old mtimes: entries of files hashed right after a write are racy and
+	// not kept across runs.
+	old := time.Now().Add(-time.Hour)
+	for _, f := range []string{"svc/a.go", "svc/b.go"} {
+		if err := os.Chtimes(filepath.Join(root, f), old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
 	p, err := Open(root)
 	if err != nil {
 		t.Fatal(err)

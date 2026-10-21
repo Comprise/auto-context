@@ -687,7 +687,7 @@ func TestRecordTurn(t *testing.T) {
 		"svc/CLAUDE.md":  {MtimeNs: 30, Size: 2},
 	}
 	var j session.Journal
-	fresh := recordTurn(p.Tree(), before, cur, 0, &j)
+	fresh := recordTurn(p.Tree(), before, cur, 0, noDirs, &j)
 	if !slices.Equal(fresh, []string{"svc"}) || !slices.Equal(j.CodeChanged, []string{"lib", "svc"}) || !slices.Equal(j.DocsTouched, []string{"lib", "svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
 	}
@@ -705,20 +705,145 @@ func TestRecordTurnOldMtime(t *testing.T) {
 		"context/svc.md": {MtimeNs: 20, Size: 2},
 	}
 	var j session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 10, &j); len(fresh) != 0 ||
+	if fresh := recordTurn(p.Tree(), before, cur, 10, noDirs, &j); len(fresh) != 0 ||
 		!slices.Equal(j.CodeChanged, []string{"svc"}) || !slices.Equal(j.DocsTouched, []string{"svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
 	}
 	var j0 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 0, &j0); !slices.Equal(fresh, []string{"svc"}) {
+	if fresh := recordTurn(p.Tree(), before, cur, 0, noDirs, &j0); !slices.Equal(fresh, []string{"svc"}) {
 		t.Errorf("rule off: fresh=%v", fresh)
 	}
 	// A modified (not new) file with an old mtime bars the ack too.
 	delete(cur, "svc/moved.go")
 	cur["svc/main.go"] = units.Stat{MtimeNs: 5, Size: 2}
 	var j1 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 10, &j1); len(fresh) != 0 {
+	if fresh := recordTurn(p.Tree(), before, cur, 10, noDirs, &j1); len(fresh) != 0 {
 		t.Errorf("modified old file: fresh=%v", fresh)
+	}
+}
+
+// noDirs is a dirStat for recordTurn tests that delete nothing.
+func noDirs(string) (int64, bool, error) { return 0, false, errors.New("unexpected dir stat") }
+
+// A deleted code file is ordered by the mtime of its nearest surviving
+// directory; a directory that cannot order it bars the auto-ack.
+func TestRecordTurnDeletedFile(t *testing.T) {
+	env := newRepo(t, true)
+	p, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := session.Snapshot{
+		"svc/main.go": {MtimeNs: 1, Size: 1}, "svc/a/b/x.go": {MtimeNs: 1, Size: 1}, "svc/a/b/y.go": {MtimeNs: 1, Size: 1},
+		"context/svc.md": {MtimeNs: 1, Size: 1},
+	}
+	cur := session.Snapshot{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 20, Size: 2}}
+	cases := []struct {
+		name  string
+		dirs  map[string]int64 // surviving directories; missing ones are climbed past
+		err   error
+		fresh bool
+	}{
+		{"deleted before the docs edit", map[string]int64{"svc/a/b": 15}, nil, true},
+		{"deleted after the docs edit", map[string]int64{"svc/a/b": 25}, nil, false},
+		{"directory gone, parent orders", map[string]int64{"svc": 15}, nil, true},
+		{"directory gone, parent after the docs", map[string]int64{"svc": 25}, nil, false},
+		{"only the root survives", map[string]int64{".": 15}, nil, true},
+		{"directory older than the turn", map[string]int64{"svc/a/b": 5}, nil, false},
+		{"stat fails", nil, errors.New("boom"), false},
+		{"nothing survives", map[string]int64{}, nil, false},
+	}
+	for _, c := range cases {
+		calls := map[string]int{}
+		stat := func(dir string) (int64, bool, error) {
+			calls[dir]++
+			if c.err != nil {
+				return 0, false, c.err
+			}
+			m, ok := c.dirs[dir]
+			return m, ok, nil
+		}
+		var j session.Journal
+		fresh := recordTurn(p.Tree(), before, cur, 10, stat, &j)
+		if got := len(fresh) == 1; got != c.fresh || !slices.Equal(j.CodeChanged, []string{"svc"}) {
+			t.Errorf("%s: fresh=%v journal=%+v", c.name, fresh, j)
+		}
+		for dir, n := range calls {
+			if n > 1 {
+				t.Errorf("%s: %s statted %d times", c.name, dir, n)
+			}
+		}
+	}
+}
+
+// deleteTurn starts a turn in which svc has svc/extra.go and svc/sub/x.go.
+func deleteTurn(t *testing.T) Env {
+	t.Helper()
+	env := newRepo(t, false)
+	testutil.WriteFile(t, env.Root, "svc/extra.go", "package main\n")
+	testutil.WriteFile(t, env.Root, "svc/sub/x.go", "package sub\n")
+	ack(t, env, "svc")
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func remove(t *testing.T, root, rel string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A file deleted before the docs edit is covered by it: auto-ack.
+func TestStopDeleteThenDocsAutoAcks(t *testing.T) {
+	env := deleteTurn(t)
+	base := time.Now().Add(time.Hour)
+	remove(t, env.Root, "svc/extra.go")
+	setMtime(t, env.Root, "svc", base, 0)
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, without extra.\n")
+	setMtime(t, env.Root, "context/svc.md", base, time.Second)
+	if out := stop(t, env); out != nil {
+		t.Errorf("feedback: %s", out)
+	}
+	if st := unitState(t, env, "svc"); st != docstate.OK {
+		t.Errorf("svc state = %s, want ok", st)
+	}
+}
+
+// A file deleted after the docs edit is not covered by it: no auto-ack, and
+// the deletion is reported.
+func TestStopDocsThenDeleteNotAutoAcked(t *testing.T) {
+	for _, rel := range []string{"svc/extra.go", "svc/sub"} {
+		env := deleteTurn(t)
+		base := time.Now().Add(time.Hour)
+		testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, edited first.\n")
+		setMtime(t, env.Root, "context/svc.md", base, 0)
+		remove(t, env.Root, rel)
+		setMtime(t, env.Root, "svc", base, time.Second)
+		if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
+			t.Errorf("%s: reason = %q", rel, r)
+		}
+		if st := unitState(t, env, "svc"); st != docstate.Stale {
+			t.Errorf("%s: svc state = %s, want stale", rel, st)
+		}
+	}
+}
+
+// A whole directory deleted before the docs edit: its parent orders it.
+func TestStopDirDeletedThenDocsAutoAcks(t *testing.T) {
+	env := deleteTurn(t)
+	base := time.Now().Add(time.Hour)
+	remove(t, env.Root, "svc/sub")
+	setMtime(t, env.Root, "svc", base, 0)
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, without sub.\n")
+	setMtime(t, env.Root, "context/svc.md", base, time.Second)
+	if out := stop(t, env); out != nil {
+		t.Errorf("feedback: %s", out)
+	}
+	if st := unitState(t, env, "svc"); st != docstate.OK {
+		t.Errorf("svc state = %s, want ok", st)
 	}
 }
 
@@ -1144,5 +1269,30 @@ func TestStopReasonCodexQuotedCLI(t *testing.T) {
 	got := StopReason(Feedback{Agent: Codex, Changed: []string{"svc"}})
 	if want := "`'/home/my user/p/bin/auto-context' ack svc`"; !strings.Contains(got, want) {
 		t.Errorf("reason lacks %s:\n%s", want, got)
+	}
+}
+
+// A repo opened through a link still has a root directory; a link inside the
+// repo is not one of its directories.
+func TestRepoDirStatLinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges")
+	}
+	real := t.TempDir()
+	if err := os.Mkdir(filepath.Join(real, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "repo")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("d", filepath.Join(real, "ld")); err != nil {
+		t.Fatal(err)
+	}
+	stat := repoDirStat(link)
+	for dir, want := range map[string]bool{".": true, "d": true, "ld": false} {
+		if _, found, err := stat(dir); err != nil || found != want {
+			t.Errorf("%s: found=%v err=%v, want %v", dir, found, err, want)
+		}
 	}
 }

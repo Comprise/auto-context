@@ -1025,7 +1025,7 @@ func TestStatusBrokenMarkersAgents(t *testing.T) {
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "index_file: AGENTS.md\n")
 	testutil.WriteFile(t, root, "AGENTS.md", "<!-- auto-context:units -->\nx\n")
 	_, out, _ := do(root, "", "status")
-	want := "warning: the auto-context:units markers in the root AGENTS.md are unbalanced, so the units index is not updated"
+	want := "warning: the auto-context:units markers in the root AGENTS.md are unbalanced or repeated, so the units index is not updated"
 	if !strings.Contains(out, want) {
 		t.Errorf("status output lacks %q:\n%s", want, out)
 	}

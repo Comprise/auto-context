@@ -20,7 +20,9 @@ import (
 const maxChangesOutput = 64 << 10
 
 // WriteChanges writes what changed in unit since its docs were last acked:
-// commits since the frontmatter's `updated` date (the whole ack day included)
+// commits after the frontmatter's `commit` when HEAD descends from it, else
+// commits since its `updated` date (the whole ack day included; by commit
+// date, so an older commit merged later is missed, and the title says so)
 // and, when every git filter is trusted, the uncommitted diff stat (if there
 // is a HEAD) and `git status` (untracked and modified files). It runs fixed git invocations itself, so
 // the sync skill needs no git permissions (a pre-approved `git log *` would
@@ -62,7 +64,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		spec = ":(literal)" + unit
 	}
 	ctx := units.ContextPath(unit)
-	since, why := ackDate(root, ctx)
+	ack := ackPoint(root, ctx)
 
 	if _, err := gitx.Run(root, 0, "rev-parse", "--is-inside-work-tree"); err != nil {
 		fmt.Fprintf(w, "(git unavailable: %s; read the code against %s)\n", textx.Err(err), ctx)
@@ -81,15 +83,32 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		args  []string
 	}
 	var sections []section
+	logArgs := []string{"log", "--relative", "--no-ext-diff", "--no-textconv", "--stat", "--date=short", "--format=%h %ad %s", "-n", "50"}
+	byCommit := false
+	dateNote := "no acked commit recorded"
+	if hasCommits && ack.commit != "" {
+		// The id is checked hex, so it cannot be read as an option.
+		_, err := gitx.Run(root, 0, "merge-base", "--is-ancestor", ack.commit, "HEAD")
+		byCommit = err == nil
+		dateNote = "the acked commit is not in HEAD's history"
+		if err != nil && gitx.Code(err) != 1 {
+			// Exit 1 is "not an ancestor"; anything else (an unknown commit, a
+			// shallow clone without it, a timeout) means it could not be checked.
+			dateNote = "the acked commit is not in this clone or could not be checked"
+		}
+	}
 	switch {
 	case !hasCommits:
 		fmt.Fprintln(w, "(the repository has no commits yet)")
-	case since != "":
-		sections = append(sections, section{"## commits touching " + unit + " since " + since + " (docs last acked; the whole day is included)",
-			[]string{"log", "--relative", "--no-ext-diff", "--no-textconv", "--stat", "--date=short", "--format=%h %ad %s", "-n", "50", "--since=" + since}})
+	case byCommit:
+		sections = append(sections, section{"## commits touching " + unit + " since the acked commit " + ack.commit[:12],
+			append(logArgs, ack.commit+"..HEAD")})
+	case ack.since != "":
+		sections = append(sections, section{"## commits touching " + unit + " since " + ack.since + " (docs last acked; " + dateNote +
+			", so commits are picked by commit date and older commits merged later are missed; the whole day is included)",
+			append(logArgs, "--since="+ack.since)})
 	default:
-		sections = append(sections, section{"## last commits touching " + unit + " (" + why + ": compare the code with " + ctx + ")",
-			[]string{"log", "--relative", "--no-ext-diff", "--no-textconv", "--stat", "--date=short", "--format=%h %ad %s", "-n", "50"}})
+		sections = append(sections, section{"## last commits touching " + unit + " (" + ack.why + ": compare the code with " + ctx + ")", logArgs})
 	}
 	// Comparing with the work tree runs clean filters, so do it only when every
 	// filter git would use comes from a trusted scope (see trustedFilters).
@@ -124,28 +143,54 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	return nil
 }
 
-// ackDate returns the "YYYY-MM-DD 00:00" of the last ack from the frontmatter,
-// or "" and why there is none. Only a real date reaches git: the frontmatter
-// is repo content.
-func ackDate(root, ctx string) (since, why string) {
+// ack is the last ack of a unit from its frontmatter: the acked commit (""
+// if none or malformed), the "YYYY-MM-DD 00:00" of the ack day ("" if none)
+// and, without a date, why.
+type ack struct {
+	commit, since, why string
+}
+
+// ackPoint reads the last ack from the context doc. Only a full hex commit id
+// and a real date reach git: the frontmatter is repo content.
+func ackPoint(root, ctx string) ack {
 	meta, _, err := frontmatter.Read(root, fsutil.Abs(root, ctx))
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return "", "no context doc yet"
+		return ack{why: "no context doc yet"}
 	case errors.Is(err, frontmatter.ErrNoFrontmatter):
-		return "", "not acked yet"
+		return ack{why: "not acked yet"}
 	case errors.Is(err, frontmatter.ErrBroken):
-		return "", "broken frontmatter"
+		return ack{why: "broken frontmatter"}
 	case errors.Is(err, fsutil.ErrOutside):
-		return "", "the context doc " + docstate.OutsideText
+		return ack{why: "the context doc " + docstate.OutsideText}
 	case err != nil:
-		return "", "the context doc cannot be read"
+		return ack{why: "the context doc cannot be read"}
+	}
+	var a ack
+	if isCommitID(meta.Commit) {
+		a.commit = meta.Commit
 	}
 	d, err := time.Parse("2006-01-02", meta.Updated)
 	if err != nil {
-		return "", "no valid ack date"
+		a.why = "no valid ack date"
+		return a
 	}
-	return d.Format("2006-01-02") + " 00:00", ""
+	a.since = d.Format("2006-01-02") + " 00:00"
+	return a
+}
+
+// isCommitID reports whether s is a full lowercase hex object id (SHA-1 or
+// SHA-256), as rev-parse prints it.
+func isCommitID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // trustedFilters reports whether every filter driver in git's effective

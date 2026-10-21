@@ -89,7 +89,7 @@ Details: context/src/auth.md
 - Omit empty sections.
 
 ## Never
-- Edit the frontmatter (`unit`, `source_hash`, `updated`): `auto-context ack` writes it; leave it out
+- Edit the frontmatter (`unit`, `source_hash`, `commit`, `updated`): `auto-context ack` writes it; leave it out
   of a new file.
 - Edit the `<!-- auto-context:units -->` section of the root index file (its heading line may be
   translated; the list is generated) — except to repair unbalanced markers when a hook or `auto-context status` reports them:

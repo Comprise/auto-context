@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"auto-context/internal/fsutil"
 
@@ -169,8 +170,10 @@ func parseIgnore(lines iter.Seq[string]) ignoreFile {
 		r.under = strings.HasSuffix(l, "/**")
 		p := l
 		if r.glob {
-			// Braces are literal in git but alternatives in doublestar.
-			p = strings.NewReplacer("{", "\\{", "}", "\\}").Replace(l)
+			var ok bool
+			if p, ok = globPattern(l); !ok {
+				continue // a class with no member: git matches nothing either
+			}
 			if len(p) > maxRuleLen || !doublestar.ValidatePattern(p) {
 				f.invalid++
 				continue
@@ -207,6 +210,141 @@ func parseIgnore(lines iter.Seq[string]) ignoreFile {
 	return f
 }
 
+// globPattern turns a git glob rule into a doublestar pattern: braces, literal
+// in git, are escaped, and bracket classes are rewritten member by member as
+// git's wildmatch reads them. Other bytes, not UTF-8 ones included (a Latin-1
+// .gitignore), are kept as written. ok is false when a class has no member
+// left, so the rule matches nothing.
+func globPattern(l string) (p string, ok bool) {
+	var b strings.Builder
+	for i := 0; i < len(l); i++ {
+		switch c := l[i]; c {
+		case '\\':
+			b.WriteByte(c)
+			if i+1 < len(l) {
+				i++
+				b.WriteByte(l[i])
+			}
+		case '{', '}':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case '[':
+			class, n, ok := bracketClass(l[i+1:])
+			if n < 0 { // unterminated or with a [:name:]: left as written
+				b.WriteByte(c)
+				continue
+			}
+			if !ok {
+				return "", false
+			}
+			b.WriteString(class)
+			i += n
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), true
+}
+
+// bracketClass rewrites the class whose body starts s (just after "[") the
+// way git reads it: "!" or "^" negates; the first member may be "]"; a
+// backslash escapes a member; "-" between members makes a range, which holds
+// its first end even when reversed; and a class never matches "/" (git
+// matches with WM_PATHNAME), so "/" is dropped from the members, or added to
+// them when negated. A member is a UTF-8 character or, where the bytes are
+// not UTF-8, one byte, written back as it was. n is the bytes consumed
+// through the closing "]", or -1 for a class left to doublestar as written
+// (unterminated, or with a [:name:]). ok is false when no member is left.
+func bracketClass(s string) (class string, n int, ok bool) {
+	type end struct {
+		v   rune   // for ordering: the character, or the byte value
+		raw string // as written, without the escape
+	}
+	type span struct{ lo, hi end }
+	var spans []span
+	i, negated := 0, false
+	if i < len(s) && (s[i] == '!' || s[i] == '^') {
+		i, negated = i+1, true
+	}
+	member := func() (end, bool) {
+		if i < len(s) && s[i] == '\\' {
+			i++
+		}
+		if i >= len(s) {
+			return end{}, false
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			r = rune(s[i])
+		}
+		e := end{r, s[i : i+size]}
+		i += size
+		return e, true
+	}
+	for first := true; ; first = false {
+		if i >= len(s) {
+			return "", -1, false
+		}
+		if s[i] == ']' && !first {
+			break
+		}
+		if s[i] == '[' && i+1 < len(s) && s[i+1] == ':' {
+			return "", -1, false
+		}
+		lo, ok := member()
+		if !ok {
+			return "", -1, false
+		}
+		spans = append(spans, span{lo, lo})
+		if i+1 < len(s) && s[i] == '-' && s[i+1] != ']' {
+			i++
+			hi, ok := member()
+			if !ok {
+				return "", -1, false
+			}
+			spans = append(spans, span{lo, hi})
+		}
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	if negated {
+		b.WriteByte('!')
+	}
+	members := 0
+	write := func(e end) {
+		if len(e.raw) == 1 && strings.IndexByte("\\[]-!^{}", e.raw[0]) >= 0 {
+			b.WriteByte('\\')
+		}
+		b.WriteString(e.raw)
+	}
+	add := func(lo, hi end) {
+		if lo.v > hi.v {
+			return
+		}
+		members++
+		write(lo)
+		if hi.v != lo.v {
+			b.WriteByte('-')
+			write(hi)
+		}
+	}
+	dot, zero := end{'.', "."}, end{'0', "0"}
+	for _, sp := range spans {
+		if sp.lo.v <= '/' && '/' <= sp.hi.v {
+			add(sp.lo, dot)
+			add(zero, sp.hi)
+		} else {
+			add(sp.lo, sp.hi)
+		}
+	}
+	if negated {
+		b.WriteString("\\/")
+		members++
+	}
+	b.WriteByte(']')
+	return b.String(), i + 1, members > 0
+}
+
 // longestLiteral returns the longest run of literal text in pattern p, outside
 // character classes and escapes: every match must contain it.
 func longestLiteral(p string) string {
@@ -221,7 +359,9 @@ func longestLiteral(p string) string {
 		c := p[i]
 		switch {
 		case inClass:
-			if c == ']' {
+			if c == '\\' {
+				i++ // an escaped member, "]" included
+			} else if c == ']' {
 				inClass = false
 			}
 		case c == '[':

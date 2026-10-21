@@ -6,6 +6,8 @@ import (
 	"maps"
 	"math"
 	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -134,7 +136,7 @@ func recordJournal(tree *units.Tree, before, cur session.Snapshot, root, id stri
 	if err != nil {
 		turnStart = 0
 	}
-	fresh := recordTurn(tree, before, cur, turnStart, &j)
+	fresh := recordTurn(tree, before, cur, turnStart, repoDirStat(root), &j)
 	if err := j.Save(root, id); err != nil {
 		// Feedback is still worth giving; it may repeat on the next Stop.
 		logx.Errorf(root, "stop: saving the journal: %v", err)
@@ -222,30 +224,60 @@ func configPaused(root, id string, a Agent) ([]byte, error) {
 	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `"+a.CLI()+" status` for the error. Changes made meanwhile are checked once it is fixed.", a)
 }
 
+// dirStat reports the mtime (ns) of the repo directory dir (slash path, "."
+// is the root); found is false when dir is missing or not a real directory.
+type dirStat func(dir string) (mtimeNs int64, found bool, err error)
+
+// repoDirStat is the dirStat of the repository at root. Lstat: a symlink is
+// not a directory of the repo, except the root itself (a repo opened through
+// a link).
+func repoDirStat(root string) dirStat {
+	return func(dir string) (int64, bool, error) {
+		stat := os.Lstat
+		if dir == "." {
+			stat = os.Stat
+		}
+		fi, err := stat(filepath.Join(root, filepath.FromSlash(dir)))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return 0, false, nil
+		case err != nil:
+			return 0, false, err
+		}
+		return fi.ModTime().UnixNano(), fi.IsDir(), nil
+	}
+}
+
 // recordTurn folds the changes between the turn-start snapshot and now into
 // the journal and returns the units whose context doc was touched this turn
 // and is not older than their newest code edit: the candidates for auto-ack.
 // A changed code file whose mtime predates the turn start (turnStart, ns; 0
 // turns the rule off) was moved in with its old time (mv, cp -p) and cannot
 // be ordered against the docs edit: it bars the unit's auto-ack.
-func recordTurn(tree *units.Tree, before, cur session.Snapshot, turnStart int64, j *session.Journal) (fresh []string) {
-	// newestCode is the latest mtime of a changed code file per unit; a docs
-	// edit counts for the unit only if it is not older (deleted files have no
-	// mtime and do not order).
+// A deleted code file has no mtime: its deletion time is the mtime of its
+// nearest surviving directory (stat; never above the root), which removing
+// an entry updates. Later changes in that directory only make it newer,
+// which errs towards no auto-ack; a directory older than the turn start or a
+// failed stat cannot order the deletion and bars the auto-ack.
+func recordTurn(tree *units.Tree, before, cur session.Snapshot, turnStart int64, stat dirStat, j *session.Journal) (fresh []string) {
+	// newestCode is the latest mtime (or deletion time) of a changed code file
+	// per unit; a docs edit counts for the unit only if it is not older.
 	newestCode := map[string]int64{}
 	docs := map[string]bool{}
-	for _, path := range session.Diff(before, cur) {
-		switch kind, unit := tree.Classify(path); kind {
+	deletedAt := deletionTimes(stat, turnStart)
+	for _, p := range session.Diff(before, cur) {
+		switch kind, unit := tree.Classify(p); kind {
 		case units.KindCode:
-			mt := newestCode[unit] // a deleted file changes the unit, with no mtime to order by
-			if fs, ok := cur[path]; ok {
-				m := fs.MtimeNs
+			var m int64
+			if fs, ok := cur[p]; ok {
+				m = fs.MtimeNs
 				if m < turnStart {
 					m = math.MaxInt64
 				}
-				mt = max(mt, m)
+			} else {
+				m = deletedAt(path.Dir(p))
 			}
-			newestCode[unit] = mt
+			newestCode[unit] = max(newestCode[unit], m)
 		case units.KindContextDoc:
 			// Only context/<unit>.md counts as a docs update: an index file touch
 			// (a typo fix, or our own root index rewrite) must not ack the unit.
@@ -262,6 +294,32 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, turnStart int64,
 		}
 	}
 	return fresh
+}
+
+// deletionTimes returns the deletion time of an entry of dir: the mtime of
+// dir or, if it is gone too, of its nearest surviving ancestor up to the
+// root; math.MaxInt64 when that cannot order the deletion (see recordTurn).
+// Results are cached per directory: a mass deletion stats each one once.
+func deletionTimes(stat dirStat, turnStart int64) func(dir string) int64 {
+	cache := map[string]int64{}
+	var at func(dir string) int64
+	at = func(dir string) int64 {
+		if m, ok := cache[dir]; ok {
+			return m
+		}
+		m, found, err := stat(dir)
+		switch {
+		case err != nil || found && m < turnStart:
+			m = math.MaxInt64
+		case !found && dir == ".":
+			m = math.MaxInt64 // the root itself is gone or not a directory
+		case !found:
+			m = at(path.Dir(dir))
+		}
+		cache[dir] = m
+		return m
+	}
+	return at
 }
 
 // turnNewUnits returns the sorted unique units of us (except _root) that are

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -139,16 +140,11 @@ func Load(root string) (Config, Problems, error) {
 		}
 	}
 	slices.Sort(pr)
-	cfg := Default()
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		var te *yaml.TypeError
-		if !errors.As(err, &te) {
-			return Default(), nil, err
-		}
-		for _, e := range te.Errors {
-			pr = append(pr, typeProblem(e)) // the field keeps its default
-		}
+	cfg, typePr, err := decodeConfig(data)
+	if err != nil {
+		return Default(), nil, err
 	}
+	pr = append(pr, typePr...)
 	if cfg.IndexFile != "" && cfg.IndexFile != IndexClaude && cfg.IndexFile != IndexAgents {
 		// Which file holds the index decides where every doc lives: no guessing.
 		return Default(), nil, ErrBadIndexFile
@@ -171,6 +167,48 @@ func safeKey(k string) string {
 		return k
 	}
 	return "(name not shown)"
+}
+
+// decodeConfig decodes data over Default() as one document, so merge keys
+// and duplicate keys behave as yaml.v3 defines. A value of the wrong type is
+// a Problem; yaml.v3 leaves its field half-decoded (a list keeps the elements
+// that decoded: `exclude: [{a: b}]` gave an empty list), so each top-level key
+// that fails on its own is reset to its default.
+func decodeConfig(data []byte) (Config, Problems, error) {
+	cfg := Default()
+	err := yaml.Unmarshal(data, &cfg)
+	var te *yaml.TypeError
+	if err == nil || !errors.As(err, &te) {
+		return cfg, nil, err
+	}
+	var pr Problems
+	for _, e := range te.Errors {
+		pr = append(pr, typeProblem(e))
+	}
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return cfg, pr, nil
+	}
+	m, def := doc.Content[0], Default()
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		var probe Config
+		one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: m.Content[i : i+2]}
+		if one.Decode(&probe) != nil {
+			resetField(&cfg, &def, m.Content[i].Value)
+		}
+	}
+	return cfg, pr, nil
+}
+
+// resetField sets the field of c whose yaml key is key to its value in def;
+// other keys (unknown, or a merge key) change nothing.
+func resetField(c, def *Config, key string) {
+	cv, dv := reflect.ValueOf(c).Elem(), reflect.ValueOf(def).Elem()
+	for i := range cv.NumField() {
+		if cv.Type().Field(i).Tag.Get("yaml") == key {
+			cv.Field(i).Set(dv.Field(i))
+		}
+	}
 }
 
 // typeProblem rewrites a yaml type error ("line 3: cannot unmarshal !!str
@@ -348,9 +386,10 @@ func AddExclude(root, pattern string) error {
 			continue
 		}
 		found = true
-		if v := m.Content[i+1]; v.Kind == yaml.SequenceNode {
+		if v := m.Content[i+1]; v.Kind == yaml.SequenceNode && !deadList(v) {
 			v.Content = append(v.Content, item)
 		} else {
+			// Not a list, or one Load could not use: write out the effective list.
 			var list yaml.Node
 			if err := list.Encode(append(cfg.Exclude, pattern)); err != nil {
 				return err
@@ -377,7 +416,26 @@ func AddExclude(root, pattern string) error {
 	if err := enc.Close(); err != nil {
 		return err
 	}
-	return fsutil.WriteAtomic(root, path, buf.Bytes(), 0o644)
+	perm := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
+	}
+	return fsutil.WriteAtomic(root, path, buf.Bytes(), perm)
+}
+
+// deadList reports whether a non-empty list has no entry Load would keep, so
+// Load falls back to the defaults and an item appended to it would drop them.
+func deadList(seq *yaml.Node) bool {
+	var list []string
+	if err := seq.Decode(&list); err != nil {
+		return true // wrong types: rewrite from what Load made of them
+	}
+	for _, p := range list {
+		if ValidatePattern(p) == nil {
+			return false
+		}
+	}
+	return len(list) > 0
 }
 
 // FindRoot walks up from cwd to a directory holding .git or FileName owned

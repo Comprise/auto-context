@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/testutil"
 )
 
 // A FIFO .gitignore must not block discovery.
@@ -97,5 +99,39 @@ func TestWarningsHaveNoAbsolutePath(t *testing.T) {
 		if strings.Contains(s, root) || strings.Contains(s, outside) || strings.Contains(s, os.TempDir()) {
 			t.Errorf("warning has an absolute path: %q", s)
 		}
+	}
+}
+
+// Git mode: a tracked directory replaced by a symlink to a directory is
+// skipped, as in the walk: neither a file listed under it nor the directory
+// itself counts, so content outside the repo is never tracked.
+func TestDiscoverGitSkipsSymlinkedTrackedDir(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	mkfiles(t, root, "a.go", "pkg/a/x.txt", "pkg/a/y.go", "pkg/b/z.go", "pkg/c/x.txt")
+	gitInit(t, root)
+	testutil.Git(t, root, "add", ".")
+	mkfiles(t, outside, "x.txt", "y.go")
+	for _, d := range []string{"a", "c"} { // c: only a file no unit looks at
+		if err := os.RemoveAll(filepath.Join(root, "pkg", d)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "pkg", d)); err != nil {
+			t.Skip("symlinks unsupported:", err)
+		}
+	}
+	cfg := config.Default()
+	cfg.Include = []string{"pkg/*"}
+	tr := discover(t, root, cfg)
+	if !tr.viaGit {
+		t.Fatal("git listing not used")
+	}
+	if got, want := paths(tr.Units()), []string{"_root", "pkg/b"}; !slices.Equal(got, want) {
+		t.Errorf("units = %v, want %v", got, want)
+	}
+	if got, want := tr.Tracked(), []string{"a.go", "pkg/b/z.go"}; !slices.Equal(got, want) {
+		t.Errorf("tracked = %v, want %v", got, want)
+	}
+	if w := tr.Warnings(); len(w) != 0 {
+		t.Errorf("warnings = %v", w)
 	}
 }

@@ -14,10 +14,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Meta is the frontmatter written by the binary.
+// Meta is the frontmatter written by the binary. Commit (HEAD at ack time) is
+// optional and, like every field, unvalidated repo content.
 type Meta struct {
 	Unit       string `yaml:"unit"`
 	SourceHash string `yaml:"source_hash"`
+	Commit     string `yaml:"commit,omitempty"`
 	Updated    string `yaml:"updated"`
 }
 
@@ -30,12 +32,18 @@ var ErrBroken = errors.New("broken frontmatter")
 // MaxSize caps the size of a context doc we read.
 const MaxSize = 1 << 20
 
-// oursRe recognizes the block we write; any other leading "---" block (a
-// horizontal rule, the user's own front matter) is left alone.
-var oursRe = regexp.MustCompile(`(?m)^(unit|source_hash|updated)[ \t]*:`)
+// oursRe recognizes the block we write, which always has both keys; any other
+// leading "---" block (a horizontal rule, the user's own front matter, even
+// with an `updated:` key) is left alone.
+var oursRe = regexp.MustCompile(`(?m)^(unit|source_hash)[ \t]*:`)
 
-// split returns the raw YAML text and the body. ok is false if there is no closed block.
+// bom is the UTF-8 byte order mark some editors put first in a file.
+const bom = "\ufeff"
+
+// split returns the raw YAML text and the body, skipping a leading BOM. ok is
+// false if there is no closed block.
 func split(content string) (yml, body string, ok bool) {
+	content = strings.TrimPrefix(content, bom)
 	var rest string
 	switch {
 	case strings.HasPrefix(content, "---\n"):
@@ -65,7 +73,7 @@ func split(content string) (yml, body string, ok bool) {
 
 // Read returns the meta and body of path, read through fsutil.ReadDoc inside
 // root. Without a block of ours it returns ErrNoFrontmatter and the whole
-// content as body; with an unparsable one, ErrBroken and the rest as body.
+// content (without a leading BOM) as body; with an unparsable one, ErrBroken and the rest as body.
 func Read(root, path string) (Meta, string, error) {
 	_, data, err := fsutil.ReadDoc(root, path, MaxSize)
 	if err != nil {
@@ -74,7 +82,7 @@ func Read(root, path string) (Meta, string, error) {
 	content := string(data)
 	yml, body, ok := split(content)
 	if !ok || !oursRe.MatchString(yml) {
-		return Meta{}, content, ErrNoFrontmatter
+		return Meta{}, strings.TrimPrefix(content, bom), ErrNoFrontmatter
 	}
 	var m Meta
 	if err := yaml.Unmarshal([]byte(yml), &m); err != nil {
@@ -92,9 +100,11 @@ func eolOf(s string) string {
 }
 
 // SetHash rewrites our frontmatter block (even a broken one) or, if the file
-// has none, adds it above the content; the rest is kept byte-for-byte. path is
-// resolved with fsutil.ResolveDoc and must stay inside root.
-func SetHash(root, path, unit, hash string, today time.Time) error {
+// has none, adds it above the content; the rest is kept byte-for-byte, and a
+// leading BOM stays first in the file. commit, if not empty, is recorded as
+// the acked commit. path is resolved with fsutil.ResolveDoc and must stay
+// inside root.
+func SetHash(root, path, unit, hash, commit string, today time.Time) error {
 	path, data, err := fsutil.ReadDoc(root, path, MaxSize)
 	if err != nil {
 		return err
@@ -103,16 +113,19 @@ func SetHash(root, path, unit, hash string, today time.Time) error {
 	if st, err := os.Stat(path); err == nil {
 		perm = st.Mode().Perm()
 	}
-	body := string(data)
+	body, lead := string(data), ""
+	if strings.HasPrefix(body, bom) {
+		body, lead = body[len(bom):], bom
+	}
 	if yml, rest, ok := split(body); ok && oursRe.MatchString(yml) {
 		body = rest
 	}
-	y, err := yaml.Marshal(Meta{Unit: unit, SourceHash: hash, Updated: today.Format("2006-01-02")})
+	y, err := yaml.Marshal(Meta{Unit: unit, SourceHash: hash, Commit: commit, Updated: today.Format("2006-01-02")})
 	if err != nil {
 		return err
 	}
 	eol := eolOf(string(data))
-	out := "---" + eol + strings.ReplaceAll(string(y), "\n", eol) + "---" + eol + body
+	out := lead + "---" + eol + strings.ReplaceAll(string(y), "\n", eol) + "---" + eol + body
 	return fsutil.WriteDoc(root, path, []byte(out), perm)
 }
 

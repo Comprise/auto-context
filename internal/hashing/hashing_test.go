@@ -19,6 +19,15 @@ func hex256(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// makeOld sets the mtime of rel an hour back, so its cache entry is not racy.
+func makeOld(t *testing.T, root, rel string) {
+	t.Helper()
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(root, rel), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func mustHash(t *testing.T, root string, files []string, c *Cache) string {
 	t.Helper()
 	h, err := SourceHash(root, files, nil, c)
@@ -111,6 +120,7 @@ func TestCacheInvalidatedOnChange(t *testing.T) {
 func TestCacheRoundTrip(t *testing.T) {
 	r := t.TempDir()
 	testutil.WriteFile(t, r, "a.go", "content")
+	makeOld(t, r, "a.go") // not racy: kept by LoadCache
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
 	if err := c.Save(r); err != nil {
@@ -181,6 +191,7 @@ func TestSourceHashExtra(t *testing.T) {
 func TestSaveOnlyWhenDirty(t *testing.T) {
 	r := t.TempDir()
 	testutil.WriteFile(t, r, "a.go", "x")
+	makeOld(t, r, "a.go")
 	c := NewCache()
 	mustHash(t, r, []string{"a.go"}, c)
 	if err := c.Save(r); err != nil {
@@ -368,5 +379,58 @@ func TestUseStatsTrustsUnchangedStat(t *testing.T) {
 	c.UseStats(func(string) (int64, int64, bool) { return e.MtimeNs, e.Size, true })
 	if h2 := mustHash(t, r, []string{"a.go"}, c); h2 != h1 {
 		t.Error("trusted unchanged stat did not hit the cache")
+	}
+}
+
+// Racily clean (as in git): a same-size rewrite within the mtime tick in which
+// the file was hashed keeps mtime and size, so an entry hashed that close to
+// its mtime is not trusted by a later run.
+func TestRacyEntryRehashedNextRun(t *testing.T) {
+	for _, stats := range []bool{false, true} {
+		r := t.TempDir()
+		p := filepath.Join(r, "a.go")
+		if err := os.WriteFile(p, []byte("one"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		fi, _ := os.Lstat(p)
+		c := NewCache()
+		h1 := mustHash(t, r, []string{"a.go"}, c)
+		if err := c.Save(r); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("two"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, fi.ModTime(), fi.ModTime()); err != nil { // same tick
+			t.Fatal(err)
+		}
+		c2, err := LoadCache(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats {
+			c2.UseStats(func(string) (int64, int64, bool) { return fi.ModTime().UnixNano(), fi.Size(), true })
+		}
+		if h2 := mustHash(t, r, []string{"a.go"}, c2); h2 == h1 {
+			t.Errorf("stats=%v: racy entry trusted after reload", stats)
+		}
+	}
+}
+
+// An entry hashed well after its mtime is trusted across runs.
+func TestOldEntryTrustedNextRun(t *testing.T) {
+	r := t.TempDir()
+	if err := os.WriteFile(filepath.Join(r, "a.go"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeOld(t, r, "a.go")
+	c := NewCache()
+	mustHash(t, r, []string{"a.go"}, c)
+	if err := c.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	c2, _ := LoadCache(r)
+	if c2.Len() != 1 {
+		t.Fatalf("entries = %d", c2.Len())
 	}
 }

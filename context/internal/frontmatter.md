@@ -1,7 +1,7 @@
 ---
 unit: internal/frontmatter
-source_hash: sha256:0d116712d496d205f570387f8c704ba3e24cfc78fec33c80d0e7c22f00a06bf0
-updated: "2026-10-20"
+source_hash: sha256:2b616985ce1fe26d380910479e214a3bdcdb97523e3f608ddd93d153890825e4
+updated: "2026-10-21"
 ---
 # internal/frontmatter
 Читает и пишет YAML-блок меты в контекстных файлах.
@@ -10,13 +10,14 @@ updated: "2026-10-20"
 Отпечаток и дату ack во frontmatter пишет только бинарь (`ack` и авто-ack Stop); пакет изолирует разбор и перезапись блока.
 
 ## Публичный API / точки входа
-- `Meta{Unit, SourceHash, Updated}`, `MaxSize` (1 МиБ).
-- `Read(root, path)` — через `fsutil.ReadDoc`; без нашего блока — `ErrNoFrontmatter` и всё содержимое; с битым — `ErrBroken`.
-- `SetHash(root, path, unit, hash, today)` — переписывает наш блок или добавляет его перед содержимым, через `fsutil.WriteDoc`.
+- `Meta{Unit, SourceHash, Commit, Updated}` (ключи в этом порядке; `commit` — HEAD на момент ack, необязателен и не проверяется), `MaxSize` (1 МиБ).
+- `Read(root, path)` — через `fsutil.ReadDoc`; без нашего блока — `ErrNoFrontmatter` и всё содержимое (без ведущего BOM); с битым — `ErrBroken`.
+- `SetHash(root, path, unit, hash, commit, today)` — переписывает наш блок или добавляет его перед содержимым, через `fsutil.WriteDoc`; пустой `commit` не пишется.
 - `Summary(body)` — первая непустая строка после первого `# `-заголовка.
 
 ## Инварианты и подводные камни
-- Блок наш, только если в нём есть строка `unit:`, `source_hash:` или `updated:`; иной ведущий блок `---…---` — текст пользователя, не заменяется.
+- Блок наш, только если в нём есть строка `unit:` или `source_hash:` (в нашем есть обе); иной ведущий блок `---…---`, даже с `updated:`, — текст пользователя: `SetHash` не заменяет его, а ставит наш блок над ним.
+- Ведущий UTF-8 BOM блок не прячет: `Read` и `SetHash` его пропускают, `SetHash` оставляет BOM первым в файле, перед блоком.
 - `Summary` пуст, если сразу после заголовка идёт заголовок.
 - `SetHash` пишет блок и строки YAML с теми же концами строк, что первая строка файла (CRLF или LF); тело не меняется.
 

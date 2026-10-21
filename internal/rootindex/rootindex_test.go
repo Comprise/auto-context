@@ -138,27 +138,73 @@ func TestUpdateKeepsUserHeader(t *testing.T) {
 	}
 }
 
-// A second close marker later in the file belongs to the user's text: the
-// section ends at the first one, and the rest is kept.
-func TestUpdateKeepsTextAfterFirstClose(t *testing.T) {
-	root := t.TempDir()
-	cur := "<!-- auto-context:units -->\n## Units (details: context/<unit>.md)\n<!-- /auto-context:units -->\nuser text\n<!-- /auto-context:units -->\n"
-	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(cur), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
-		t.Fatal(err)
-	}
-	if got := read(t, root); !strings.Contains(got, "user text") {
-		t.Errorf("user text lost:\n%s", got)
+// A second open or close marker (a duplicate pair, or a stray one after the
+// section) is refused, not silently left stale: Update keeps the file as is
+// and Check reports it.
+func TestUpdateRefusesDuplicateMarkers(t *testing.T) {
+	sec := "<!-- auto-context:units -->\n- `old`\n<!-- /auto-context:units -->\n"
+	for _, in := range []string{
+		sec + "user text\n<!-- /auto-context:units -->\n",
+		sec + "text\n" + sec,
+		"<!-- auto-context:units -->\nX\n" + sec,
+	} {
+		root := writeIndex(t, in)
+		ch, err := Update(root, "CLAUDE.md", entries)
+		if !errors.Is(err, ErrBrokenMarkers) || ch || read(t, root) != in {
+			t.Errorf("in %q: ch=%v err=%v", in, ch, err)
+		}
+		if err := Check(root, "CLAUDE.md"); !errors.Is(err, ErrBrokenMarkers) {
+			t.Errorf("Check %q: %v", in, err)
+		}
 	}
 }
 
-// The section runs from the first open marker; markers are whole lines that
-// may be indented or carry trailing spaces.
+// A section appended after an unclosed fence closes that fence first: the
+// section is found again on the next run, and a fenced block the user adds
+// after it later does not swallow it.
+func TestUpdateUnclosedFenceStable(t *testing.T) {
+	root := writeIndex(t, "# T\n```\ncode")
+	for i := 0; i < 2; i++ {
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "# T\n```\ncode\n```\n\n" + Render(entries)
+	if got := read(t, root); got != want {
+		t.Errorf("got %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(want+"\n```\nfoo\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Update(root, "CLAUDE.md", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); got != "# T\n```\ncode\n```\n\n"+Render(nil)+"\n```\nfoo\n```\n" {
+		t.Errorf("after a later fence: got %q", got)
+	}
+}
+
+// Check reads a file starting with a BOM the way Update does.
+func TestCheckBOMFence(t *testing.T) {
+	sec := "<!-- auto-context:units -->\n- `old`\n<!-- /auto-context:units -->\n"
+	for in, broken := range map[string]bool{
+		"\ufeff```\n<!-- auto-context:units -->\n```\n": false,
+		"\ufeff```\n" + sec + "```\n" + sec:             false,
+		"\ufeff" + sec + sec:                            true,
+	} {
+		root := writeIndex(t, in)
+		err := Check(root, "CLAUDE.md")
+		_, uerr := Update(root, "CLAUDE.md", entries)
+		if errors.Is(err, ErrBrokenMarkers) != broken || errors.Is(uerr, ErrBrokenMarkers) != broken {
+			t.Errorf("in %q: Check %v, Update %v", in, err, uerr)
+		}
+	}
+}
+
+// Markers are whole lines that may be indented or carry trailing spaces.
 func TestUpdateMarkerEdgeCases(t *testing.T) {
 	root := t.TempDir()
-	in := "A\n  <!-- auto-context:units -->  \nX\n<!-- auto-context:units -->\nY\n<!-- /auto-context:units -->\t\nB\n"
+	in := "A\n  <!-- auto-context:units -->  \nY\n<!-- /auto-context:units -->\t\nB\n"
 	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte(in), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +212,65 @@ func TestUpdateMarkerEdgeCases(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := read(t, root)
-	if !strings.HasPrefix(got, "A\n") || !strings.HasSuffix(got, "B\n") || strings.Contains(got, "X\n") || strings.Contains(got, "Y\n") {
+	if !strings.HasPrefix(got, "A\n") || !strings.HasSuffix(got, "B\n") || strings.Contains(got, "Y\n") {
 		t.Errorf("got %q", got)
+	}
+}
+
+// A UTF-8 BOM before the open marker on line 1 does not hide it, and is kept.
+func TestUpdateBOM(t *testing.T) {
+	in := "\ufeff<!-- auto-context:units -->\n- `old`\n<!-- /auto-context:units -->\n"
+	root := writeIndex(t, in)
+	if err := Check(root, "CLAUDE.md"); err != nil {
+		t.Errorf("Check: %v", err)
+	}
+	if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); got != "\ufeff"+Render(entries) {
+		t.Errorf("got %q", got)
+	}
+	root = writeIndex(t, "\ufeff# T\n")
+	if _, err := Update(root, "CLAUDE.md", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, root); got != "\ufeff# T\n\n"+Render(nil) {
+		t.Errorf("got %q", got)
+	}
+}
+
+// Markers inside a fenced code block are an example, not the section: they
+// are neither rewritten nor counted.
+func TestUpdateSkipsFencedMarkers(t *testing.T) {
+	sec := "<!-- auto-context:units -->\n- `old`\n<!-- /auto-context:units -->\n"
+	for _, fenced := range []string{
+		"```\n" + sec + "```\n",
+		"   ~~~~ md\n" + sec + "~~~\n````\n~~~~~\n",
+		"````\n" + sec + "```\n````\n",
+		"```go\n<!-- /auto-context:units -->\n``` \n",
+		"- ex:\n\n    ```\n    <!-- auto-context:units -->\n    <!-- /auto-context:units -->\n    ```\n",
+	} {
+		for _, in := range []string{fenced, sec + fenced} {
+			root := writeIndex(t, in)
+			if err := Check(root, "CLAUDE.md"); err != nil {
+				t.Errorf("Check %q: %v", in, err)
+			}
+			if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+				t.Errorf("in %q: %v", in, err)
+				continue
+			}
+			if got := read(t, root); !strings.Contains(got, fenced) || !strings.Contains(got, Render(entries)) {
+				t.Errorf("in %q: got %q", in, got)
+			}
+		}
+	}
+	// A backtick in a backtick fence's info string or no closing fence make no
+	// fence: the markers are live.
+	for _, in := range []string{"    ```\n" + sec, "``` a`b\n" + sec, "```\n" + sec} {
+		root := writeIndex(t, in)
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil || strings.Contains(read(t, root), "old") {
+			t.Errorf("in %q: err=%v got %q", in, err, read(t, root))
+		}
 	}
 }
 

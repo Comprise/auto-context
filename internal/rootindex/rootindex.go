@@ -24,8 +24,9 @@ type Entry struct {
 	Unit, Summary string
 }
 
-// ErrBrokenMarkers reports unbalanced units markers in the root index file.
-var ErrBrokenMarkers = errors.New("unbalanced auto-context:units markers in the root index file")
+// ErrBrokenMarkers reports unbalanced or repeated units markers in the root
+// index file.
+var ErrBrokenMarkers = errors.New("unbalanced or repeated auto-context:units markers in the root index file")
 
 // maxSummary caps a unit summary in the index (runes); MaxSize caps the root
 // index file we read.
@@ -73,23 +74,80 @@ func sanitize(s string) string {
 	return textx.Cap(strings.TrimSpace(s), maxSummary)
 }
 
-// markers returns the line of the first open marker and of the first close
-// marker (-1 if absent); markers are whole lines.
-func markers(lines []string) (oi, ci int) {
-	oi, ci = -1, -1
-	for i, l := range lines {
-		switch strings.TrimSpace(l) {
-		case openMarker:
-			if oi < 0 && ci < 0 {
-				oi = i
-			}
-		case closeMarker:
-			if ci < 0 {
-				ci = i
+// bom is the UTF-8 byte order mark; a file may start with it, and it is kept.
+const bom = "\ufeff"
+
+// fence reports the fence character and run length if l opens or closes a
+// code fence: 3 or more backticks or tildes after any indent (a fence in a
+// list item is indented by the item, and CommonMark's 3-space limit is
+// relative to it). info is the rest of the line after the run.
+func fence(l string) (c byte, n int, info string) {
+	t := strings.TrimLeft(l, " \t")
+	if t == "" || (t[0] != '`' && t[0] != '~') {
+		return 0, 0, ""
+	}
+	for n < len(t) && t[n] == t[0] {
+		n++
+	}
+	if n < 3 {
+		return 0, 0, ""
+	}
+	return t[0], n, strings.TrimSpace(t[n:])
+}
+
+// fenced marks the lines inside closed code fences (fence lines included)
+// and returns the fence of the first opener that is never closed ("" if
+// none). An unclosed fence hides nothing: Update closes it before appending
+// a section, so the section is not swallowed by a fence closed later.
+func fenced(lines []string) (in []bool, open string) {
+	in = make([]bool, len(lines))
+	for i := 0; i < len(lines); i++ {
+		c, n, info := fence(lines[i])
+		if c == 0 || (c == '`' && strings.ContainsRune(info, '`')) {
+			continue
+		}
+		closed := false
+		for j := i + 1; j < len(lines); j++ {
+			if cc, nn, rest := fence(lines[j]); cc == c && nn >= n && rest == "" {
+				for k := i; k <= j; k++ {
+					in[k] = true
+				}
+				i, closed = j, true
+				break
 			}
 		}
+		if !closed && open == "" {
+			open = strings.Repeat(string(c), n)
+		}
 	}
-	return oi, ci
+	return in, open
+}
+
+// markers returns the line of the open and of the close marker, -1 if both
+// are absent. Markers are whole lines outside code fences (a leading BOM is
+// ignored); a lone, misordered or repeated marker is ErrBrokenMarkers.
+func markers(lines []string) (oi, ci int, err error) {
+	oi, ci = -1, -1
+	no, nc := 0, 0
+	in, _ := fenced(lines)
+	for i, l := range lines {
+		if in[i] {
+			continue
+		}
+		if i == 0 {
+			l = strings.TrimPrefix(l, bom)
+		}
+		switch strings.TrimSpace(l) {
+		case openMarker:
+			oi, no = i, no+1
+		case closeMarker:
+			ci, nc = i, nc+1
+		}
+	}
+	if no != nc || no > 1 || ci < oi {
+		return -1, -1, ErrBrokenMarkers
+	}
+	return oi, ci, nil
 }
 
 // Check reports, without writing, what Update would refuse: ErrBrokenMarkers,
@@ -106,14 +164,12 @@ func Check(root, name string) error {
 	if err != nil {
 		return err
 	}
-	if oi, ci := markers(strings.SplitAfter(string(data), "\n")); (oi >= 0 || ci >= 0) && (oi < 0 || ci < oi) {
-		return ErrBrokenMarkers
-	}
-	return nil
+	_, _, err = markers(strings.SplitAfter(strings.TrimPrefix(string(data), bom), "\n"))
+	return err
 }
 
 // Update rewrites the section in <root>/<name> and reports whether the file
-// changed. Markers count only as whole lines; a heading line right after the
+// changed. Markers count only as whole lines outside code fences; a heading line right after the
 // open marker is the user's and is kept.
 func Update(root, name string, entries []Entry) (bool, error) {
 	// An index file linking outside the repo, into .git or to a non-.md file is
@@ -136,12 +192,22 @@ func Update(root, name string, entries []Entry) (bool, error) {
 	}
 
 	eol := eolOf(cur)
-	lines := strings.SplitAfter(cur, "\n")
-	oi, ci := markers(lines)
+	lines := strings.SplitAfter(strings.TrimPrefix(cur, bom), "\n")
+	oi, ci, err := markers(lines)
+	if err != nil {
+		return false, err
+	}
 	var next string
-	switch {
-	case oi < 0 && ci < 0:
+	if oi < 0 {
 		next = cur
+		if _, open := fenced(lines); open != "" {
+			// Close the file's dangling fence (it ran to the end anyway), or a
+			// fence the user closes later would swallow the section.
+			if !strings.HasSuffix(next, "\n") {
+				next += eol
+			}
+			next += open + eol
+		}
 		if next != "" && !strings.HasSuffix(next, "\n"+eol) {
 			if strings.HasSuffix(next, "\n") {
 				next += eol
@@ -150,14 +216,15 @@ func Update(root, name string, entries []Entry) (bool, error) {
 			}
 		}
 		next += render(header, entries, eol)
-	case oi < 0 || ci < oi:
-		return false, ErrBrokenMarkers
-	default:
+	} else {
 		head := header
 		if oi+1 < ci && strings.HasPrefix(strings.TrimSpace(lines[oi+1]), "#") {
 			head = strings.TrimRight(lines[oi+1], "\r\n")
 		}
 		next = strings.Join(lines[:oi], "") + render(head, entries, eol) + strings.Join(lines[ci+1:], "")
+		if strings.HasPrefix(cur, bom) {
+			next = bom + next
+		}
 	}
 	if next == cur {
 		return false, nil

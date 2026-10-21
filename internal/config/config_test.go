@@ -200,6 +200,8 @@ func TestLoadDropsOnlyBadSettings(t *testing.T) {
 		"min_files type":   {"min_files: many\n", func(c Config) bool { return c.MinFiles == d.MinFiles }},
 		"huge notice":      {"max_session_notice: 1000000\n", func(c Config) bool { return c.MaxSessionNotice == d.MaxSessionNotice }},
 		"extension no dot": {"code_extensions: [go, .rs]\n", func(c Config) bool { return slices.Equal(c.CodeExtensions, []string{".rs"}) }},
+		"entry type":       {"exclude: [{a: b}]\n", func(c Config) bool { return slices.Equal(c.Exclude, d.Exclude) }},
+		"mixed entry type": {"exclude: [keep/**, {a: b}]\n", func(c Config) bool { return slices.Equal(c.Exclude, d.Exclude) }},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -483,5 +485,97 @@ func TestDescribeIndexFileAndPermission(t *testing.T) {
 		if got := Describe(c.err); got != c.want {
 			t.Errorf("Describe(%v) = %q, want %q", c.err, got, c.want)
 		}
+	}
+}
+
+// When no entry of the written exclude list is valid, Load uses the defaults;
+// AddExclude must keep them rather than append to the dead list.
+func TestAddExcludeInvalidListKeepsDefaults(t *testing.T) {
+	d := Default()
+	cases := map[string]struct {
+		in   string
+		want []string
+	}{
+		"all invalid":    {"exclude: [\"a{\"]\n", append(slices.Clone(d.Exclude), "gen/**")},
+		"partly invalid": {"exclude: [\"a{\", keep/**]\n", []string{"keep/**", "gen/**"}},
+		"empty":          {"exclude: []\n", []string{"gen/**"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := writeConfig(root, []byte(c.in), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := AddExclude(root, "gen/**"); err != nil {
+				t.Fatal(err)
+			}
+			cfg, _, err := Load(root)
+			if err != nil || !slices.Equal(cfg.Exclude, c.want) {
+				data, _ := os.ReadFile(filepath.Join(root, FileName))
+				t.Errorf("exclude = %v, want %v (err %v)\n%s", cfg.Exclude, c.want, err, data)
+			}
+		})
+	}
+}
+
+func TestAddExcludeKeepsPerm(t *testing.T) {
+	if filepath.Separator != '/' {
+		t.Skip("POSIX permissions")
+	}
+	root := t.TempDir()
+	if err := writeConfig(root, []byte("min_files: 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, FileName)
+	if err := os.Chmod(p, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddExclude(root, "gen/**"); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("perm = %v, err %v", st.Mode().Perm(), err)
+	}
+	fresh := t.TempDir()
+	if err := AddExclude(fresh, "gen/**"); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(filepath.Join(fresh, FileName)); err != nil || st.Mode().Perm() != 0o644 {
+		t.Fatalf("new file perm = %v, err %v", st.Mode().Perm(), err)
+	}
+}
+
+// The document is decoded as a whole: explicit keys win over a merge key,
+// and a duplicated key is a problem.
+func TestLoadMergeAndDuplicateKeys(t *testing.T) {
+	cases := map[string]struct {
+		yaml     string
+		minFiles int
+		index    string
+		problem  bool
+	}{
+		"explicit before merge": {"base: &b {min_files: 2}\nmin_files: 7\n<<: *b\n", 7, IndexClaude, true},
+		"index before merge":    {"index_file: AGENTS.md\n<<: {index_file: CLAUDE.md}\n", 5, IndexAgents, false},
+		"merge only":            {"<<: {min_files: 3}\n", 3, IndexClaude, false},
+		"duplicate key":         {"min_files: 7\nmin_files: 3\n", 0, IndexClaude, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := writeConfig(root, []byte(tc.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := load(root)
+			var pr Problems
+			if errors.As(err, &pr) != tc.problem || (err != nil && !errors.As(err, &pr)) {
+				t.Fatalf("err = %v, want problems: %v", err, tc.problem)
+			}
+			if tc.minFiles != 0 && cfg.MinFiles != tc.minFiles {
+				t.Errorf("min_files = %d, want %d", cfg.MinFiles, tc.minFiles)
+			}
+			if cfg.IndexFile != tc.index {
+				t.Errorf("index_file = %q, want %q", cfg.IndexFile, tc.index)
+			}
+		})
 	}
 }

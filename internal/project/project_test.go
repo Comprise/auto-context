@@ -190,12 +190,12 @@ func TestAckDate(t *testing.T) {
 	}
 	for content, want := range cases {
 		testutil.WriteFile(t, root, "context/svc.md", content)
-		if since, why := ackDate(root, "context/svc.md"); since != want || (want == "" && why == "") {
-			t.Errorf("%q: since=%q why=%q, want %q", content, since, why, want)
+		if a := ackPoint(root, "context/svc.md"); a.since != want || (want == "" && a.why == "") {
+			t.Errorf("%q: since=%q why=%q, want %q", content, a.since, a.why, want)
 		}
 	}
-	if since, why := ackDate(root, "context/none.md"); since != "" || why != "no context doc yet" {
-		t.Errorf("missing: %q %q", since, why)
+	if a := ackPoint(root, "context/none.md"); a.since != "" || a.why != "no context doc yet" {
+		t.Errorf("missing: %q %q", a.since, a.why)
 	}
 }
 
@@ -490,5 +490,131 @@ func TestWriteChangesReportsWriteError(t *testing.T) {
 	}
 	if err := p.WriteChanges(failingWriter{}, "svc"); err == nil || !strings.Contains(err.Error(), "write failed") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Ack records HEAD in the frontmatter; without commits it records none and
+// still succeeds.
+func TestAckRecordsHead(t *testing.T) {
+	root := t.TempDir()
+	testutil.Git(t, root, "init", "-q")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc, other]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	testutil.WriteFile(t, root, "other/a.go", "package other\n")
+	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, root, "context/other.md", "# other\n\nO.\n")
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Ack("other", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "other.md")); err != nil || m.Commit != "" {
+		t.Fatalf("unborn HEAD: m=%+v err=%v", m, err)
+	}
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-qm", "first")
+	head := strings.TrimSpace(testutil.Git(t, root, "rev-parse", "HEAD"))
+	p, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Ack("svc", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "svc.md")); err != nil || m.Commit != head {
+		t.Fatalf("m=%+v err=%v, want commit %s", m, err, head)
+	}
+}
+
+// changesRepo makes a repo whose svc history has a commit dated 2020 that
+// arrives after the ack (a merged branch). It returns the root, the acked
+// commit and a helper that writes the doc of svc with a given commit field.
+func changesRepo(t *testing.T) (root, acked string, doc func(commit string)) {
+	t.Helper()
+	testutil.RequireGit(t)
+	root = t.TempDir()
+	git := func(env []string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git(nil, "init", "-q")
+	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
+	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
+	git(nil, "add", "-A")
+	git(nil, "commit", "-qm", "base change")
+	acked = strings.TrimSpace(testutil.Git(t, root, "rev-parse", "HEAD"))
+	testutil.WriteFile(t, root, "svc/a.go", "package svc // branch\n")
+	old := []string{"GIT_AUTHOR_DATE=2020-01-01T00:00:00", "GIT_COMMITTER_DATE=2020-01-01T00:00:00"}
+	git(old, "commit", "-qam", "merged branch change")
+	doc = func(commit string) {
+		field := ""
+		if commit != "" {
+			field = "commit: " + commit + "\n"
+		}
+		testutil.WriteFile(t, root, "context/svc.md", "---\nunit: svc\nsource_hash: x\n"+field+"updated: \"2021-06-01\"\n---\n# svc\n")
+	}
+	return root, acked, doc
+}
+
+func changesOf(t *testing.T, root string) string {
+	t.Helper()
+	p, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := p.WriteChanges(&b, "svc"); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// With the acked commit in HEAD's history, commits after it are listed by
+// ancestry, however old their dates.
+func TestWriteChangesSinceAckedCommit(t *testing.T) {
+	root, acked, doc := changesRepo(t)
+	doc(acked)
+	out := changesOf(t, root)
+	if !strings.Contains(out, "merged branch change") || strings.Contains(out, "base change") ||
+		!strings.Contains(out, "since the acked commit "+acked[:12]) {
+		t.Errorf("out:\n%s", out)
+	}
+}
+
+// A missing, unknown or malformed commit falls back to the ack date and says so.
+func TestWriteChangesCommitFallback(t *testing.T) {
+	cases := map[string]string{
+		"":                      "no acked commit recorded",
+		strings.Repeat("0", 40): "the acked commit is not in this clone or could not be checked",
+		"--output=/tmp/x":       "no acked commit recorded",
+		"HEAD~1":                "no acked commit recorded",
+		strings.Repeat("A", 40): "no acked commit recorded",
+	}
+	for commit, note := range cases {
+		root, _, doc := changesRepo(t)
+		doc(commit)
+		out := changesOf(t, root)
+		if !strings.Contains(out, "since 2021-06-01") || !strings.Contains(out, note) ||
+			strings.Contains(out, "merged branch change") {
+			t.Errorf("%q: out:\n%s", commit, out)
+		}
+	}
+}
+
+// A commit that exists but is off HEAD's history falls back to the date with
+// its own note.
+func TestWriteChangesCommitOffHistory(t *testing.T) {
+	root, _, doc := changesRepo(t)
+	side := strings.TrimSpace(testutil.Git(t, root, "commit-tree", "HEAD^{tree}", "-m", "side"))
+	doc(side)
+	out := changesOf(t, root)
+	if !strings.Contains(out, "since 2021-06-01") || !strings.Contains(out, "the acked commit is not in HEAD's history") {
+		t.Errorf("out:\n%s", out)
 	}
 }

@@ -19,11 +19,19 @@ import (
 )
 
 // Entry caches the content hash of one file with the stat data it was taken at.
+// Racy marks a sum taken less than racyMargin after the mtime: a same-size
+// rewrite in the same mtime tick would leave mtime and size as they are (git's
+// "racily clean"), so the entry serves only the process that hashed it.
 type Entry struct {
 	MtimeNs int64  `json:"mtime_ns"`
 	Size    int64  `json:"size"`
 	Sum     string `json:"sum"`
+	Racy    bool   `json:"racy,omitempty"`
 }
+
+// racyMargin covers coarse mtime granularity (2 s on FAT, 1 s on ext3/HFS+)
+// and small clock skew between the file system and us.
+const racyMargin = 2 * time.Second
 
 // Cache maps root-relative slash paths to entries. Its fields are private so
 // that every change marks it dirty.
@@ -41,9 +49,10 @@ type cacheFile struct {
 	Entries map[string]Entry `json:"entries"`
 }
 
-// cacheVersion names the meaning of cached sums (content with CRLF as LF):
-// a cache file of another version is discarded.
-const cacheVersion = 2
+// cacheVersion names the meaning of cached sums (content with CRLF as LF) and
+// entries (3: racy entries are marked): a cache file of another version is
+// discarded.
+const cacheVersion = 3
 
 func cachePath(root string) string {
 	return fsutil.StatePath(root, "cache.json")
@@ -52,8 +61,8 @@ func cachePath(root string) string {
 // NewCache returns an empty cache.
 func NewCache() *Cache { return &Cache{entries: map[string]Entry{}} }
 
-// LoadCache returns the stored cache, or an empty one. A missing file is not
-// an error; one that cannot be used (too large, not a regular file, corrupt)
+// LoadCache returns the stored cache, or an empty one, without racy entries
+// (their files are hashed again). A missing file is not an error; one that cannot be used (too large, not a regular file, corrupt)
 // gives an empty cache marked for rewriting and the error, so callers can say
 // why hashing is cold. A cache of another version is replaced silently.
 func LoadCache(root string) (*Cache, error) {
@@ -73,7 +82,14 @@ func LoadCache(root string) (*Cache, error) {
 	if f.Version != cacheVersion || f.Entries == nil {
 		return empty, nil
 	}
-	return &Cache{entries: f.Entries}, nil
+	c := &Cache{entries: f.Entries}
+	for rel, e := range c.entries {
+		if e.Racy {
+			delete(c.entries, rel)
+			c.dirty = true
+		}
+	}
+	return c, nil
 }
 
 // maxCache caps the size of the cache file we read (about 1.8M entries).
@@ -166,31 +182,34 @@ func fileSum(root, rel string, c *Cache) (string, error) {
 			return e.Sum, nil
 		}
 	}
-	sum, mt, size, err := hashFile(root, rel, nil)
+	e, err := hashFile(root, rel, nil)
 	if err != nil {
 		return "", err
 	}
-	c.entries[rel] = Entry{MtimeNs: mt, Size: size, Sum: sum}
+	c.entries[rel] = e
 	c.dirty = true
-	return sum, nil
+	return e.Sum, nil
 }
 
-// hashFile hashes one regular file (CRLF as LF) and returns its sum with the
-// mtime and size it had. buf, if set, is the copy buffer.
-func hashFile(root, rel string, buf []byte) (sum string, mt, size int64, err error) {
+// hashFile hashes one regular file (CRLF as LF) and returns its entry: the sum
+// with the mtime and size it had, racy if the mtime is not racyMargin older
+// than the read. buf, if set, is the copy buffer.
+func hashFile(root, rel string, buf []byte) (Entry, error) {
 	path := fsutil.Abs(root, rel)
+	// Before the Lstat: a write after it gets a later mtime or the same one.
+	start := time.Now()
 	// Lstat: Discover never tracks symlinked sources, and one appearing since must not
 	// make us read outside the repo (or block on a FIFO).
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return "", 0, 0, err
+		return Entry{}, err
 	}
 	if !fi.Mode().IsRegular() {
-		return "", 0, 0, fmt.Errorf("%s: %w", rel, fsutil.ErrNotRegular)
+		return Entry{}, fmt.Errorf("%s: %w", rel, fsutil.ErrNotRegular)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", 0, 0, err
+		return Entry{}, err
 	}
 	defer f.Close()
 	h := sha256.New()
@@ -199,12 +218,17 @@ func hashFile(root, rel string, buf []byte) (sum string, mt, size int64, err err
 		buf = make([]byte, 32<<10)
 	}
 	if _, err := io.CopyBuffer(lf, f, buf); err != nil {
-		return "", 0, 0, err
+		return Entry{}, err
 	}
 	if err := lf.flush(); err != nil {
-		return "", 0, 0, err
+		return Entry{}, err
 	}
-	return hex.EncodeToString(h.Sum(nil)), fi.ModTime().UnixNano(), fi.Size(), nil
+	return Entry{
+		MtimeNs: fi.ModTime().UnixNano(),
+		Size:    fi.Size(),
+		Sum:     hex.EncodeToString(h.Sum(nil)),
+		Racy:    fi.ModTime().After(start.Add(-racyMargin)),
+	}, nil
 }
 
 // Prewarm hashes, on several goroutines, the files among rels whose entry is
@@ -231,10 +255,9 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 		return
 	}
 	type result struct {
-		rel    string
-		sum    string
-		mt, sz int64
-		ok     bool
+		rel string
+		e   Entry
+		ok  bool
 	}
 	jobs := make(chan string)
 	results := make(chan result)
@@ -246,8 +269,8 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 			defer wg.Done()
 			buf := make([]byte, 32<<10)
 			for rel := range jobs {
-				sum, mt, sz, err := hashFile(root, rel, buf)
-				results <- result{rel, sum, mt, sz, err == nil}
+				e, err := hashFile(root, rel, buf)
+				results <- result{rel, e, err == nil}
 			}
 		}()
 	}
@@ -262,7 +285,7 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 	last := time.Now()
 	for r := range results {
 		if r.ok {
-			c.entries[r.rel] = Entry{MtimeNs: r.mt, Size: r.sz, Sum: r.sum}
+			c.entries[r.rel] = r.e
 			c.dirty = true
 		}
 		if save != nil && time.Since(last) > saveEvery {

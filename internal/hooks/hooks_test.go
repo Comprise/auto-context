@@ -69,6 +69,9 @@ func TestSessionNotice(t *testing.T) {
 		{"both", []string{"a"}, []string{"c"}, 10, "auto-context: docs stale for a; missing for c" + tail},
 		{"overflow", []string{"a", "b"}, []string{"c"}, 2, "auto-context: docs stale for a, b (+1 more)" + tail},
 		{"overflow into missing", []string{"a"}, []string{"c", "d"}, 2, "auto-context: docs stale for a; missing for c (+1 more)" + tail},
+		{"counts only", []string{"a", "b"}, []string{"c"}, 0, "auto-context: docs stale for 2 units, missing for 1 unit" + tail},
+		{"counts stale", []string{"a"}, nil, 0, "auto-context: docs stale for 1 unit" + tail},
+		{"counts missing", nil, []string{"c", "d"}, 0, "auto-context: docs missing for 2 units" + tail},
 		{"spec", []string{"src/auth", "cmd/api"}, []string{"internal/billing"}, 10,
 			"auto-context: docs stale for src/auth, cmd/api; missing for internal/billing. Update them when working there (skill auto-context:auto-context-docs) or run /auto-context:status."},
 	}

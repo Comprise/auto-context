@@ -137,6 +137,48 @@ func TestDiscoverGitSkipsDeletedDirs(t *testing.T) {
 	}
 }
 
+// A directory whose indexed files were all deleted from the work tree, the
+// directory itself left empty, is no unit in git mode either: as in the walk,
+// a directory comes only from a file that exists (a symlink does not count).
+func TestDiscoverGitSkipsDirsOfDeletedFiles(t *testing.T) {
+	build := func() string {
+		root := t.TempDir()
+		mkfiles(t, root, "pkg/a/x.go", "pkg/b/y.go", "pkg/c/d/z.txt", "pkg/e/w.txt")
+		if err := os.MkdirAll(filepath.Join(root, "pkg", "s"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../a/x.go", filepath.Join(root, "pkg", "s", "link.go")); err != nil {
+			t.Skip("symlinks unsupported:", err)
+		}
+		return root
+	}
+	plain, viaGit := build(), build()
+	gitInit(t, viaGit)
+	testutil.Git(t, viaGit, "add", ".")
+	for _, root := range []string{plain, viaGit} {
+		for _, rel := range []string{"pkg/b/y.go", "pkg/c/d/z.txt"} {
+			if err := os.Remove(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	cfg := config.Default()
+	cfg.Include = []string{"pkg/*"}
+	a, b := discover(t, plain, cfg), discover(t, viaGit, cfg)
+	if !b.viaGit {
+		t.Fatal("git listing not used in a git repo")
+	}
+	want := []string{"_root", "pkg/a", "pkg/e"}
+	for name, tr := range map[string]*Tree{"walk": a, "git": b} {
+		if got := paths(tr.Units()); !slices.Equal(got, want) {
+			t.Errorf("%s units = %v, want %v", name, got, want)
+		}
+		if w := tr.Warnings(); len(w) != 0 {
+			t.Errorf("%s warnings = %v", name, w)
+		}
+	}
+}
+
 // A localized git still reads as "not a git repository": no false warning.
 func TestDiscoverNoGitRepoAnyLocale(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -545,6 +587,38 @@ func TestGitignoreBraceSuffixMatchesGit(t *testing.T) {
 	for name, tr := range map[string]*Tree{"walk": discover(t, plain, config.Default()), "git": discover(t, viaGit, config.Default())} {
 		if got := tr.Tracked(); !slices.Equal(got, []string{"y.go"}) {
 			t.Errorf("%s tracked = %v", name, got)
+		}
+	}
+}
+
+// Bracket classes as git's wildmatch reads them: "]" first in a class is a
+// member, a class never matches "/" (not even "[/]", "[!q]" or a range over
+// it), a reversed range still holds its first end, and a class with no member
+// left matches nothing, without a warning.
+func TestGitignoreBracketEdgesMatchGit(t *testing.T) {
+	build := func() string {
+		root := t.TempDir()
+		mkfiles(t, root, "a/b.go", "a].go", "ab.go", "x/y.go", "xqy.go", "xzy.go",
+			"r/s.go", "r0s.go", "n]1.go", "nx1.go", "e]1.go", "rz1.go", "ra1.go", "keep.go")
+		rules := "a[/]b.go\na[]].go\nx[!q]y.go\nr[.-0]s.go\nn[!]]1.go\ne[\\]]1.go\nr[z-a]1.go\n"
+		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(rules), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	plain, viaGit := build(), build()
+	gitInit(t, viaGit)
+	a, b := discover(t, plain, config.Default()), discover(t, viaGit, config.Default())
+	if !b.viaGit {
+		t.Fatal("git listing not used in a git repo")
+	}
+	want := []string{"a/b.go", "ab.go", "keep.go", "n]1.go", "r/s.go", "ra1.go", "x/y.go", "xqy.go"}
+	for name, tr := range map[string]*Tree{"walk": a, "git": b} {
+		if got := tr.Tracked(); !slices.Equal(got, want) {
+			t.Errorf("%s tracked = %v, want %v", name, got, want)
+		}
+		if w := tr.Warnings(); len(w) != 0 {
+			t.Errorf("%s warnings = %v", name, w)
 		}
 	}
 }

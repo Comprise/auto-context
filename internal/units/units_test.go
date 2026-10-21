@@ -553,6 +553,7 @@ func TestLongestLiteral(t *testing.T) {
 		"x[0-9]long.go": "long.go",
 		"a\\*bcd":       "bcd",
 		"[abcdefgh]x":   "x",
+		"[\\]abcd]x":    "x",
 		"*":             "",
 	} {
 		if got := longestLiteral(p); got != want {
@@ -645,5 +646,23 @@ func TestWarningCountAndStat(t *testing.T) {
 	}
 	if _, _, ok := tr.Stat("nope.go"); ok {
 		t.Error("unknown file reported as tracked")
+	}
+}
+
+// Rule bytes that are not UTF-8 (a Latin-1 .gitignore) are kept as written,
+// so glob rules still match the same bytes in names, as in git.
+func TestGitignoreNonUTF8Rules(t *testing.T) {
+	f := parseIgnore(slices.Values([]string{"d\xe9j\xe0*", "*f\xe9.g?", "x\xff\xfe?.go", "[\xe9]q.go"}))
+	budget := 1 << 30
+	for _, c := range []struct {
+		path string
+		want bool
+	}{
+		{"d\xe9j\xe0.go", true}, {"caf\xe9.go", true}, {"x\xff\xfey.go", true}, {"\xe9q.go", true},
+		{"deja.go", false}, {"cafe.go", false}, {"xy.go", false}, {"eq.go", false},
+	} {
+		if got, _ := f.match(c.path, false, &budget); got != c.want {
+			t.Errorf("%q: %v, want %v", c.path, got, c.want)
+		}
 	}
 }

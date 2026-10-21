@@ -167,7 +167,7 @@ exclude: [vendor/**, node_modules/**, "**/testdata/**", dist/**, build/**]
 track: []               # files without a code extension that also count as unit code
 index_file: CLAUDE.md   # unit index file name: CLAUDE.md or AGENTS.md (Codex)
 language: ""            # docs language: ru, en, pt-BR…; empty means as in the existing docs
-max_session_notice: 10  # how many units to list in the session-start notice
+max_session_notice: 10  # how many units to list in the session-start notice (0: counts only)
 code_extensions: [.go, .ts, .tsx, .mts, .cts, .js, .jsx, .mjs, .cjs, .vue, .svelte, .py, .rs, .java, .kt,
                   .scala, .swift, .dart, .rb, .php, .cs, .fs, .c, .h, .cc, .cpp, .cxx, .hh, .hpp, .m, .mm,
                   .ex, .exs, .erl, .hs, .clj, .lua, .zig, .sh, .sql, .proto, .graphql, .tf]

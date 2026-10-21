@@ -392,7 +392,7 @@ func runStatus(args []string, stdout, stderr io.Writer, cwd string) int {
 	name := p.IndexFile()
 	switch err := rootindex.Check(root, name); {
 	case errors.Is(err, rootindex.ErrBrokenMarkers):
-		fmt.Fprintf(stdout, "warning: the auto-context:units markers in the root %s are unbalanced, so the units index is not updated\n", name)
+		fmt.Fprintf(stdout, "warning: the auto-context:units markers in the root %s are unbalanced or repeated, so the units index is not updated\n", name)
 	case err != nil:
 		fmt.Fprintf(stdout, "warning: the root %s cannot be used for the units index: %s\n", name, textx.Err(err))
 	}

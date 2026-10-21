@@ -128,7 +128,7 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 		logx.Errorf(env.Root, "root index: %v", err)
 		switch {
 		case errors.Is(err, rootindex.ErrBrokenMarkers):
-			problems = append(problems, "the auto-context:units markers in the root "+idx+" are unbalanced, so the units index is not updated; restore or remove the marker lines (not the list).")
+			problems = append(problems, "the auto-context:units markers in the root "+idx+" are unbalanced or repeated, so the units index is not updated; restore or remove the marker lines (not the list).")
 		case errors.Is(err, fsutil.ErrOutside):
 			problems = append(problems, "the root "+idx+" "+docstate.OutsideText+", so the units index is not updated.")
 		default:
@@ -247,11 +247,24 @@ func SessionFailure(a Agent) []byte {
 	return data
 }
 
-// SessionNotice builds the notice text, listing at most limit units (stale first).
+// SessionNotice builds the notice text, listing at most limit units (stale
+// first); with limit 0 it gives only the counts.
 func SessionNotice(stale, missing []string, limit int, a Agent) string {
 	total := len(stale) + len(missing)
 	if limit < 0 {
 		limit = 0
+	}
+	tail := ". Update them when working there (skill " + a.Skill("auto-context-docs") + ") or run " + a.Command("status") + "."
+	if limit == 0 {
+		// No names to list: counts, so the notice still says what is wrong.
+		var parts []string
+		if len(stale) > 0 {
+			parts = append(parts, "stale for "+unitCount(len(stale)))
+		}
+		if len(missing) > 0 {
+			parts = append(parts, "missing for "+unitCount(len(missing)))
+		}
+		return "auto-context: docs " + strings.Join(parts, ", ") + tail
 	}
 	if total < limit {
 		limit = total
@@ -283,6 +296,13 @@ func SessionNotice(stale, missing []string, limit int, a Agent) string {
 	if k := total - limit; k > 0 {
 		more = " (+" + strconv.Itoa(k) + " more)"
 	}
-	return "auto-context: " + strings.Join(parts, "; ") + more +
-		". Update them when working there (skill " + a.Skill("auto-context-docs") + ") or run " + a.Command("status") + "."
+	return "auto-context: " + strings.Join(parts, "; ") + more + tail
+}
+
+// unitCount is "1 unit" or "N units".
+func unitCount(n int) string {
+	if n == 1 {
+		return "1 unit"
+	}
+	return strconv.Itoa(n) + " units"
 }

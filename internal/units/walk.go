@@ -92,23 +92,14 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 	}
 	if ok {
 		t.viaGit = true
-		// The index lists files deleted from the work tree too; a directory
-		// they leave behind in the index is not a directory any more.
-		gone := map[string]bool{}
+		// As in the walk, a listed file counts only under real directories:
+		// one replaced by a symlink (or a file, or gone) hides what git lists
+		// under it, so nothing outside the repository is read.
+		ex := existence{root: root, real: map[string]bool{".": true}, warned: map[string]bool{}}
 		var kept []string
 		for _, rel := range files {
-			if strings.HasPrefix(rel, ".auto-context/") || t.excludedPath(rel) {
+			if strings.HasPrefix(rel, ".auto-context/") || t.excludedPath(rel) || !ex.realDir(t, path.Dir(rel)) {
 				continue
-			}
-			for d := path.Dir(rel); d != "." && !isContext(d) && dirs[d] == nil && !gone[d]; d = path.Dir(d) {
-				if fi, err := os.Lstat(fsutil.Abs(root, d)); err != nil || !fi.IsDir() {
-					if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
-						t.warn("skipped directory " + shown(d) + ": " + errKind(err))
-					}
-					gone[d] = true
-					continue
-				}
-				dirs[d] = &dirInfo{}
 			}
 			kept = append(kept, rel)
 		}
@@ -117,6 +108,14 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 		stats := parallelLstat(root, kept, t.interesting)
 		for i, rel := range kept {
 			st := stats[i]
+			// A directory exists only through a file of its own (or below)
+			// that exists: the index lists files deleted from the work tree
+			// too. A known directory has its ancestors already.
+			if dir := path.Dir(rel); dir != "." && !isContext(dir) && dirs[dir] == nil && ex.exists(t, rel, st) {
+				for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
+					dirs[dir] = &dirInfo{}
+				}
+			}
 			t.addFile(rel, dirs, true, func() (fs.FileInfo, error) { return st.info, st.err })
 		}
 	} else if err := t.walk(root, dirs); err != nil {
@@ -156,6 +155,51 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 		t.units[k] = u
 	}
 	return t, nil
+}
+
+// existence tells, in git mode, what of a listed path is in the work tree as
+// the walk would see it. Each directory is lstat'ed once.
+type existence struct {
+	root   string
+	real   map[string]bool // directory -> it and its parents are real directories
+	warned map[string]bool // directories warned about
+}
+
+// realDir reports whether dir and every directory above it is a directory,
+// not a symlink, a file or missing. Errors other than "missing" warn once.
+func (e *existence) realDir(t *Tree, dir string) bool {
+	if v, ok := e.real[dir]; ok {
+		return v
+	}
+	v := e.realDir(t, path.Dir(dir))
+	if v {
+		fi, err := os.Lstat(fsutil.Abs(e.root, dir))
+		v = err == nil && fi.IsDir()
+		if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			t.warn("skipped directory " + shown(dir) + ": " + errKind(err))
+		}
+	}
+	e.real[dir] = v
+	return v
+}
+
+// exists reports whether a listed file in a real directory is there and no
+// symlink. Files parallelLstat stat'ed are known; the others are stat'ed
+// here, only while their directory is unknown (the caller's check).
+func (e *existence) exists(t *Tree, rel string, st lstatResult) bool {
+	if !errors.Is(st.err, errNotStated) {
+		return st.err == nil && st.info.mode&fs.ModeSymlink == 0
+	}
+	dir := path.Dir(rel)
+	if e.warned[dir] {
+		return false
+	}
+	fi, err := os.Lstat(fsutil.Abs(e.root, rel))
+	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+		t.warn("skipped directory " + shown(dir) + ": " + errKind(err))
+		e.warned[dir] = true
+	}
+	return err == nil && fi.Mode()&fs.ModeSymlink == 0
 }
 
 func isContext(dir string) bool { return dir == "context" || strings.HasPrefix(dir, "context/") }

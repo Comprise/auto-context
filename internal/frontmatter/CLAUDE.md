@@ -1,5 +1,5 @@
 # internal/frontmatter
-Чтение и запись YAML-frontmatter контекстных файлов (unit, source_hash, updated).
+Чтение и запись YAML-frontmatter контекстных файлов (unit, source_hash, commit, updated).
 
 - `frontmatter.go` — чтение и перезапись блока меты, summary для оглавления
 

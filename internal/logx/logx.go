@@ -46,8 +46,7 @@ func write(root, msg string) error {
 	}
 	var rotErr error
 	if st, err := os.Stat(path); err == nil && st.Size() > maxSize {
-		_ = os.Remove(path + ".1")
-		rotErr = os.Rename(path, path+".1")
+		rotErr = rotate(root, path)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -65,6 +64,43 @@ func write(root, msg string) error {
 }
 
 const rotationFailed = "log rotation failed"
+
+// lockWait bounds the wait for the rotation lock: a hook never hangs on it.
+// lockPoll is the retry interval.
+const (
+	lockWait = 500 * time.Millisecond
+	lockPoll = 5 * time.Millisecond
+)
+
+// rotate moves the oversized log to log.1 under the lock file log.lock and
+// re-checks the size there: of parallel hooks that all saw the log oversized,
+// the first rotates and the others find the fresh log and only append (an
+// unguarded second rotation would replace the rotated log with the fresh
+// one). A lock not taken within lockWait skips this rotation; a later write
+// rotates.
+func rotate(root, path string) error {
+	lockPath, err := fsutil.Resolve(root, path+".lock")
+	if err != nil {
+		return err
+	}
+	if st, err := os.Lstat(lockPath); err == nil && !st.Mode().IsRegular() {
+		return fmt.Errorf("%s: %w", lockPath, fsutil.ErrNotRegular)
+	}
+	unlock, ok, err := lock(lockPath)
+	if err != nil || !ok {
+		return err
+	}
+	defer unlock()
+	if st, err := os.Stat(path); err != nil || st.Size() <= maxSize {
+		return nil
+	}
+	if os.Rename(path, path+".1") == nil {
+		return nil
+	}
+	// Rename replaces log.1 on POSIX; elsewhere it may have to go first.
+	_ = os.Remove(path + ".1")
+	return os.Rename(path, path+".1")
+}
 
 // recentlyNoted reports whether the last 64 KiB of the log mention msg.
 func recentlyNoted(f *os.File, msg string) bool {
