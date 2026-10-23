@@ -371,15 +371,15 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** `gitx.Run(ctx context.Context, dir string, limit int, args ...string)`; `gitx.SetDeadline` удаляется; `project.Open(ctx, root)`; `hooks.Env.Ctx context.Context`; `hashing.Prewarm(ctx, …)` и `SourceHash` проверяют `ctx.Err()` в цикле; при исчерпании — частичный результат, `Note` `NoteHashError` с `Detail` `"the hook's time is up"`: в `docstate` проверить `errors.Is(err, context.DeadlineExceeded)` до `fsutil.Category` (fsutil в этой волне принадлежит T25). Задача удаляет обёртку `docstate.Ack`. CLI — `signal.NotifyContext(context.Background(), os.Interrupt)`.
 
-- [ ] **Step 1: Tests.** `TestHookBudgetStopsHashing` — 1000 файлов, бюджет 50 мс → хук отвечает < 500 мс и пишет в лог `time is up`. `TestRunHonorsParentDeadline` в gitx.
-- [ ] **Step 2–4:** FAIL → перевести вызовы (пакет за пакетом, снизу вверх) → `go test ./...` PASS.
+- [x] **Step 1: Tests.** `TestHookBudgetStopsHashing` — 1000 файлов, бюджет 50 мс → хук отвечает < 500 мс и пишет в лог `time is up`. `TestRunHonorsParentDeadline` в gitx.
+- [x] **Step 2–4:** FAIL → перевести вызовы (пакет за пакетом, снизу вверх) → `go test ./...` PASS.
 
 ### Task T25: `os.Root` для ввода-вывода в fsutil (BP-L4)
 
 **Files:** Modify `internal/fsutil/**`, `context/internal/fsutil.md`.
 
-- [ ] **Step 1: Tests.** `TestReadRegularFIFONonBlocking` (unix): подмена файла на FIFO между `Resolve` и чтением не блокирует (`O_NONBLOCK` + `f.Stat().Mode().IsRegular()`). Существующие тесты симлинк-атак — без изменений.
-- [ ] **Step 2–4:** `Resolve` остаётся политикой; чтение и `CreateTemp`/`Rename` идут через кэшированный `os.OpenRoot(realRoot)` по root-relative пути; запись через симлинк по-прежнему пишет в цель (поведение `CLAUDE.md → AGENTS.md` сохранено, тест есть). PASS.
+- [x] **Step 1: Tests.** `TestReadRegularFIFONonBlocking` (unix): подмена файла на FIFO между `Resolve` и чтением не блокирует (`O_NONBLOCK` + `f.Stat().Mode().IsRegular()`). Существующие тесты симлинк-атак — без изменений.
+- [x] **Step 2–4:** `Resolve` остаётся политикой; чтение и `CreateTemp`/`Rename` идут через кэшированный `os.OpenRoot(realRoot)` по root-relative пути; запись через симлинк по-прежнему пишет в цель (поведение `CLAUDE.md → AGENTS.md` сохранено, тест есть). PASS.
 
 ### Task T26: неизменяемое дерево, `Stat` в листе, меньше копий, `FindRoot` в project (Q-M2, A-L5, P-M5, A-L4)
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -971,8 +972,8 @@ func TestStatusLogNotWritable(t *testing.T) {
 	}
 }
 
-// runHook resets the gitx deadline it set, even when the hook's budget ran
-// out: later in-process git calls are not refused.
+// runHook's budget ends with the hook, even when it ran out: later
+// in-process git calls are not refused.
 func TestHookResetsGitDeadline(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -984,7 +985,7 @@ func TestHookResetsGitDeadline(t *testing.T) {
 	t.Cleanup(func() { hookTable["pre-tool-use"] = old })
 	root := repo(t)
 	do(root, `{"session_id":"s","cwd":`+quote(root)+`}`, "hook", "pre-tool-use")
-	if _, err := gitx.Run(t.TempDir(), 0, "version"); err != nil {
+	if _, err := gitx.Run(context.Background(), t.TempDir(), 0, "version"); err != nil {
 		t.Errorf("git after the hook: %v", err)
 	}
 }
@@ -1892,5 +1893,41 @@ func TestParseHookArgs(t *testing.T) {
 		if ok != c.ok || (ok && (e != c.event || a != c.agent)) {
 			t.Errorf("parseHookArgs(%q) = %q, %q, %v", c.args, e, a, ok)
 		}
+	}
+}
+
+// A hook whose budget runs out while hashing stops hashing, answers soon
+// after and logs that its time was up.
+func TestHookBudgetStopsHashing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sparse files")
+	}
+	old := hookTable["session-start"]
+	fast := old
+	fast.budget = 50 * time.Millisecond
+	hookTable["session-start"] = fast
+	t.Cleanup(func() { hookTable["session-start"] = old })
+	root := repo(t)
+	testutil.WriteFile(t, root, "context/svc.md", "---\nunit: svc\nsource_hash: v2:sha256:00\nupdated: 2026-01-01\n---\n# svc\n\nSvc.\n")
+	// 1000 sparse 8 MiB files: gigabytes to hash, no disk space taken.
+	for i := range 1000 {
+		f, err := os.Create(filepath.Join(root, "svc", fmt.Sprintf("f%04d.go", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := errors.Join(f.Truncate(8<<20), f.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No git: discovery walks the tree at once, so the budget goes to hashing.
+	t.Setenv("PATH", t.TempDir())
+	start := time.Now()
+	do(root, `{"session_id":"s","cwd":`+quote(root)+`}`, "hook", "session-start")
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Errorf("hook answered after %v with a 50ms budget", d)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".auto-context", "log"))
+	if err != nil || !strings.Contains(string(data), "time is up") {
+		t.Errorf("log %q (%v) does not say the time is up", data, err)
 	}
 }

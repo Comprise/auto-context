@@ -53,6 +53,7 @@ func SessionStart(env Env, in Input) ([]byte, error) {
 	}
 	problems := envProblems(env.Root, p, cli)
 	statuses := p.Statuses()
+	logTimeUp(env.Root, statuses)
 	g := classifyStatuses(statuses)
 	problems = append(problems, unitProblems(env, p, g, cli)...)
 	problems = append(problems, indexProblems(env.Root, p, statuses, cli)...)
@@ -99,6 +100,20 @@ func envProblems(root string, p *project.Project, cli string) []string {
 		problems = append(problems, "old session files in .auto-context/state could not be removed; ask the user to check .auto-context/log.")
 	}
 	return problems
+}
+
+// logTimeUp logs the units left unhashed because the hook's budget ran out
+// (reported as unreadable sources like any other hash error).
+func logTimeUp(root string, statuses []docstate.UnitStatus) {
+	n := 0
+	for _, s := range statuses {
+		if s.Note == docstate.NoteHashError && s.Detail == docstate.TimeUp {
+			n++
+		}
+	}
+	if n > 0 {
+		logx.Errorf(root, "session start: %s: %d unit(s) not hashed", docstate.TimeUp, n)
+	}
 }
 
 // statusGroups is what SessionStart reports of the unit statuses.

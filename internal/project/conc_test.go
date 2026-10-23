@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func TestConcurrentAckTouched(t *testing.T) {
 	for w := range workers {
 		wg.Go(func() {
 			for i := range rounds {
-				p, err := Open(root)
+				p, err := Open(context.Background(), root)
 				if err != nil {
 					errs <- err
 					return

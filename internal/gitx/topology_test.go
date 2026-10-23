@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func initRepo(t *testing.T, dir string) {
 
 func wantWorkTree(t *testing.T, root string, want bool) {
 	t.Helper()
-	ok, err := WorkTreeOK(root)
+	ok, err := WorkTreeOK(context.Background(), root)
 	if err != nil || ok != want {
 		t.Errorf("WorkTreeOK(%s) = %v, %v; want %v", root, ok, err, want)
 	}
@@ -35,7 +36,7 @@ func TestWorkTreeOK(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantWorkTree(t, sub, true)
-	if _, err := WorkTreeOK(t.TempDir()); !NotRepo(err) {
+	if _, err := WorkTreeOK(context.Background(), t.TempDir()); !NotRepo(err) {
 		t.Errorf("outside a repo: err = %v", err)
 	}
 }

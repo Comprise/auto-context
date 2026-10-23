@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -679,7 +680,7 @@ func TestSessionStartOldSchemeLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := hashing.SourceHash(env.Root, p.Tree().Files("svc"), nil, p.Cache())
+	h, err := hashing.SourceHash(context.Background(), env.Root, p.Tree().Files("svc"), nil, p.Cache())
 	if err != nil {
 		t.Fatal(err)
 	}

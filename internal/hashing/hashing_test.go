@@ -1,8 +1,10 @@
 package hashing
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,7 +33,7 @@ func makeOld(t *testing.T, root, rel string) {
 
 func mustHash(t *testing.T, root string, files []string, c *Cache) string {
 	t.Helper()
-	h, err := SourceHash(root, files, nil, c)
+	h, err := SourceHash(context.Background(), root, files, nil, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestSourceHashChangesOnRename(t *testing.T) {
 }
 
 func TestSourceHashMissingFile(t *testing.T) {
-	if _, err := SourceHash(t.TempDir(), []string{"nope.go"}, nil, NewCache()); err == nil {
+	if _, err := SourceHash(context.Background(), t.TempDir(), []string{"nope.go"}, nil, NewCache()); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -183,7 +185,7 @@ func TestLFWriterBoundary(t *testing.T) {
 // Extra lines (the unit list of _root) change the hash.
 func TestSourceHashExtra(t *testing.T) {
 	r := t.TempDir()
-	if h1, _ := SourceHash(r, nil, []string{"a"}, NewCache()); h1 == mustHash(t, r, nil, NewCache()) {
+	if h1, _ := SourceHash(context.Background(), r, nil, []string{"a"}, NewCache()); h1 == mustHash(t, r, nil, NewCache()) {
 		t.Error("extra ignored")
 	}
 }
@@ -304,7 +306,7 @@ func TestPrewarmMatchesColdHash(t *testing.T) {
 	c := NewCache()
 	c.UseStats(func(rel string) (int64, int64, bool) { s, ok := stats[rel]; return s[0], s[1], ok })
 	saved := 0
-	c.Prewarm(r, files, func() { saved++ }, 0)
+	c.Prewarm(context.Background(), r, files, func() { saved++ }, 0)
 	if c.Len() != len(files) || saved == 0 {
 		t.Fatalf("entries=%d saves=%d", c.Len(), saved)
 	}
@@ -482,7 +484,7 @@ func TestHashLargeFileSampled(t *testing.T) {
 	fmt.Fprintf(h, "large\x00%d\x00%s%s", size, head, tail)
 	want := hex.EncodeToString(h.Sum(nil))
 
-	e, err := hashFile(root, "big.bin", nil)
+	e, err := hashFile(context.Background(), root, "big.bin", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +521,7 @@ func TestHashFileAtLimitIsFull(t *testing.T) {
 	makeOld(t, root, "edge.bin")
 	h := sha256.New()
 	h.Write(make([]byte, MaxHashSize))
-	e, err := hashFile(root, "edge.bin", nil)
+	e, err := hashFile(context.Background(), root, "edge.bin", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +590,7 @@ func TestPrewarmSaveDoesNotStallWorkers(t *testing.T) {
 			return fi.ModTime().UnixNano(), fi.Size(), true
 		})
 		start := time.Now()
-		c.Prewarm(root, rels, save, 0)
+		c.Prewarm(context.Background(), root, rels, save, 0)
 		if c.Len() != len(rels) {
 			t.Errorf("hashed %d of %d", c.Len(), len(rels))
 		}
@@ -598,5 +600,39 @@ func TestPrewarmSaveDoesNotStallWorkers(t *testing.T) {
 	slow := run(func() { time.Sleep(200 * time.Millisecond) })
 	if slow > base+300*time.Millisecond {
 		t.Errorf("with slow save %v, without %v", slow, base)
+	}
+}
+
+// An ended context stops SourceHash with the context's error.
+func TestSourceHashStopsWhenCtxEnds(t *testing.T) {
+	r := t.TempDir()
+	testutil.WriteFile(t, r, "a.go", "a")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	c := NewCache()
+	if _, err := SourceHash(ctx, r, []string{"a.go"}, nil, c); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v", err)
+	}
+	if c.Len() != 0 {
+		t.Errorf("hashed %d files past the deadline", c.Len())
+	}
+}
+
+// An ended context stops Prewarm: what is left is not hashed.
+func TestPrewarmStopsWhenCtxEnds(t *testing.T) {
+	r := t.TempDir()
+	var rels []string
+	for i := range 200 {
+		rel := fmt.Sprintf("f%03d.go", i)
+		testutil.WriteFile(t, r, rel, "x")
+		rels = append(rels, rel)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := NewCache()
+	c.UseStats(func(rel string) (int64, int64, bool) { return 1, 1, true })
+	c.Prewarm(ctx, r, rels, nil, 0)
+	if c.Len() != 0 {
+		t.Errorf("Prewarm hashed %d files after the context ended", c.Len())
 	}
 }

@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -28,7 +29,7 @@ func TestBrokenConfigRefusesWrites(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestWriteChangesLiteralPathspec(t *testing.T) {
 	testutil.WriteFile(t, root, "a1/new.go", "package a\n")
 	testutil.WriteFile(t, root, "a10/new10.go", "package a\n")
 	testutil.WriteFile(t, root, "a[1]/newb.go", "package a\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestPrewarmPersists(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestPrewarmPersists(t *testing.T) {
 	if err := p.SaveCache(); err != nil {
 		t.Fatal(err)
 	}
-	q, err := Open(root)
+	q, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 // open opens root or fails the test.
 func open(t *testing.T, root string) *Project {
 	t.Helper()
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +358,7 @@ func TestUpgrade(t *testing.T) {
 		"context/new.md":            "# new\n\nNew.\n",
 	})
 	p := open(t, root)
-	old, err := hashing.SourceHash(root, p.Tree().Files("svc"), nil, hashing.NewCache())
+	old, err := hashing.SourceHash(context.Background(), root, p.Tree().Files("svc"), nil, hashing.NewCache())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -582,6 +582,8 @@ func errCategory(err error) string {
 		return config.FileName + " cannot be read or parsed; fix it first"
 	case errors.Is(err, project.ErrConfigDegraded):
 		return config.FileName + " has invalid settings that decide the units; fix it first"
+	case errors.Is(err, units.ErrTimeUp):
+		return "the hook's time ran out; the repository may be too large or slow"
 	case errors.Is(err, units.ErrGitTimeout), errors.Is(err, units.ErrListTooLarge):
 		return "git is too slow or lists too many files; add big generated directories to .gitignore"
 	}

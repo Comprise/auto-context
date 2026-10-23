@@ -3,6 +3,7 @@ package hashing
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -152,8 +153,10 @@ func (c *Cache) Save(root string) error {
 // the sampled sum of largeSum) + "\n", then for each sorted
 // extra: "\x00unit\x00" + extra + "\n")). Line endings are normalized so a
 // Windows checkout (autocrlf) hashes like any other. Files are re-read only
-// when mtime or size differ from the cache, which is updated.
-func SourceHash(root string, files, extra []string, c *Cache) (string, error) {
+// when mtime or size differ from the cache, which is updated. Once ctx has
+// ended it stops with ctx's error at the first file the cache does not
+// answer for; the sums taken so far stay in the cache.
+func SourceHash(ctx context.Context, root string, files, extra []string, c *Cache) (string, error) {
 	if c.entries == nil {
 		c.entries = map[string]Entry{}
 	}
@@ -161,7 +164,7 @@ func SourceHash(root string, files, extra []string, c *Cache) (string, error) {
 	slices.Sort(sorted)
 	h := sha256.New()
 	for _, f := range sorted {
-		sum, err := fileSum(root, f, c)
+		sum, err := fileSum(ctx, root, f, c)
 		if err != nil {
 			return "", err
 		}
@@ -175,7 +178,7 @@ func SourceHash(root string, files, extra []string, c *Cache) (string, error) {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func fileSum(root, rel string, c *Cache) (string, error) {
+func fileSum(ctx context.Context, root, rel string, c *Cache) (string, error) {
 	if c.stat != nil {
 		if mt, size, ok := c.stat(rel); ok {
 			if e, ok := c.entries[rel]; ok && e.MtimeNs == mt && e.Size == size {
@@ -190,7 +193,10 @@ func fileSum(root, rel string, c *Cache) (string, error) {
 			return e.Sum, nil
 		}
 	}
-	e, err := hashFile(root, rel, nil)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	e, err := hashFile(ctx, root, rel, nil)
 	if err != nil {
 		return "", err
 	}
@@ -226,8 +232,9 @@ func largeSum(r io.ReaderAt, size int64) (string, error) {
 
 // hashFile hashes one regular file (CRLF as LF) and returns its entry: the sum
 // with the mtime and size it had, racy if the mtime is not racyMargin older
-// than the read. buf, if set, is the copy buffer.
-func hashFile(root, rel string, buf []byte) (Entry, error) {
+// than the read. buf, if set, is the copy buffer. Once ctx has ended the read
+// stops with ctx's error.
+func hashFile(ctx context.Context, root, rel string, buf []byte) (Entry, error) {
 	path := fsutil.Abs(root, rel)
 	// Before the Lstat: a write after it gets a later mtime or the same one.
 	start := time.Now()
@@ -247,7 +254,7 @@ func hashFile(root, rel string, buf []byte) (Entry, error) {
 	defer f.Close()
 	var sum string
 	if fi.Size() > MaxHashSize {
-		if sum, err = largeSum(f, fi.Size()); err != nil {
+		if sum, err = largeSum(ctxReaderAt{ctx, f}, fi.Size()); err != nil {
 			return Entry{}, err
 		}
 	} else {
@@ -256,7 +263,7 @@ func hashFile(root, rel string, buf []byte) (Entry, error) {
 		if buf == nil {
 			buf = make([]byte, 32<<10)
 		}
-		if _, err := io.CopyBuffer(lf, f, buf); err != nil {
+		if _, err := io.CopyBuffer(lf, ctxReader{ctx, f}, buf); err != nil {
 			return Entry{}, err
 		}
 		if err := lf.flush(); err != nil {
@@ -272,12 +279,40 @@ func hashFile(root, rel string, buf []byte) (Entry, error) {
 	}, nil
 }
 
+// ctxReader reads r until ctx ends, then fails with ctx's error: a large
+// file must not hold a hook past its budget.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// ctxReaderAt is ctxReader for io.ReaderAt.
+type ctxReaderAt struct {
+	ctx context.Context
+	r   io.ReaderAt
+}
+
+func (c ctxReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.ReadAt(p, off)
+}
+
 // Prewarm hashes, on several goroutines, the files among rels whose entry is
 // missing or out of date (per the trusted stats), so later SourceHash calls
 // hit the cache. save, if set, is called every saveEvery while results come
-// in, so a hook killed by its timeout keeps the work done. Errors are left for
-// SourceHash to report.
-func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.Duration) {
+// in, so a hook killed by its timeout keeps the work done. Once ctx has ended
+// no new file is started and Prewarm returns with what it has. Errors are
+// left for SourceHash to report.
+func (c *Cache) Prewarm(ctx context.Context, root string, rels []string, save func(), saveEvery time.Duration) {
 	if c.stat == nil {
 		return
 	}
@@ -308,14 +343,19 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 		wg.Go(func() {
 			buf := make([]byte, 32<<10)
 			for rel := range jobs {
-				e, err := hashFile(root, rel, buf)
+				e, err := hashFile(ctx, root, rel, buf)
 				results <- result{rel, e, err == nil}
 			}
 		})
 	}
 	go func() {
+	feed:
 		for _, rel := range todo {
-			jobs <- rel
+			select {
+			case jobs <- rel:
+			case <-ctx.Done():
+				break feed
+			}
 		}
 		close(jobs)
 		wg.Wait()

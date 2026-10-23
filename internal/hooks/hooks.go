@@ -3,6 +3,7 @@ package hooks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -69,7 +70,8 @@ func CheckEvent(event string, in Input) error {
 	return nil
 }
 
-// Env carries the resolved project root, the clock and the agent.
+// Env carries the resolved project root, the clock, the agent and the hook's
+// budget.
 type Env struct {
 	Root  string
 	Now   func() time.Time
@@ -77,6 +79,17 @@ type Env struct {
 	// PluginRoot is the plugin's install directory; when empty, CLI reads it
 	// from the environment.
 	PluginRoot string
+	// Ctx bounds the hook's git calls and hashing (its budget); nil means
+	// no bound.
+	Ctx context.Context
+}
+
+// ctx is Env.Ctx, or context.Background() when it is nil.
+func (env Env) ctx() context.Context {
+	if env.Ctx != nil {
+		return env.Ctx
+	}
+	return context.Background()
 }
 
 // load prepares the state dir and opens the project. It reports nothing
@@ -86,7 +99,7 @@ func load(env Env) (*project.Project, error) {
 	if err := fsutil.EnsureStateDir(env.Root); err != nil {
 		return nil, err
 	}
-	return project.Open(env.Root)
+	return project.Open(env.ctx(), env.Root)
 }
 
 // hookOutput is the answer of every hook; unset fields are left out, so each

@@ -2,6 +2,7 @@
 package docstate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -59,6 +60,14 @@ const (
 	NoteOldScheme Note = "old hash scheme"
 )
 
+// TimeUp is the Detail of NoteHashError when the caller's context ran out
+// (a hook's budget) before the unit's sources were hashed.
+const TimeUp = "the hook's time is up"
+
+// Interrupted is the Detail of NoteHashError when the caller's context was
+// cancelled (an interrupted CLI command) before the unit's sources were hashed.
+const Interrupted = "interrupted"
+
 // NoteText is the note as `status` prints it, with the detail if any.
 func (s UnitStatus) NoteText() string {
 	if s.Detail != "" {
@@ -71,13 +80,32 @@ func (s UnitStatus) NoteText() string {
 // scheme, so an ack would only upgrade it.
 func OldScheme(st UnitStatus) bool { return st.State == OK && st.Note == NoteOldScheme }
 
+// DocText is a unit's context doc as frontmatter.Read returned it.
+type DocText struct {
+	Meta frontmatter.Meta
+	Body string
+	Err  error
+}
+
+// ReadDoc reads unit's context doc for StatusOfDoc.
+func ReadDoc(root, unit string) DocText {
+	meta, body, err := frontmatter.Read(root, fsutil.Abs(root, units.ContextPath(unit)))
+	return DocText{Meta: meta, Body: body, Err: err}
+}
+
 // StatusOf returns the status of one unit; Note is set when State is Stale
-// (a doc or sources that cannot be read) or, as NoteOldScheme, when it is OK
-// by the old hash scheme. It updates c but does not save it.
-func StatusOf(root string, t *units.Tree, c *hashing.Cache, unit string) UnitStatus {
-	ctx := units.ContextPath(unit)
-	st := UnitStatus{Unit: unit, ContextPath: ctx, State: Stale}
-	meta, body, err := frontmatter.Read(root, fsutil.Abs(root, ctx))
+// (a doc or sources that cannot be read, or hashing cut short by ctx: Detail
+// TimeUp on a deadline, Interrupted on a cancel) or, as NoteOldScheme, when it is OK by the old hash scheme. It
+// updates c but does not save it.
+func StatusOf(ctx context.Context, root string, t *units.Tree, c *hashing.Cache, unit string) UnitStatus {
+	return StatusOfDoc(ctx, root, t, c, unit, ReadDoc(root, unit))
+}
+
+// StatusOfDoc is StatusOf with unit's doc already read (ReadDoc), so a
+// caller that inspected the doc does not read it again.
+func StatusOfDoc(ctx context.Context, root string, t *units.Tree, c *hashing.Cache, unit string, d DocText) UnitStatus {
+	st := UnitStatus{Unit: unit, ContextPath: units.ContextPath(unit), State: Stale}
+	meta, body, err := d.Meta, d.Body, d.Err
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		st.State = Missing
@@ -100,9 +128,15 @@ func StatusOf(root string, t *units.Tree, c *hashing.Cache, unit string) UnitSta
 		if legacy {
 			hash = legacyHash
 		}
-		if h, herr := hash(root, t, c, unit); herr != nil {
+		h, herr := hash(ctx, root, t, c, unit)
+		switch {
+		case errors.Is(herr, context.DeadlineExceeded):
+			st.Note, st.Detail = NoteHashError, TimeUp
+		case errors.Is(herr, context.Canceled):
+			st.Note, st.Detail = NoteHashError, Interrupted
+		case herr != nil:
 			st.Note, st.Detail = NoteHashError, fsutil.Category(herr)
-		} else if meta.SourceHash == h {
+		case meta.SourceHash == h:
 			st.State = OK
 			if legacy {
 				st.Note = NoteOldScheme
@@ -126,12 +160,12 @@ func SummaryOf(root, unit string) string {
 // for _root also the index view's units, so adding or removing a unit makes
 // the root docs stale. A unit only of the full view (untracked files only)
 // hashes an empty list.
-func sourceHash(root string, t *units.Tree, c *hashing.Cache, unit string) (string, error) {
+func sourceHash(ctx context.Context, root string, t *units.Tree, c *hashing.Cache, unit string) (string, error) {
 	var extra []string
 	if unit == units.RootUnit {
 		extra = t.HashUnits()
 	}
-	h, err := hashing.SourceHash(root, t.HashFiles(unit), extra, c)
+	h, err := hashing.SourceHash(ctx, root, t.HashFiles(unit), extra, c)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +174,7 @@ func sourceHash(root string, t *units.Tree, c *hashing.Cache, unit string) (stri
 
 // legacyHash is the old scheme hash, as v1.0.0 recorded it: the full view's
 // files and, for _root, all other units.
-func legacyHash(root string, t *units.Tree, c *hashing.Cache, unit string) (string, error) {
+func legacyHash(ctx context.Context, root string, t *units.Tree, c *hashing.Cache, unit string) (string, error) {
 	var extra []string
 	if unit == units.RootUnit {
 		for _, u := range t.Units() {
@@ -149,7 +183,7 @@ func legacyHash(root string, t *units.Tree, c *hashing.Cache, unit string) (stri
 			}
 		}
 	}
-	return hashing.SourceHash(root, t.Files(unit), extra, c)
+	return hashing.SourceHash(ctx, root, t.Files(unit), extra, c)
 }
 
 // DocKind is what context/<unit>.md is on disk.
@@ -191,7 +225,7 @@ func Doc(root, unit string) (kind DocKind, path string, err error) {
 // untouched, commit included, so repeated acks (auto-ack on every Stop, a
 // parallel session) do not rewrite it; head is called only to rewrite. A doc
 // of the old scheme is always rewritten.
-func AckIfNeeded(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time, head func() string) (written bool, err error) {
+func AckIfNeeded(ctx context.Context, root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time, head func() string) (written bool, err error) {
 	if !t.IsUnit(unit) {
 		return false, fmt.Errorf("%w %s", units.ErrUnknownUnit, unit)
 	}
@@ -207,7 +241,7 @@ func AckIfNeeded(root string, t *units.Tree, c *hashing.Cache, unit string, now 
 	case DocUnreadable:
 		return false, err
 	}
-	h, err := sourceHash(root, t, c, unit)
+	h, err := sourceHash(ctx, root, t, c, unit)
 	if err != nil {
 		return false, err
 	}
@@ -222,10 +256,4 @@ func AckIfNeeded(root string, t *units.Tree, c *hashing.Cache, unit string, now 
 		return false, err
 	}
 	return true, nil
-}
-
-// Ack is AckIfNeeded without the written flag.
-func Ack(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time, head func() string) error {
-	_, err := AckIfNeeded(root, t, c, unit, now, head)
-	return err
 }

@@ -1609,3 +1609,10 @@ func TestRepoDirStatLinkedRoot(t *testing.T) {
 		}
 	}
 }
+
+// Discovery stopped by the hook's budget has its own fixed category.
+func TestTimeUpCategory(t *testing.T) {
+	if got := errCategory(fmt.Errorf("x: %w", units.ErrTimeUp)); got != "the hook's time ran out; the repository may be too large or slow" {
+		t.Errorf("%q", got)
+	}
+}

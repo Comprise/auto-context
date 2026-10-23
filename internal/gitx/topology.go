@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,8 +26,8 @@ func NotRepo(err error) bool {
 // core.worktree or a `.git` file sending git to another tree or repository
 // gives false and a nil error; an error means git did not answer (NotRepo
 // tells "no repo").
-func WorkTreeOK(root string) (bool, error) {
-	res, err := Run(root, 0, "rev-parse", "--show-toplevel", "--absolute-git-dir")
+func WorkTreeOK(ctx context.Context, root string) (bool, error) {
+	res, err := Run(ctx, root, 0, "rev-parse", "--show-toplevel", "--absolute-git-dir")
 	if err != nil {
 		return false, err
 	}
