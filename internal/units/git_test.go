@@ -458,7 +458,7 @@ func TestDiscoverListTooLarge(t *testing.T) {
 	old := maxList
 	maxList = 4
 	t.Cleanup(func() { maxList = old })
-	if _, err := Discover(root, config.Default()); !errors.Is(err, ErrListTooLarge) {
+	if _, err := DiscoverContext(context.Background(), root, config.Default()); !errors.Is(err, ErrListTooLarge) {
 		t.Errorf("err = %v, want ErrListTooLarge", err)
 	}
 }
@@ -505,7 +505,7 @@ func TestDiscoverEmptyListCheckIgnoreTimeout(t *testing.T) {
 	old := gitx.Timeout
 	gitx.Timeout = 200 * time.Millisecond
 	t.Cleanup(func() { gitx.Timeout = old })
-	if _, err := Discover(root, config.Default()); !errors.Is(err, ErrGitTimeout) {
+	if _, err := DiscoverContext(context.Background(), root, config.Default()); !errors.Is(err, ErrGitTimeout) {
 		t.Errorf("err = %v, want ErrGitTimeout", err)
 	}
 }
@@ -878,7 +878,7 @@ func TestDiscoverLsFilesTimeout(t *testing.T) {
 	gitx.Timeout = 200 * time.Millisecond
 	t.Cleanup(func() { gitx.Timeout = old })
 	start := time.Now()
-	_, err := Discover(root, config.Default())
+	_, err := DiscoverContext(context.Background(), root, config.Default())
 	if !errors.Is(err, ErrGitTimeout) {
 		t.Errorf("err = %v, want ErrGitTimeout", err)
 	}
@@ -897,13 +897,13 @@ func TestMaxFiles(t *testing.T) {
 	t.Cleanup(func() { maxFiles = old })
 	walked := t.TempDir()
 	mkfiles(t, walked, "a.go", "b.go", "c.go")
-	if _, err := Discover(walked, config.Default()); !errors.Is(err, ErrListTooLarge) {
+	if _, err := DiscoverContext(context.Background(), walked, config.Default()); !errors.Is(err, ErrListTooLarge) {
 		t.Errorf("walk: err = %v, want ErrListTooLarge", err)
 	}
 	listed := t.TempDir()
 	mkfiles(t, listed, "a.go", "b.go", "c.go")
 	gitInit(t, listed)
-	if _, err := Discover(listed, config.Default()); !errors.Is(err, ErrListTooLarge) {
+	if _, err := DiscoverContext(context.Background(), listed, config.Default()); !errors.Is(err, ErrListTooLarge) {
 		t.Errorf("git: err = %v, want ErrListTooLarge", err)
 	}
 	ok := t.TempDir()

@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
+	"auto-context/internal/filestat"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/project"
 	"auto-context/internal/session"
@@ -135,7 +137,7 @@ func TestStopWithoutSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := snap["svc/main.go"]; !ok {
+	if !snap.Has("svc/main.go") {
 		t.Errorf("snapshot lacks svc/main.go: %v", snap)
 	}
 }
@@ -840,20 +842,77 @@ func TestRecordTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := session.Snapshot{
+	before := session.FromMap(map[string]filestat.Stat{
 		"svc/main.go": {MtimeNs: 1, Size: 1}, "lib/lib.go": {MtimeNs: 1, Size: 1},
 		"context/svc.md": {MtimeNs: 1, Size: 1}, "context/lib.md": {MtimeNs: 1, Size: 1}, "svc/CLAUDE.md": {MtimeNs: 1, Size: 1},
-	}
-	cur := session.Snapshot{
+	})
+	cur := session.FromMap(map[string]filestat.Stat{
 		"svc/main.go": {MtimeNs: 10, Size: 1}, "lib/lib.go": {MtimeNs: 10, Size: 1},
 		"context/svc.md": {MtimeNs: 20, Size: 1}, // after svc's code: counts
 		"context/lib.md": {MtimeNs: 5, Size: 1},  // before lib's code: does not
 		"svc/CLAUDE.md":  {MtimeNs: 30, Size: 2},
-	}
+	})
 	var j session.Journal
-	fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil}, nil, &j).fresh
+	fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil, nil}, nil, &j).fresh
 	if !slices.Equal(fresh, []string{"svc"}) || !slices.Equal(j.CodeChanged, []string{"lib", "svc"}) || !slices.Equal(j.DocsTouched, []string{"lib", "svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
+	}
+}
+
+// recordTurn stops when the hook's time is up: the changes not looked at
+// are not recorded (the snapshot stays, so the next Stop sees them), and the
+// result says so.
+func TestRecordTurnStopsWhenTimeUp(t *testing.T) {
+	env := newRepo(t, true)
+	p, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := session.FromMap(map[string]filestat.Stat{"svc/main.go": {MtimeNs: 1, Size: 1}, "lib/lib.go": {MtimeNs: 1, Size: 1}})
+	cur := session.FromMap(map[string]filestat.Stat{"svc/main.go": {MtimeNs: 10, Size: 1}, "lib/lib.go": {MtimeNs: 10, Size: 1}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var j session.Journal
+	tc := recordTurn(p.Tree(), before, cur, turnEnv{stat: noDirs, ctx: ctx}, nil, &j)
+	if !tc.timeUp || len(j.CodeChanged) != 0 {
+		t.Errorf("timeUp=%v journal=%+v", tc.timeUp, j)
+	}
+}
+
+// errAfter is a context whose Err is nil for the first n calls, then
+// DeadlineExceeded: the hook's time ends in the middle of a loop.
+type errAfter struct {
+	context.Context
+	n int
+}
+
+func (c *errAfter) Err() error {
+	if c.n--; c.n < 0 {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// A diff cut short by the hook's time gives no auto-ack candidates: the
+// sorted diff reaches context/svc.md before svc/main.go, whose newer edit
+// would bar the ack, and marking the doc seen would hide the feedback on the
+// next Stop.
+func TestRecordTurnTimeUpMidDiffNoFresh(t *testing.T) {
+	env := newRepo(t, false)
+	p, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := map[string]filestat.Stat{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 1, Size: 1}}
+	c := map[string]filestat.Stat{"svc/main.go": {MtimeNs: 100, Size: 1}, "context/svc.md": {MtimeNs: 20, Size: 1}}
+	for i := range 63 { // diff entries 0..62; context/svc.md is 63, svc/main.go 64
+		c[fmt.Sprintf("aaa/x%02d.go", i)] = filestat.Stat{MtimeNs: 5, Size: 1}
+	}
+	var j session.Journal
+	te := turnEnv{stat: noDirs, ctx: &errAfter{Context: context.Background(), n: 1}}
+	tc := recordTurn(p.Tree(), session.FromMap(b), session.FromMap(c), te, nil, &j)
+	if !tc.timeUp || len(tc.fresh) != 0 {
+		t.Errorf("timeUp=%v fresh=%v, want time up and no fresh", tc.timeUp, tc.fresh)
 	}
 }
 
@@ -863,25 +922,24 @@ func TestRecordTurnOldMtime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := session.Snapshot{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 1, Size: 1}}
-	cur := session.Snapshot{
+	before := session.FromMap(map[string]filestat.Stat{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 1, Size: 1}})
+	cur := session.FromMap(map[string]filestat.Stat{
 		"svc/main.go": {MtimeNs: 1, Size: 2}, "svc/moved.go": {MtimeNs: 5, Size: 1},
 		"context/svc.md": {MtimeNs: 20, Size: 2},
-	}
+	})
 	var j session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil}, nil, &j).fresh; len(fresh) != 0 ||
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil, nil}, nil, &j).fresh; len(fresh) != 0 ||
 		!slices.Equal(j.CodeChanged, []string{"svc"}) || !slices.Equal(j.DocsTouched, []string{"svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
 	}
 	var j0 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil}, nil, &j0).fresh; !slices.Equal(fresh, []string{"svc"}) {
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil, nil}, nil, &j0).fresh; !slices.Equal(fresh, []string{"svc"}) {
 		t.Errorf("rule off: fresh=%v", fresh)
 	}
 	// A modified (not new) file with an old mtime bars the ack too.
-	delete(cur, "svc/moved.go")
-	cur["svc/main.go"] = units.Stat{MtimeNs: 5, Size: 2}
+	cur = session.FromMap(map[string]filestat.Stat{"svc/main.go": {MtimeNs: 5, Size: 2}, "context/svc.md": {MtimeNs: 20, Size: 2}})
 	var j1 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil}, nil, &j1).fresh; len(fresh) != 0 {
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil, nil}, nil, &j1).fresh; len(fresh) != 0 {
 		t.Errorf("modified old file: fresh=%v", fresh)
 	}
 }
@@ -897,11 +955,11 @@ func TestRecordTurnDeletedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := session.Snapshot{
+	before := session.FromMap(map[string]filestat.Stat{
 		"svc/main.go": {MtimeNs: 1, Size: 1}, "svc/a/b/x.go": {MtimeNs: 1, Size: 1}, "svc/a/b/y.go": {MtimeNs: 1, Size: 1},
 		"context/svc.md": {MtimeNs: 1, Size: 1},
-	}
-	cur := session.Snapshot{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 20, Size: 2}}
+	})
+	cur := session.FromMap(map[string]filestat.Stat{"svc/main.go": {MtimeNs: 1, Size: 1}, "context/svc.md": {MtimeNs: 20, Size: 2}})
 	cases := []struct {
 		name  string
 		dirs  map[string]int64 // surviving directories; missing ones are climbed past
@@ -928,7 +986,7 @@ func TestRecordTurnDeletedFile(t *testing.T) {
 			return m, ok, nil
 		}
 		var j session.Journal
-		fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, stat, nil}, nil, &j).fresh
+		fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, stat, nil, nil}, nil, &j).fresh
 		if got := len(fresh) == 1; got != c.fresh || !slices.Equal(j.CodeChanged, []string{"svc"}) {
 			t.Errorf("%s: fresh=%v journal=%+v", c.name, fresh, j)
 		}
@@ -1393,7 +1451,7 @@ func TestTurnNew(t *testing.T) {
 		// Files deleted this turn count for then: it had 3 files.
 		"cnt/shuffled": {"cnt/shuffled/a.go", "cnt/shuffled/new1.go", "cnt/shuffled/new2.go"},
 	}
-	before := session.Snapshot{
+	before := session.FromMap(map[string]filestat.Stat{
 		"mod/old/go.mod": {}, "mod/new/a.go": {},
 		"cnt/old/a.go": {}, "cnt/old/b.go": {}, "cnt/old/c.go": {}, // d.go added: was a unit already
 		"cnt/grown/a.go": {}, "cnt/grown/b.go": {}, // c.go added: becomes a unit
@@ -1404,7 +1462,7 @@ func TestTurnNew(t *testing.T) {
 		"mod/unmarked/go.mod": {}, "mod/unmarked/a.go": {},
 		"cnt/shuffled/a.go": {}, "cnt/shuffled/gone1.go": {}, "cnt/shuffled/gone2.go": {},
 		"cnt/shuffled/CLAUDE.md": {}, // the index file is no source
-	}
+	})
 	of := func(u string) []string { return files[u] }
 	for _, c := range []struct {
 		u      string

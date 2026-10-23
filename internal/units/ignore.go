@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"auto-context/internal/config"
 	"auto-context/internal/fsutil"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -70,10 +71,54 @@ func (s patternSet) match(rel string) bool {
 	return matchesAny(s.globs, rel)
 }
 
+// patterns are the rules Discover found: the exclude and track patterns of
+// the config and the .gitignore files it loaded. Discover fills them; after
+// it they are only read, from any goroutine.
+type patterns struct {
+	ignores     map[string]ignoreFile // dir ("." for root) -> its .gitignore
+	excludes    patternSet            // cfg.Exclude, compiled
+	tracks      patternSet            // cfg.Track, compiled
+	excludeDirs []string              // X of every exclude pattern "X/**", for skipDir
+}
+
+func compileConfig(cfg config.Config) *patterns {
+	p := &patterns{ignores: map[string]ignoreFile{}, excludes: compilePatterns(cfg.Exclude), tracks: compilePatterns(cfg.Track)}
+	for _, e := range cfg.Exclude {
+		if x, ok := strings.CutSuffix(e, "/**"); ok {
+			p.excludeDirs = append(p.excludeDirs, x)
+		}
+	}
+	return p
+}
+
+func (p *patterns) excluded(rel string) bool { return p.excludes.match(rel) }
+
+// matcher applies patterns with the state matching spends: the doublestar
+// work left, whether the budget warning was given, the skipDir memo and where
+// warnings go. Discover uses one for the whole discovery, Classify a fresh
+// one per call; a matcher is used on one goroutine.
+type matcher struct {
+	*patterns
+	budget       int             // doublestar work left (maxGlobWork)
+	budgetWarned bool            // the budget warning was given
+	skipped      map[string]bool // skipDir results per directory; nil: not memoized
+	warn         func(string)
+}
+
+// newMatcher returns a matcher over p with the full glob budget; memo keeps
+// skipDir results (worth it for a whole discovery, not for one path).
+func newMatcher(p *patterns, memo bool, warn func(string)) *matcher {
+	m := &matcher{patterns: p, budget: maxGlobWork, warn: warn}
+	if memo {
+		m.skipped = map[string]bool{}
+	}
+	return m
+}
+
 // gitIgnored checks rel against the .gitignore of every ancestor directory,
 // each relative to its own directory. As in git, the deepest file with a
 // matching rule decides, and within a file the last matching rule.
-func (t *Tree) gitIgnored(rel string, isDir bool) bool {
+func (m *matcher) gitIgnored(rel string, isDir bool) bool {
 	for i := len(rel) - 1; i >= -1; i-- {
 		if i >= 0 && rel[i] != '/' {
 			continue
@@ -82,14 +127,14 @@ func (t *Tree) gitIgnored(rel string, isDir bool) bool {
 		if i >= 0 {
 			dir = rel[:i]
 		}
-		gi, ok := t.ignores[dir]
+		gi, ok := m.ignores[dir]
 		if !ok {
 			continue
 		}
-		ignored, matched := gi.match(rel[i+1:], isDir, &t.globBudget)
-		if t.globBudget <= 0 && !t.budgetWarned {
-			t.budgetWarned = true
-			t.warn(".gitignore pattern rules took too long; the rest were skipped, so some paths may be tracked or ignored wrongly")
+		ignored, matched := gi.match(rel[i+1:], isDir, &m.budget)
+		if m.budget <= 0 && !m.budgetWarned {
+			m.budgetWarned = true
+			m.warn(".gitignore pattern rules took too long; the rest were skipped, so some paths may be tracked or ignored wrongly")
 		}
 		if matched {
 			return ignored
@@ -124,9 +169,9 @@ type ignoreFile struct {
 	invalid int              // lines doublestar cannot parse or too long, dropped
 }
 
-// maxGlobWork bounds doublestar work per Discover (pattern × path length
-// summed over calls, about a second): past it the remaining pattern rules are
-// skipped, with a warning. A variable so tests can lower it.
+// maxGlobWork bounds doublestar work per Discover, and per Classify (pattern
+// × path length summed over calls, about a second): past it the remaining
+// pattern rules are skipped, with a warning. A variable so tests can lower it.
 var maxGlobWork = 300_000_000
 
 // maxRuleLen caps a pattern rule: doublestar's cost grows with its length.
@@ -587,9 +632,10 @@ const (
 	maxGlobRules     = 1000 // rules matched by pattern (with "/" or a wildcard beyond "*<suffix>"), in all files
 )
 
-// loadGitignore parses dir/.gitignore, if any, into t.ignores. A file that is
-// not a regular in-repo file, or exceeds the limits, is skipped with a warning.
-func (t *Tree) loadGitignore(root, dir string) {
+// loadGitignore parses dir/.gitignore, if any, into the tree's patterns. A
+// file that is not a regular in-repo file, or exceeds the limits, is skipped
+// with a warning.
+func (d *discovery) loadGitignore(root, dir string) {
 	rel := path.Join(dir, ".gitignore")
 	full := fsutil.Abs(root, rel)
 	if _, err := os.Lstat(full); errors.Is(err, os.ErrNotExist) {
@@ -600,19 +646,19 @@ func (t *Tree) loadGitignore(root, dir string) {
 		return
 	}
 	if err != nil {
-		t.warn("skipped " + shown(rel) + ": " + errKind(err))
+		d.warn("skipped " + shown(rel) + ": " + errKind(err))
 		return
 	}
 	f := parseIgnore(strings.SplitSeq(strings.TrimPrefix(string(data), "\ufeff"), "\n"))
 	if f.invalid > 0 {
-		t.warn(fmt.Sprintf("%s: %d invalid or overlong rule(s) ignored", shown(rel), f.invalid))
+		d.warn(fmt.Sprintf("%s: %d invalid or overlong rule(s) ignored", shown(rel), f.invalid))
 	}
 	rules := len(f.rules)
-	if rules > maxRulesPerFile || t.rules+rules > maxRulesTotal || t.globRules+len(f.other) > maxGlobRules {
-		t.warn(fmt.Sprintf("skipped %s: %d rules, %d matched by pattern (limits: %d per file, %d total, %d matched by pattern)", shown(rel), rules, len(f.other), maxRulesPerFile, maxRulesTotal, maxGlobRules))
+	if rules > maxRulesPerFile || d.rules+rules > maxRulesTotal || d.globRules+len(f.other) > maxGlobRules {
+		d.warn(fmt.Sprintf("skipped %s: %d rules, %d matched by pattern (limits: %d per file, %d total, %d matched by pattern)", shown(rel), rules, len(f.other), maxRulesPerFile, maxRulesTotal, maxGlobRules))
 		return
 	}
-	t.rules += rules
-	t.globRules += len(f.other)
-	t.ignores[dir] = f
+	d.rules += rules
+	d.globRules += len(f.other)
+	d.pats.ignores[dir] = f
 }

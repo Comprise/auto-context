@@ -55,7 +55,7 @@ func PromptSubmit(env Env, in Input) ([]byte, error) {
 		// The new snapshot below still replaces the old one.
 		logx.Errorf(root, "prompt-submit: clearing the previous turn: %v", err)
 	}
-	return nil, session.FromTree(p.Tree().Stats()).Save(root, id)
+	return nil, session.FromTree(p.Tree().Tracked(), p.Tree().StatsView()).Save(root, id)
 }
 
 // snapshotUsable reports whether the session's snapshot loads; an unreadable

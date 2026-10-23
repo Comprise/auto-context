@@ -109,7 +109,7 @@ func TestShimSessionStartCrashNotice(t *testing.T) {
 	}
 }
 
-// The shim finds the project root as config.FindRoot does: a session in a
+// The shim finds the project root as project.FindRoot does: a session in a
 // subdirectory of an enabled repo gets the notice, one in a nested repo
 // without markers does not.
 func TestShimWithoutBinaryFindsRoot(t *testing.T) {

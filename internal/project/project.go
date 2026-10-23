@@ -68,7 +68,9 @@ func markerState(root string) (active, refused bool) {
 
 // Project is an opened repository, read-only after Open (but for the lazily
 // loaded cache, and Exclude, which reloads config and tree in place): the
-// tree, cache and config belong together.
+// tree, cache and config belong together. The tree itself is immutable:
+// classifying paths (Orphans, Stop) changes neither its warnings nor a
+// shared glob budget.
 type Project struct {
 	root string
 	// ctx bounds the project's git calls and hashing (a hook's budget, an
@@ -186,7 +188,8 @@ func (p *Project) CacheErr() error {
 func (p *Project) Orphans() []string {
 	var out []string
 	for _, rel := range p.tree.Tracked() {
-		// The prefix test first: Classify may run the .gitignore rules.
+		// Only context/*.md: Classify answers those from the unit list,
+		// without the .gitignore rules.
 		if !strings.HasPrefix(rel, "context/") || !strings.HasSuffix(rel, ".md") {
 			continue
 		}

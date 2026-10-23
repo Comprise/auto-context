@@ -3,6 +3,7 @@
 package units
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -151,7 +152,7 @@ func TestDiscoverGitFIFOGitignore(t *testing.T) {
 	gitx.Timeout = 500 * time.Millisecond
 	t.Cleanup(func() { gitx.Timeout = old })
 	start := time.Now()
-	_, err := Discover(root, config.Default())
+	_, err := DiscoverContext(context.Background(), root, config.Default())
 	if !errors.Is(err, ErrGitTimeout) {
 		t.Errorf("err = %v, want ErrGitTimeout", err)
 	}

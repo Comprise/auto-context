@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/filestat"
 	"auto-context/internal/fsutil"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -26,37 +27,46 @@ import (
 // glob, is a module marker (go.mod, package.json…: dependencies are part of a
 // unit), or has a code extension and is not Markdown.
 func (t *Tree) isSource(rel string) bool {
-	if t.tracks.match(rel) || slices.Contains(t.cfg.ModuleMarkers, path.Base(rel)) {
+	if t.pats.tracks.match(rel) || slices.Contains(t.cfg.ModuleMarkers, path.Base(rel)) {
 		return true
 	}
 	ext := path.Ext(rel)
 	return ext != ".md" && slices.Contains(t.cfg.CodeExtensions, ext)
 }
 
-func (t *Tree) excluded(rel string) bool { return t.excludes.match(rel) }
-
 // untracked reports whether rel, or a directory it is in, matches exclude or a
 // .gitignore.
-func (t *Tree) untracked(rel string) bool {
-	return t.excludedPath(rel) || t.gitIgnored(rel, false)
+func (m *matcher) untracked(rel string) bool {
+	return m.excludedPath(rel) || m.gitIgnored(rel, false)
 }
 
-// skipDir reports whether the walk must not enter dir at all (memoized).
-func (t *Tree) skipDir(dir string) bool {
-	if v, ok := t.skipped[dir]; ok {
+// skipDir reports whether the walk must not enter dir at all (memoized when
+// the matcher keeps a memo).
+func (m *matcher) skipDir(dir string) bool {
+	if v, ok := m.skipped[dir]; ok {
 		return v
 	}
-	v := t.gitIgnored(dir, true)
-	for _, p := range t.cfg.Exclude {
+	v := m.gitIgnored(dir, true)
+	for _, x := range m.excludeDirs {
 		if v {
 			break
 		}
-		if x, ok := strings.CutSuffix(p, "/**"); ok {
-			v, _ = doublestar.Match(x, dir)
-		}
+		v, _ = doublestar.Match(x, dir)
 	}
-	t.skipped[dir] = v
+	if m.skipped != nil {
+		m.skipped[dir] = v
+	}
 	return v
+}
+
+// discovery is the work state of one Discover: the tree it builds, the
+// matcher that spends the glob budget, and counters only discovery needs.
+type discovery struct {
+	*Tree
+	m             *matcher
+	rules         int  // .gitignore rules loaded, against maxRulesTotal
+	globRules     int  // of them with wildcards, against maxGlobRules
+	ctxCodeWarned bool // the context/-holds-code warning was given
 }
 
 type dirInfo struct {
@@ -64,35 +74,30 @@ type dirInfo struct {
 	marker bool
 }
 
-// Discover lists the repository's files once and builds the unit tree. Inside
-// a git work tree of its own (root may be below its top level) it asks git:
-// exact .gitignore semantics and .git/info/exclude. Outside git, when git
-// lists nothing because the root itself is ignored, or when git's work tree
-// or git dir lies outside the project, it walks the tree with its own
-// .gitignore matcher; if git fails it walks too, with a warning. A git
+// DiscoverContext lists the repository's files once and builds the unit
+// tree. Inside a git work tree of its own (root may be below its top level)
+// it asks git: exact .gitignore semantics and .git/info/exclude. Outside git,
+// when git lists nothing because the root itself is ignored, or when git's
+// work tree or git dir lies outside the project, it walks the tree with its
+// own .gitignore matcher; if git fails it walks too, with a warning. A git
 // timeout or more than maxFiles files is an error: walking would be slower.
 //
-// The tree has two views: the full one (Units, Files, Tracked, Stats) of
+// The tree has two views: the full one (Units, Files, Tracked, StatsView) of
 // tracked and untracked files, and the index view (HashUnits, HashFiles) of
 // files in git's index only. Without git they are the same.
 //
-// Discover is DiscoverContext without a deadline.
-func Discover(root string, cfg config.Config) (*Tree, error) {
-	return DiscoverContext(context.Background(), root, cfg)
-}
-
-// DiscoverContext is Discover bounded by ctx (a hook's budget, an
-// interrupted CLI): an already ended ctx or one ending during the walk gives
-// ErrTimeUp, one ending while git runs ErrGitTimeout.
+// ctx bounds it (a hook's budget, an interrupted CLI): an already ended ctx
+// or one ending during the walk gives ErrTimeUp, one ending while git runs
+// ErrGitTimeout.
 func DiscoverContext(ctx context.Context, root string, cfg config.Config) (*Tree, error) {
 	if ctx.Err() != nil {
 		return nil, ErrTimeUp
 	}
 	cfg.Validate() // a Config not from config.Load is checked too
 
-	t := &Tree{cfg: cfg, units: map[string]Unit{}, files: map[string][]string{}, ignores: map[string]ignoreFile{},
-		stats: map[string]Stat{}, skipped: map[string]bool{},
-		excludes: compilePatterns(cfg.Exclude), tracks: compilePatterns(cfg.Track), globBudget: maxGlobWork}
+	t := &Tree{cfg: cfg, units: map[string]Unit{}, files: map[string][]string{},
+		stats: map[string]filestat.Stat{}, pats: compileConfig(cfg)}
+	d := &discovery{Tree: t, m: newMatcher(t.pats, true, t.warn)}
 
 	// Resolve a symlinked root so WalkDir does not stop at the link itself.
 	if r, err := filepath.EvalSymlinks(root); err == nil {
@@ -118,7 +123,7 @@ func DiscoverContext(ctx context.Context, root string, cfg config.Config) (*Tree
 		var kept []string
 		var keptOther []bool
 		for i, rel := range files {
-			if strings.HasPrefix(rel, ".auto-context/") || t.excludedPath(rel) || !ex.realDir(t, path.Dir(rel)) {
+			if strings.HasPrefix(rel, ".auto-context/") || d.m.excludedPath(rel) || !ex.realDir(t, path.Dir(rel)) {
 				continue
 			}
 			kept = append(kept, rel)
@@ -145,9 +150,9 @@ func DiscoverContext(ctx context.Context, root string, cfg config.Config) (*Tree
 					addDirs(idx, dir)
 				}
 			}
-			t.addFile(rel, dirs, idx, true, func() (fs.FileInfo, error) { return st.info, st.err })
+			d.addFile(rel, dirs, idx, true, func() (fs.FileInfo, error) { return st.info, st.err })
 		}
-	} else if err := t.walk(ctx, root, dirs); err != nil {
+	} else if err := d.walk(ctx, root, dirs); err != nil {
 		return nil, err
 	}
 	slices.Sort(t.tracked)
@@ -167,13 +172,20 @@ func addDirs(dirs map[string]*dirInfo, dir string) {
 	}
 }
 
+// Discover is DiscoverContext without a deadline.
+//
+// Deprecated: kept only for the internal/docstate tests; use DiscoverContext.
+func Discover(root string, cfg config.Config) (*Tree, error) {
+	return DiscoverContext(context.Background(), root, cfg)
+}
+
 // view qualifies the units among dirs and assigns their code files: the
 // units (with _root and file counts) and unit -> sorted files.
 func (t *Tree) view(dirs map[string]*dirInfo) (map[string]Unit, map[string][]string) {
 	units := map[string]Unit{RootUnit: {Path: RootUnit, Reason: ReasonRoot}}
 	files := map[string][]string{}
 	for dir, di := range dirs {
-		if dir == "." || t.excluded(dir) || !SafeName(dir) {
+		if dir == "." || t.pats.excluded(dir) || !SafeName(dir) {
 			continue
 		}
 		var reason Reason
@@ -254,12 +266,12 @@ func isContext(dir string) bool { return dir == "context" || strings.HasPrefix(d
 
 // excludedPath reports whether rel, or a directory it is in, is cut off by an
 // exclude pattern of the form "X/**" (what skipDir does during the walk).
-func (t *Tree) excludedPath(rel string) bool {
-	if t.excluded(rel) {
+func (m *matcher) excludedPath(rel string) bool {
+	if m.excluded(rel) {
 		return true
 	}
 	for d := path.Dir(rel); d != "."; d = path.Dir(d) {
-		if t.skipDir(d) {
+		if m.skipDir(d) {
 			return true
 		}
 	}
@@ -352,7 +364,8 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 // and stat'ed; an ignored or excluded marker makes no unit, as with git.
 // checked means the caller already applied excludes and .gitignore. idx, if
 // not nil, is the index view's dirs, which get the file too.
-func (t *Tree) addFile(rel string, dirs, idx map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
+func (d *discovery) addFile(rel string, dirs, idx map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
+	t := d.Tree
 	dir := path.Dir(rel)
 	c := t.classifyFile(rel)
 	ctxDoc, isDoc, isMarker, isSrc := c.ctxDoc, c.indexDoc, c.marker, c.source
@@ -361,7 +374,7 @@ func (t *Tree) addFile(rel string, dirs, idx map[string]*dirInfo, checked bool, 
 	}
 	// In git mode the caller already checked excludes (git applied .gitignore);
 	// the walk reaches rel only through directories it did not skip.
-	if !checked && (t.excluded(rel) || t.gitIgnored(rel, false)) {
+	if !checked && (t.pats.excluded(rel) || d.m.gitIgnored(rel, false)) {
 		return
 	}
 	fi, err := stat()
@@ -385,8 +398,8 @@ func (t *Tree) addFile(rel string, dirs, idx map[string]*dirInfo, checked bool, 
 		return // a symlink or a submodule
 	}
 	if ctxDoc {
-		if ext := path.Ext(rel); ext != ".md" && slices.Contains(t.cfg.CodeExtensions, ext) && !t.ctxCodeWarned {
-			t.ctxCodeWarned = true
+		if ext := path.Ext(rel); ext != ".md" && slices.Contains(t.cfg.CodeExtensions, ext) && !d.ctxCodeWarned {
+			d.ctxCodeWarned = true
 			t.warn("context/ holds code files (e.g. " + shown(rel) + "); they belong to no unit: the top-level context/ directory is reserved for unit docs")
 		}
 		t.track(rel, fi)
@@ -418,7 +431,7 @@ func note(dirs map[string]*dirInfo, dir string, marker, src bool, rel string) {
 
 func (t *Tree) track(rel string, fi fs.FileInfo) {
 	t.tracked = append(t.tracked, rel)
-	t.stats[rel] = Stat{MtimeNs: fi.ModTime().UnixNano(), Size: fi.Size()}
+	t.stats[rel] = filestat.Of(fi)
 }
 
 // walkCheckEvery is how many entries the walk visits between checks of its
@@ -428,8 +441,9 @@ const walkCheckEvery = 256
 // walk lists files without git, applying the .gitignore files itself. The
 // files that can matter are lstat'ed in parallel after the walk, as in git
 // mode.
-func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) error {
-	t.loadGitignore(root, ".")
+func (d *discovery) walk(ctx context.Context, root string, dirs map[string]*dirInfo) error {
+	t, m := d.Tree, d.m
+	d.loadGitignore(root, ".")
 	prefix := root
 	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
 		prefix += string(filepath.Separator)
@@ -437,7 +451,7 @@ func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) 
 	var cands []string // interesting files, neither excluded nor ignored
 	n := 0             // regular files seen, against maxFiles
 	seen := 0          // entries seen, for the ctx check
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
 		if seen++; seen%walkCheckEvery == 0 && ctx.Err() != nil {
 			return ErrTimeUp
 		}
@@ -455,30 +469,30 @@ func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) 
 				return err
 			}
 			t.warn("skipped " + shown(rel) + ": " + errKind(err))
-			if d != nil && d.IsDir() {
+			if e != nil && e.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil // unreadable entry: skip it, keep discovering
 		}
-		if d.Type()&fs.ModeSymlink != 0 {
+		if e.Type()&fs.ModeSymlink != 0 {
 			// Symlinks are skipped, except a context doc, which may stand for a
 			// doc elsewhere in the repo (addFile checks where it leads).
-			if isContext(path.Dir(rel)) && t.interesting(rel) && !t.excluded(rel) && !t.gitIgnored(rel, false) {
+			if isContext(path.Dir(rel)) && t.interesting(rel) && !t.pats.excluded(rel) && !m.gitIgnored(rel, false) {
 				cands = append(cands, rel)
 			}
 			return nil
 		}
-		if d.IsDir() {
+		if e.IsDir() {
 			if rel == "." {
 				return nil
 			}
-			if d.Name() == ".git" || rel == ".auto-context" || t.skipDir(rel) || nestedRepo(p) {
+			if e.Name() == ".git" || rel == ".auto-context" || m.skipDir(rel) || nestedRepo(p) {
 				return filepath.SkipDir
 			}
-			t.loadGitignore(root, rel)
+			d.loadGitignore(root, rel)
 			return nil
 		}
-		if !d.Type().IsRegular() {
+		if !e.Type().IsRegular() {
 			return nil
 		}
 		if n++; n > maxFiles {
@@ -489,7 +503,7 @@ func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) 
 		// has its ancestors already: .gitignore is checked once per directory.
 		dir := path.Dir(rel)
 		want := t.interesting(rel)
-		if (!want && dirs[dir] != nil) || t.excluded(rel) || t.gitIgnored(rel, false) {
+		if (!want && dirs[dir] != nil) || t.pats.excluded(rel) || m.gitIgnored(rel, false) {
 			return nil
 		}
 		for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
@@ -506,7 +520,7 @@ func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) 
 	stats := parallelLstat(root, cands, func(string) bool { return true })
 	for i, rel := range cands {
 		st := stats[i]
-		t.addFile(rel, dirs, nil, true, func() (fs.FileInfo, error) { return st.info, st.err })
+		d.addFile(rel, dirs, nil, true, func() (fs.FileInfo, error) { return st.info, st.err })
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package units
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func numbered(dir string, n int) []string {
 
 func discover(t *testing.T, root string, cfg config.Config) *Tree {
 	t.Helper()
-	tr, err := Discover(root, cfg)
+	tr, err := DiscoverContext(context.Background(), root, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +482,7 @@ func TestStats(t *testing.T) {
 	root := t.TempDir()
 	mkfiles(t, root, "a.go", "x.png")
 	tr := discover(t, root, config.Default())
-	st := tr.Stats()
+	st := tr.StatsView()
 	if _, ok := st["a.go"]; !ok || len(st) != 1 {
 		t.Errorf("stats = %v", st)
 	}
@@ -734,7 +735,7 @@ func BenchmarkDiscover(b *testing.B) {
 	cfg := config.Default()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := Discover(root, cfg); err != nil {
+		if _, err := DiscoverContext(context.Background(), root, cfg); err != nil {
 			b.Fatal(err)
 		}
 	}

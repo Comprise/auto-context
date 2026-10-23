@@ -387,8 +387,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** `filestat.Stat{MtimeNs, Size int64}` (вместо `units.Stat`); `units.Tree` неизменяем после `Discover`, изменяемое состояние — в `matcher` внутри `Discover`; `Classify` получает свой бюджет glob на вызов и не пишет предупреждений; `func (t *Tree) TakeStats() map[string]filestat.Stat` (без клона, дерево после вызова не используется для `Stats`); `project.FindRoot(cwd string) string` (из `config`, вызовы перенесены); `session.Snapshot` сохраняется отсортированным, `Diff` — слиянием двух отсортированных потоков.
 
-- [ ] **Step 1: Tests.** `TestClassifyDoesNotMutate` (предупреждения и бюджет до и после 10 000 `Classify` равны); `TestTreeConcurrentReads` под `-race`; `TestStopMemory` — Stop на 50k файлах, `runtime.ReadMemStats` HeapInuse < 150 MiB.
-- [ ] **Step 2–4:** FAIL → реализовать → `go test -race ./...` PASS.
+- [x] **Step 1: Tests.** `TestClassifyDoesNotMutate` (предупреждения и бюджет до и после 10 000 `Classify` равны); `TestTreeConcurrentReads` под `-race`; `TestStopMemory` — Stop на 50k файлах, `runtime.ReadMemStats` HeapInuse < 150 MiB.
+- [x] **Step 2–4:** FAIL → реализовать → `go test -race ./...` PASS.
 
 ### Task T27: кэш хэшей — бинарный формат, версии рядом, слияние под lock (P-M4, P-L6, A-M4)
 
