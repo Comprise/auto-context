@@ -38,6 +38,11 @@ func write(root, msg string) error {
 	if _, err := fsutil.Resolve(root, path+".1"); err != nil {
 		return err
 	}
+	if _, err := os.Lstat(filepath.Dir(path)); errors.Is(err, os.ErrNotExist) {
+		// Creates the state dir with its .gitignore; on failure the plain
+		// MkdirAll below still lets the entry reach the log.
+		_ = fsutil.EnsureStateDir(root)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

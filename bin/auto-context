@@ -1,5 +1,24 @@
 #!/bin/sh
 # Shim: picks the prebuilt binary in ../libexec for the current OS/arch.
+# The shim's own utilities run with the original PATH minus empty and relative
+# entries (so a project directory in PATH cannot supply uname & co); only sh
+# builtins are used to filter. The binary gets the original PATH back.
+orig_set=${PATH+x} orig_path=$PATH safe=
+set -f; old_ifs=$IFS; IFS=:
+for d in $PATH; do
+  case $d in /*) safe=${safe:+$safe:}$d ;; esac
+done
+IFS=$old_ifs; set +f
+[ -n "$safe" ] || safe=/usr/bin:/bin
+PATH=$safe; export PATH
+# runbin runs the binary with the original PATH (unset stays unset); a
+# subshell keeps the shim's own PATH untouched.
+runbin() {
+  (
+    if [ -n "$orig_set" ]; then PATH=$orig_path; export PATH; else unset PATH; fi
+    exec "$bin" "$@"
+  )
+}
 os=$(uname -s | tr 'A-Z' 'a-z')
 ext=
 case "$os" in
@@ -17,10 +36,11 @@ esac
 # directory up with .git or .auto-context/config.yaml, stopping below $HOME
 # when started under it, else the start directory.
 active() {
-  start=$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && pwd) || return 1
+  start=$(cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null && pwd -P) || return 1
+  home=$(cd "$HOME" 2>/dev/null && pwd -P)
   root=$start dir=$start
   while :; do
-    if [ "$dir" = "$HOME" ] && [ "$dir" != "$start" ]; then break; fi
+    if [ -n "$home" ] && [ "$dir" = "$home" ] && [ "$dir" != "$start" ]; then break; fi
     if [ -e "$dir/.git" ] || [ -e "$dir/.auto-context/config.yaml" ]; then root=$dir; break; fi
     parent=$(dirname "$dir")
     if [ "$parent" = "$dir" ]; then break; fi
@@ -50,19 +70,21 @@ if [ "$1" = hook ]; then
   # turn. It is recorded in .auto-context/log instead.
   if [ "$2" = session-start ]; then
     # Buffered, so a crash prints the notice below instead of a partial answer.
-    out=$("$bin" "$@")
+    out=$(runbin "$@")
     rc=$?
     [ "$rc" -eq 0 ] && [ -n "$out" ] && printf '%s\n' "$out"
   else
-    "$bin" "$@"
+    runbin "$@"
     rc=$?
   fi
   if [ "$rc" -ne 0 ]; then
-    "$bin" hook-exit "$2" "$rc" </dev/null >/dev/null 2>&1
+    runbin hook-exit "$2" "$rc" </dev/null >/dev/null 2>&1
     if [ "$2" = session-start ] && active; then
       printf '%s\n' '{"systemMessage":"auto-context: docs tracking is off for this session: the session-start hook crashed (see .auto-context/log).","hookSpecificOutput":{"hookEventName":"SessionStart"}}'
     fi
   fi
   exit 0
 fi
+# exec, so signals reach the binary; the shim needs no PATH after this.
+if [ -n "$orig_set" ]; then PATH=$orig_path; export PATH; else unset PATH; fi
 exec "$bin" "$@"

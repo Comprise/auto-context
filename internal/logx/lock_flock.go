@@ -17,9 +17,20 @@ func lock(path string) (unlock func(), ok bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
+	rc, err := f.SyscallConn() // unlike Fd(), leaves the file in blocking mode
+	if err != nil {
+		f.Close()
+		return nil, false, err
+	}
 	deadline := time.Now().Add(lockWait)
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		var ferr error
+		err := rc.Control(func(fd uintptr) {
+			ferr = syscall.Flock(int(fd), syscall.LOCK_EX|syscall.LOCK_NB)
+		})
+		if err == nil {
+			err = ferr
+		}
 		if err == nil {
 			return func() { f.Close() }, true, nil // closing releases the lock
 		}

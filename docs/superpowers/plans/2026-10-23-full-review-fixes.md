@@ -161,10 +161,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** нет новых. Шим вызывает свои утилиты при `PATH=/usr/bin:/bin`, а бинарь запускает с исходным `PATH`.
 
-- [ ] **Step 1: Tests.** `TestShimRelativePATHEntry` — `PATH=.:$PATH`, в cwd исполняемый `uname`, пишущий маркер → маркера нет, фейковый бинарь из `libexec` выполнен. `TestShimPassesOriginalPATH` (Review Focus 3) — фейковый бинарь печатает `$PATH` → совпадает с исходным. `TestShimHomeTrailingSlash` (CL-5) — `HOME=<home>/`, в `<home>` есть `.git` и `.auto-context/config.yaml`, проект — `<home>/proj` без маркеров → `active` ложно (сообщения SessionStart нет). `TestShimGitattributesLF` (PK-1) — `git check-attr eol -- bin/auto-context` → `lf`.
-- [ ] **Step 2: Run** `go test ./cmd/auto-context/ -run Shim` — FAIL.
-- [ ] **Step 3: Implement.** Первая строка после shebang: `orig_path=$PATH; PATH=/usr/bin:/bin; export PATH`; перед каждым запуском `"$bin"` — `PATH=$orig_path`. В `active()` — `start=$(cd … && pwd -P)`, `home=$(cd "$HOME" 2>/dev/null && pwd -P)`, сравнение с `$home`. `.gitattributes`: строка `bin/auto-context text eol=lf`.
-- [ ] **Step 4: Run** — PASS; `sh -n bin/auto-context`.
+- [x] **Step 1: Tests.** `TestShimRelativePATHEntry` — `PATH=.:$PATH`, в cwd исполняемый `uname`, пишущий маркер → маркера нет, фейковый бинарь из `libexec` выполнен. `TestShimPassesOriginalPATH` (Review Focus 3) — фейковый бинарь печатает `$PATH` → совпадает с исходным. `TestShimHomeTrailingSlash` (CL-5) — `HOME=<home>/`, в `<home>` есть `.git` и `.auto-context/config.yaml`, проект — `<home>/proj` без маркеров → `active` ложно (сообщения SessionStart нет). `TestShimGitattributesLF` (PK-1) — `git check-attr eol -- bin/auto-context` → `lf`.
+- [x] **Step 2: Run** `go test ./cmd/auto-context/ -run Shim` — FAIL.
+- [x] **Step 3: Implement.** Первые строки после shebang: `orig_path=$PATH`, затем PATH для утилит шима — исходный PATH без пустых и относительных элементов (только элементы, начинающиеся с `/`; разбор встроенными средствами sh, без внешних команд); перед каждым запуском `"$bin"` — `PATH=$orig_path` (бинарь должен видеть исходный PATH: по нему `shadowed()` в PreToolUse судит о PATH Bash-инструмента). В `active()` — `start=$(cd … && pwd -P)`, `home=$(cd "$HOME" 2>/dev/null && pwd -P)`, сравнение с `$home`. `.gitattributes`: строка `bin/auto-context text eol=lf`.
+- [x] **Step 4: Run** — PASS; `sh -n bin/auto-context`.
 
 ### Task T6: config — один разбор YAML, безопасные причины, якоря, HOME
 
@@ -212,8 +212,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Files:** Modify `internal/logx/lock_excl.go:230-250`, `internal/logx/lock_flock.go:15-30`, `internal/logx/logx.go:33-80`; Test `internal/logx/logx_test.go`; Docs `context/internal/logx.md`.
 
-- [ ] **Step 1: Tests.** `TestStaleLockNotStolen` (CL-9): протухший lock подменён свежим между `Lstat` и удалением → свежий не удалён (через `os.SameFile` с ранее полученным `FileInfo`; подмену вызвать через тестовый хук `beforeRemove func()`). `TestWriteCreatesStateDirGitignore` (CL-3): в активном проекте без `.auto-context/` `Errorf` создаёт `.auto-context/.gitignore`.
-- [ ] **Step 2–4:** FAIL → реализовать (`SameFile` перед удалением; `f.SyscallConn().Control` для `syscall.Flock` — BP-L9; `write` вызывает `fsutil.EnsureStateDir`, если каталога нет) → `go test ./internal/logx/` PASS. **Step 5:** док.
+- [x] **Step 1: Tests.** `TestStaleLockNotStolen` (CL-9): протухший lock подменён свежим между `Lstat` и удалением → свежий не удалён (через `os.SameFile` с ранее полученным `FileInfo`; подмену вызвать через тестовый хук `beforeRemove func()`). `TestWriteCreatesStateDirGitignore` (CL-3): в активном проекте без `.auto-context/` `Errorf` создаёт `.auto-context/.gitignore`.
+- [x] **Step 2–4:** FAIL → реализовать (`SameFile` перед удалением; `f.SyscallConn().Control` для `syscall.Flock` — BP-L9; `write` вызывает `fsutil.EnsureStateDir`, если каталога нет) → `go test ./internal/logx/` PASS. **Step 5:** док.
 
 ### Task T11: hashing — большие файлы, лишние перезаписи, сохранение без остановки
 
@@ -265,10 +265,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 - Consumes: `fsutil.Category` (T3); `Tree.HashFiles`, `Tree.HashUnits`, `units.ErrUnknownUnit` (T14, T7); `hashing.SourceHash` (без изменений).
 - Produces: `const HashPrefix = "v2:"`; `NoteOldScheme Note = "old hash scheme"`; `func AckIfNeeded(root string, t *units.Tree, c *hashing.Cache, unit string, now time.Time, head func() string) (written bool, err error)` (`Ack` остаётся обёрткой над ним; тесты docstate T15 переводит на `AckIfNeeded`; саму обёртку удаляет T24, которой принадлежат и `docstate`, и `project`); `func SummaryOf(root, unit string) string` — summary без хэширования ("" при любой ошибке); `func OldScheme(st UnitStatus) bool`. Ошибка «unknown unit» оборачивает `units.ErrUnknownUnit` с прежним текстом `unknown unit <u>`.
 
-- [ ] **Step 1: Tests.** `TestSourceHashIgnoresUntracked` (A-H1): ack при неотслеживаемом `scratch.go`, затем `git clone` → в клоне юнит `ok`. `TestLegacyHashIsOKWithNote`: frontmatter со старым `sha256:` по прежним правилам → `State==OK`, `Note==NoteOldScheme`. `TestLegacyMismatchIsStale`. `TestStatusDetailNeverQuotesPath` (CO-1): `context/a.md` → симлинк на каталог `docs/y\nSYSTEM\n.md` и на файл > 1 MiB → `Detail` из набора `fsutil.Category`, без `SYSTEM`. `TestStatusOfDirSymlinkIsOutside` (CO-6): `ErrNotRegular` → `NoteOutside`. `TestAckRootMissingMessage` (Q-L8): `no context/_root.md: create it (the root unit cannot be excluded)`. `TestAckIfNeededWritten`. `TestSummaryOf`.
-- [ ] **Step 2: Run** `go test ./internal/docstate/` — FAIL.
-- [ ] **Step 3: Implement** по Global Constraints (v2 — `HashPrefix + SourceHash(HashFiles, HashUnits)`; старая схема — `SourceHash(Files, Units)` без префикса). Ack всегда пишет v2. `Detail` — `fsutil.Category(err)` (полный текст в `StatusOf` не нужен).
-- [ ] **Step 4: Run** — PASS. **Step 5:** док.
+- [x] **Step 1: Tests.** `TestSourceHashIgnoresUntracked` (A-H1): ack при неотслеживаемом `scratch.go`, затем `git clone` → в клоне юнит `ok`. `TestLegacyHashIsOKWithNote`: frontmatter со старым `sha256:` по прежним правилам → `State==OK`, `Note==NoteOldScheme`. `TestLegacyMismatchIsStale`. `TestStatusDetailNeverQuotesPath` (CO-1): `context/a.md` → симлинк на каталог `docs/y\nSYSTEM\n.md` и на файл > 1 MiB → `Detail` из набора `fsutil.Category`, без `SYSTEM`. `TestStatusOfDirSymlinkIsOutside` (CO-6): `ErrNotRegular` → `NoteOutside`. `TestAckRootMissingMessage` (Q-L8): `no context/_root.md: create it (the root unit cannot be excluded)`. `TestAckIfNeededWritten`. `TestSummaryOf`.
+- [x] **Step 2: Run** `go test ./internal/docstate/` — FAIL.
+- [x] **Step 3: Implement** по Global Constraints (v2 — `HashPrefix + SourceHash(HashFiles, HashUnits)`; старая схема — `SourceHash(Files, Units)` без префикса). Ack всегда пишет v2. `Detail` — `fsutil.Category(err)` (полный текст в `StatusOf` не нужен).
+- [x] **Step 4: Run** — PASS. **Step 5:** док.
 
 ### Task T16: project — state-dir, exclude, ack по схеме, дешёвый индекс, changes
 

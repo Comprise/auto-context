@@ -10,6 +10,9 @@ import (
 // by a killed hook and removed.
 const lockStale = 10 * time.Second
 
+// beforeRemove is a test hook run between the staleness check and the removal.
+var beforeRemove func()
+
 // lockExcl is lock without flock (Windows and others): the lock is the file
 // path itself, created with O_EXCL and removed by unlock. It polls for at
 // most lockWait (ok=false when the lock stays taken); a lock file older than
@@ -26,7 +29,14 @@ func lockExcl(path string) (unlock func(), ok bool, err error) {
 			return nil, false, err
 		}
 		if st, err := os.Lstat(path); err == nil && time.Since(st.ModTime()) > lockStale {
-			_ = os.Remove(path)
+			if beforeRemove != nil {
+				beforeRemove()
+			}
+			// Remove only the file that was judged stale: a fresh lock
+			// that took its place is another holder's.
+			if cur, err := os.Lstat(path); err == nil && os.SameFile(st, cur) {
+				_ = os.Remove(path)
+			}
 		}
 		if time.Now().After(deadline) {
 			return nil, false, nil
