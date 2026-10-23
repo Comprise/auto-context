@@ -1,7 +1,7 @@
 ---
 unit: internal/frontmatter
-source_hash: v2:sha256:0635749317f890d59165b7a3f361f64c780c0d654b99bc943421172cc83dd000
-commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
+source_hash: v2:sha256:697cca0c86dd142c5c5ee8acd0afdf0977ac66f7134fbf2f577045f9f74b840c
+commit: 19511e26ff09abf55f0e0dfd25708180df415a88
 updated: "2026-10-23"
 ---
 # internal/frontmatter
