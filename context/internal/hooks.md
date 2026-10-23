@@ -1,7 +1,7 @@
 ---
 unit: internal/hooks
-source_hash: v2:sha256:e4abd495761bbf4b035fd2f2ffd6bcb110fbf4602b4746a16ba9955635795d38
-commit: 0e4d636f85b1363e33f670aeb1fc039758bf541a
+source_hash: v2:sha256:18ae05c698cbc12903e6a13ecb3b4d650de5aba77bbb0f22801a6d2c3de30ba0
+commit: 970e63dc424eef358ccbff6be95a8fa5076775d3
 updated: "2026-10-24"
 ---
 # internal/hooks
