@@ -171,7 +171,7 @@ func unitProblems(env Env, p *project.Project, g statusGroups, cli string) []str
 		}
 		problems = append(problems, msg)
 	}
-	if n := p.Tree().WarningCount(); n > 0 {
+	if n := p.WarningCount(); n > 0 {
 		problems = append(problems, fmt.Sprintf("%d discovery warning(s) (e.g. a skipped .gitignore or a git failure, which change what is tracked); run `%s status` to see them.", n, cli))
 	}
 	return problems

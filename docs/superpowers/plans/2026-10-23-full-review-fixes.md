@@ -405,14 +405,14 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** `turn.Evaluate(in turn.Input) turn.Outcome`, где `Input{Tree view, Before, Cur session.Snapshot, Journal session.Journal, TurnStart int64, DirStat func(string) (int64, bool, error), Doc func(string) docstate.DocKind}`, `Outcome{AutoAck, Pending, NewUnits, ChangedLists []string; Journal session.Journal}`; `recordTurn`, `deletionTimes`, `turnNewUnits`, `pendingUnits`, `withParents` переезжают из `hooks/stop.go` без изменений логики. `project` перестаёт отдавать `*units.Tree`: узкие методы `Units()`, `IsUnit(u)`, `Classify(rel)`, `Stats()`; вызов `p.Tree().Units()` в `cmd/auto-context/main.go` (`runUnits`) переходит на `p.Units()`.
 
-- [ ] **Step 1:** перенести табличные тесты Stop-логики в `internal/turn` (на чистых входах, без JSON). **Step 2–4:** перенос → `go test ./...` PASS, golden-файлы хуков не изменились.
+- [x] **Step 1:** перенести табличные тесты Stop-логики в `internal/turn` (на чистых входах, без JSON). **Step 2–4:** перенос → `go test ./...` PASS, golden-файлы хуков не изменились.
 
 ### Task T29: размер ветки release — проверка и решение (CD-M7)
 
 **Files:** Modify `docs/RELEASING.md`, `.github/workflows/release.yml`.
 
-- [ ] **Step 1:** выяснить, клонируют ли Claude Code (`/plugin marketplace add`, обновление) и Codex ветку shallow: установить плагин во временный `HOME` и посмотреть `git rev-parse --is-shallow-repository` и размер `.git` в кэше плагина. Записать результат и дату в `docs/RELEASING.md`.
-- [ ] **Step 2:** если клон не shallow — добавить в release.yml замер размера клона ветки и предупреждение (`::warning::`) при > 200 MiB; решение «коммиты release без родителя (force-push только ботом через bypass ruleset)» описать в RELEASING.md как следующий шаг владельца. Если shallow — записать, что действий не нужно.
+- [x] **Step 1:** выяснить, клонируют ли Claude Code (`/plugin marketplace add`, обновление) и Codex ветку shallow: установить плагин во временный `HOME` и посмотреть `git rev-parse --is-shallow-repository` и размер `.git` в кэше плагина. Записать результат и дату в `docs/RELEASING.md`.
+- [x] **Step 2:** если клон не shallow — добавить в release.yml замер размера клона ветки и предупреждение (`::warning::`) при > 200 MiB; решение «коммиты release без родителя (force-push только ботом через bypass ruleset)» описать в RELEASING.md как следующий шаг владельца. Если shallow — записать, что действий не нужно.
 
 ### Task T30: модель проблем `project.Diagnose` (A-M2)
 
