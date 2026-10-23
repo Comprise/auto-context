@@ -1,8 +1,8 @@
 ---
 unit: internal/config
-source_hash: sha256:27ab653191e8c328d917e826a44a820aaf02d6841a27a10c02c9b2c5e8aeb9c6
-commit: 8d0d43e3b49995a76334e594a9e0ed70bfabb584
-updated: "2026-10-21"
+source_hash: sha256:2c9edb19a0f7eb11eb630d4dde78ec6b14ec96a65bf04aa3bf4e04c35237c1c0
+commit: 305b9e712b2022d92dfbce747b7c3ad54db498d3
+updated: "2026-10-23"
 ---
 # internal/config
 Читает, валидирует и правит необязательный `.auto-context/config.yaml`, ищет корень репозитория.
