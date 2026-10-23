@@ -355,9 +355,9 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Files:** Modify `go.mod`, `go.sum`, `internal/config/config.go`, `internal/frontmatter/frontmatter.go`, `cmd/auto-context/main_test.go` (только импорт yaml). Задача идёт отдельной волной W7: `go get`/`go mod tidy` не должны идти параллельно со сборкой других задач.
 
-- [ ] **Step 1:** `go get go.yaml.in/yaml/v3@v3.0.5`, импорты `yaml "go.yaml.in/yaml/v3"` в `config.go`, `frontmatter.go` и `cmd/auto-context/main_test.go:22` (BP-M1), `go mod tidy` — `gopkg.in/yaml.v3` и `gopkg.in/check.v1` уходят из go.sum.
-- [ ] **Step 2:** `go.mod`: `go 1.27.0` и `toolchain go1.27.3` (BP-M3, CD-L1).
-- [ ] **Step 3: Verify** `go mod verify && go vet ./... && go test ./...` — PASS.
+- [x] **Step 1:** `go get go.yaml.in/yaml/v3@v3.0.5`, импорты `yaml "go.yaml.in/yaml/v3"` в `config.go`, `frontmatter.go` и `cmd/auto-context/main_test.go:22` (BP-M1), `go mod tidy` — `gopkg.in/yaml.v3` и `gopkg.in/check.v1` уходят из go.sum.
+- [x] **Step 2:** `go.mod`: `go 1.27.0` и `toolchain go1.27.3` (BP-M3, CD-L1).
+- [x] **Step 3: Verify** `go mod verify && go vet ./... && go test ./...` — PASS.
 
 ---
 

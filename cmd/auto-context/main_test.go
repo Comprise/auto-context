@@ -25,7 +25,7 @@ import (
 	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 func repo(t *testing.T) string {

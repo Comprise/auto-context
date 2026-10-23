@@ -17,7 +17,7 @@ import (
 	"auto-context/internal/fsutil"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // FileName is the config file, relative to the root. It lives in the
