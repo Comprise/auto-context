@@ -1,7 +1,7 @@
 ---
 unit: internal/gitx
-source_hash: v2:sha256:14f03684564d34382720bffa75afc3aceb6e7e414918a9c83811484d55d3956e
-commit: 3fb9b3fc6523bdc0b72747d317d2141f3e0403e1
+source_hash: v2:sha256:887919b931c9dc494dd59eaf469cac89ea3324cc54d864282c076a7941e53e78
+commit: c44126d5f7bca77708b36833c62e2266e53df7a0
 updated: "2026-10-24"
 ---
 # internal/gitx

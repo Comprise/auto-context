@@ -36,6 +36,8 @@ Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are 
 
 ### Fixed
 
+- Windows: removing a stale lock no longer deletes a fresh lock that replaced it, and a doc or
+  state file that another process holds open is replaced after a short retry instead of failing.
 - git can no longer run programs from a repository's `.git/config` (lazy-fetch transports,
   `gpg.program`, other transports); timeouts kill git's whole process group; a foreign work tree
   (`core.worktree`, a `.git` file pointing elsewhere, bare) is refused, linked worktrees and

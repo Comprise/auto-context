@@ -1,7 +1,7 @@
 ---
 unit: internal/filelock
-source_hash: v2:sha256:8353ebf97a281daa0341a7cffbfae91dd0d2af06e08d93fd7db2ed5d6864f0f0
-commit: 5a3491f32ba72da8d5783af53b19c793869926cf
+source_hash: v2:sha256:4674ea86b64c32785de10e7f2f8efc015cd6e6d41dcec4d74e2233841f8db6d3
+commit: c44126d5f7bca77708b36833c62e2266e53df7a0
 updated: "2026-10-24"
 ---
 # internal/filelock
