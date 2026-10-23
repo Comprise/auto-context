@@ -235,8 +235,7 @@ func absErr(err error, base string) error {
 	if errors.As(err, &pe) && !filepath.IsAbs(pe.Path) {
 		pe.Path = filepath.Join(base, pe.Path)
 	}
-	var le *os.LinkError
-	if errors.As(err, &le) {
+	if le, ok := errors.AsType[*os.LinkError](err); ok {
 		le.Old, le.New = filepath.Join(base, le.Old), filepath.Join(base, le.New)
 	}
 	return err

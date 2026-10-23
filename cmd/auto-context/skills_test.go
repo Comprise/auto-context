@@ -89,7 +89,7 @@ func TestSkillsInitDefaults(t *testing.T) {
 	}
 	block, _, _ := strings.Cut("min_files"+rest, "```")
 	var lines []string
-	for _, l := range strings.Split(block, "\n") {
+	for l := range strings.SplitSeq(block, "\n") {
 		lines = append(lines, strings.TrimPrefix(l, "     "))
 	}
 	var got config.Config

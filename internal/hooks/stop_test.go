@@ -1230,11 +1230,6 @@ func TestPromptSubmitPausedCorruptSnapshot(t *testing.T) {
 	}
 }
 
-// A unit is new only if no rule could have made it one by the turn-start
-// snapshot, whatever rule makes it one now: no marker then, fewer than
-// min_files source files directly in it then (deleted ones count), and, for
-// an include unit, no file then. A context doc in the snapshot means it is
-// not new (HS-4).
 // Adding a file to a docless unit that existed before the turn changes no
 // unit list (HS-4).
 func TestStopFileAddedToOldDoclessUnit(t *testing.T) {

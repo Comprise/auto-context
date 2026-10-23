@@ -32,7 +32,7 @@ func mkfiles(t *testing.T, root string, paths ...string) {
 
 func numbered(dir string, n int) []string {
 	var out []string
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, dir+"/f"+string(rune('a'+i))+".go")
 	}
 	return out
@@ -379,7 +379,7 @@ func TestGitignoreLimits(t *testing.T) {
 	root := t.TempDir()
 	mkfiles(t, root, "a/x.go", "b/y.go")
 	var many strings.Builder
-	for i := 0; i < maxRulesPerFile+1; i++ {
+	for i := range maxRulesPerFile + 1 {
 		fmt.Fprintf(&many, "r%d\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(root, "a", ".gitignore"), []byte(many.String()), 0o644); err != nil {
