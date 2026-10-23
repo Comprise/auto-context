@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
+	"auto-context/internal/filestat"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/logx"
 	"auto-context/internal/project"
@@ -47,7 +49,7 @@ func Stop(env Env, in Input) ([]byte, error) {
 		return configPaused(env, id)
 	}
 	tree := p.Tree()
-	cur := session.FromTree(tree.Stats())
+	cur := session.FromTree(tree.Tracked(), tree.StatsView())
 	before, err := session.LoadSnapshot(root, id)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -59,7 +61,7 @@ func Stop(env Env, in Input) ([]byte, error) {
 	}
 
 	seen := loadSeenDocs(root, id)
-	j, tc := recordJournal(tree, before, cur, seen, root, id)
+	j, tc := recordJournal(env.ctx(), tree, before, cur, seen, root, id)
 	acked, failed := autoAck(env, p, tc.fresh)
 	saveSeenDocs(root, id, seen, tc.fresh)
 	// Hash the changed units in parallel first; UpToDate then hits the cache.
@@ -90,7 +92,7 @@ func Stop(env Env, in Input) ([]byte, error) {
 	// but its parents still are while their docs are stale.
 	var removed, removedGone []string
 	for _, u := range session.Minus(tc.removed, j.AlreadyNotified) {
-		if _, ok := cur[units.ContextPath(u)]; ok {
+		if cur.Has(units.ContextPath(u)) {
 			removed = append(removed, u)
 		} else {
 			removedGone = append(removedGone, u)
@@ -164,7 +166,7 @@ func stopWithoutSnapshot(root, id string, wasActive bool, cur session.Snapshot) 
 
 // recordJournal folds this turn's changes into the session journal, saves it
 // and returns it with what recordTurn found.
-func recordJournal(tree *units.Tree, before, cur session.Snapshot, seen map[string]units.Stat, root, id string) (session.Journal, turnChanges) {
+func recordJournal(ctx context.Context, tree *units.Tree, before, cur session.Snapshot, seen map[string]filestat.Stat, root, id string) (session.Journal, turnChanges) {
 	j, _ := loadJournal(root, id, "stop")
 	if j.Paused {
 		// Tracking resumes after a broken config: the snapshot is older than
@@ -177,7 +179,10 @@ func recordJournal(tree *units.Tree, before, cur session.Snapshot, seen map[stri
 	if err != nil {
 		turnStart = 0
 	}
-	tc := recordTurn(tree, before, cur, turnEnv{turnStart, repoDirStat(root), repoGone(root)}, seen, &j)
+	tc := recordTurn(tree, before, cur, turnEnv{turnStart, repoDirStat(root), repoGone(root), ctx}, seen, &j)
+	if tc.timeUp {
+		logx.Errorf(root, "stop: the hook's time is up; only part of this turn's changes was recorded, the next Stop checks the rest")
+	}
 	if err := j.Save(root, id); err != nil {
 		// Feedback is still worth giving; it may repeat on the next Stop.
 		logx.Errorf(root, "stop: saving the journal: %v", err)
@@ -197,11 +202,11 @@ func turnNew(u string, reason units.Reason, before session.Snapshot, direct map[
 	if u == units.RootUnit {
 		return false
 	}
-	if _, ok := before[units.ContextPath(u)]; ok {
+	if before.Has(units.ContextPath(u)) {
 		return false
 	}
 	for _, m := range cfg.ModuleMarkers {
-		if _, ok := before[path.Join(u, m)]; ok {
+		if before.Has(path.Join(u, m)) {
 			return false
 		}
 	}
@@ -213,7 +218,7 @@ func turnNew(u string, reason units.Reason, before session.Snapshot, direct map[
 			return false
 		}
 		for _, f := range files(u) {
-			if _, ok := before[f]; ok {
+			if before.Has(f) {
 				return false
 			}
 		}
@@ -226,11 +231,11 @@ func turnNew(u string, reason units.Reason, before session.Snapshot, direct map[
 // and the index files are left out.
 func directSources(before session.Snapshot, indexFile string) map[string]int {
 	n := map[string]int{}
-	for p := range before {
-		if strings.HasPrefix(p, "context/") || path.Base(p) == indexFile {
+	for _, e := range before {
+		if strings.HasPrefix(e.Path, "context/") || path.Base(e.Path) == indexFile {
 			continue
 		}
-		n[path.Dir(p)]++
+		n[path.Dir(e.Path)]++
 	}
 	return n
 }
@@ -361,15 +366,23 @@ type turnChanges struct {
 	// units now and had a file deleted from disk this turn (not one excluded
 	// or untracked: that is the user's choice, or no removal).
 	removed []string
+	// timeUp: the hook's time ran out before every changed path was looked
+	// at; the result is partial and fresh is empty.
+	timeUp bool
 }
 
+// turnCheckEvery is how many changed paths recordTurn looks at between
+// checks of the hook's context.
+const turnCheckEvery = 64
+
 // turnEnv is what recordTurn reads besides the snapshots: the turn start
-// (ns; 0 turns the old-mtime rule off), the mtime of repo directories, and
-// whether a repo file is gone from disk.
+// (ns; 0 turns the old-mtime rule off), the mtime of repo directories,
+// whether a repo file is gone from disk, and the hook's context.
 type turnEnv struct {
 	turnStart int64
 	stat      dirStat
 	gone      func(rel string) bool
+	ctx       context.Context // the hook's budget; nil: none
 }
 
 // recordTurn folds the changes between the turn-start snapshot and now into
@@ -384,7 +397,7 @@ type turnEnv struct {
 // an entry updates. Later changes in that directory only make it newer,
 // which errs towards no auto-ack; a directory older than the turn start or a
 // failed stat cannot order the deletion and bars the auto-ack.
-func recordTurn(tree *units.Tree, before, cur session.Snapshot, te turnEnv, seen map[string]units.Stat, j *session.Journal) turnChanges {
+func recordTurn(tree *units.Tree, before, cur session.Snapshot, te turnEnv, seen map[string]filestat.Stat, j *session.Journal) turnChanges {
 	turnStart := te.turnStart
 	// newestCode is the latest mtime (or deletion time) of a changed code file
 	// per unit; a docs edit counts for the unit only if it is not older.
@@ -393,14 +406,23 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, te turnEnv, seen
 	deletedAt := deletionTimes(te.stat, turnStart)
 	removed := map[string]bool{}
 	checked := map[string]bool{} // directories looked at for removed units
-	for _, p := range session.Diff(before, cur) {
-		if _, ok := cur[p]; !ok && !strings.HasPrefix(p, "context/") {
+	// One classifier for the whole diff: one glob budget, one skipDir memo.
+	cl := tree.Classifier()
+	var tc turnChanges
+	for i, p := range session.Diff(before, cur) {
+		if i%turnCheckEvery == 0 && te.ctx != nil && te.ctx.Err() != nil {
+			// Partial: the paths left are not recorded. The snapshot stays,
+			// so the next Stop of the turn sees them.
+			tc.timeUp = true
+			break
+		}
+		if !cur.Has(p) && !strings.HasPrefix(p, "context/") {
 			removedUnits(tree, before, p, te.gone, checked, removed)
 		}
-		switch kind, unit := tree.Classify(p); kind {
+		switch kind, unit := cl.Classify(p); kind {
 		case units.KindCode:
 			var m int64
-			if fs, ok := cur[p]; ok {
+			if fs, ok := cur.Get(p); ok {
 				m = fs.MtimeNs
 				if m < turnStart {
 					m = math.MaxInt64
@@ -418,10 +440,16 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, te turnEnv, seen
 	// One set update each: a mass change must not cost a sort per path.
 	j.AddCode(slices.Collect(maps.Keys(newestCode))...)
 	j.AddDocs(slices.Collect(maps.Keys(docs))...)
-	var tc turnChanges
+	tc.removed = slices.Sorted(maps.Keys(removed))
+	if tc.timeUp {
+		// A partial diff may have reached a unit's doc but not its newer
+		// code (context/ sorts before most units): no auto-ack from it, and
+		// so no doc is marked seen, which would hide the next Stop's feedback.
+		return tc
+	}
 	for _, u := range slices.Sorted(maps.Keys(docs)) {
 		ctx := units.ContextPath(u)
-		fs, ok := cur[ctx]
+		fs, ok := cur.Get(ctx)
 		if s, done := seen[ctx]; !ok || done && s == fs {
 			continue
 		}
@@ -429,7 +457,6 @@ func recordTurn(tree *units.Tree, before, cur session.Snapshot, te turnEnv, seen
 			tc.fresh = append(tc.fresh, u)
 		}
 	}
-	tc.removed = slices.Sorted(maps.Keys(removed))
 	return tc
 }
 
@@ -442,7 +469,7 @@ func removedUnits(tree *units.Tree, before session.Snapshot, rel string, gone fu
 		if checked[dir] {
 			continue
 		}
-		if _, ok := before[units.ContextPath(dir)]; !ok || tree.IsUnit(dir) {
+		if !before.Has(units.ContextPath(dir)) || tree.IsUnit(dir) {
 			checked[dir] = true
 			continue
 		}
@@ -704,8 +731,8 @@ const maxSeenDocs = 16 << 20
 // loadSeenDocs returns the docs the previous Stops of this turn left (doc path
 // -> stat). A missing file is empty; an unreadable one is logged and treated
 // as empty, which only re-acks.
-func loadSeenDocs(root, id string) map[string]units.Stat {
-	seen := map[string]units.Stat{}
+func loadSeenDocs(root, id string) map[string]filestat.Stat {
+	seen := map[string]filestat.Stat{}
 	data, err := fsutil.ReadFile(root, seenDocsPath(root, id), maxSeenDocs)
 	if errors.Is(err, os.ErrNotExist) {
 		return seen
@@ -719,7 +746,7 @@ func loadSeenDocs(root, id string) map[string]units.Stat {
 		return seen
 	}
 	for p, st := range raw {
-		seen[p] = units.Stat{MtimeNs: st[0], Size: st[1]}
+		seen[p] = filestat.Stat{MtimeNs: st[0], Size: st[1]}
 	}
 	return seen
 }
@@ -728,7 +755,7 @@ func loadSeenDocs(root, id string) map[string]units.Stat {
 // doc's target) of the context docs of us, the units this Stop tried to
 // auto-ack, and saves it. A failed ack is not retried until the doc changes:
 // it was reported, with the command to run.
-func saveSeenDocs(root, id string, seen map[string]units.Stat, us []string) {
+func saveSeenDocs(root, id string, seen map[string]filestat.Stat, us []string) {
 	if len(us) == 0 {
 		return
 	}
@@ -753,27 +780,27 @@ func saveSeenDocs(root, id string, seen map[string]units.Stat, us []string) {
 	}
 }
 
-// docStat stats the context doc ctx as units.Discover does: a symlink by its
+// docStat stats the context doc ctx as units.DiscoverContext does: a symlink by its
 // target inside the repo. ok is false for anything but a regular file.
-func docStat(root, ctx string) (units.Stat, bool) {
+func docStat(root, ctx string) (filestat.Stat, bool) {
 	full := fsutil.Abs(root, ctx)
 	fi, err := os.Lstat(full)
 	if err != nil {
-		return units.Stat{}, false
+		return filestat.Stat{}, false
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		p, err := fsutil.ResolveDoc(root, full)
 		if err != nil {
-			return units.Stat{}, false
+			return filestat.Stat{}, false
 		}
 		if fi, err = os.Stat(p); err != nil {
-			return units.Stat{}, false
+			return filestat.Stat{}, false
 		}
 	}
 	if !fi.Mode().IsRegular() {
-		return units.Stat{}, false
+		return filestat.Stat{}, false
 	}
-	return units.Stat{MtimeNs: fi.ModTime().UnixNano(), Size: fi.Size()}, true
+	return filestat.Of(fi), true
 }
 
 // removeSeenDocs deletes the session's seen-docs file; a missing one is fine.

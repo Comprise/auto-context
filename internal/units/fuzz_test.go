@@ -41,9 +41,8 @@ func fuzzPath(s string) string {
 // the only .gitignore, at the root: an ignored ancestor directory or rel
 // itself.
 func ignoredByWalk(content, rel string) bool {
-	t := &Tree{ignores: map[string]ignoreFile{".": parseIgnore(strings.SplitSeq(content, "\n"))},
-		skipped: map[string]bool{}, globBudget: maxGlobWork}
-	return t.untracked(rel)
+	p := &patterns{ignores: map[string]ignoreFile{".": parseIgnore(strings.SplitSeq(content, "\n"))}}
+	return newMatcher(p, true, func(string) {}).untracked(rel)
 }
 
 // The walk's .gitignore matcher agrees with git on random rules and paths.

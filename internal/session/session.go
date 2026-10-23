@@ -17,33 +17,131 @@ import (
 	"strings"
 	"time"
 
+	"auto-context/internal/filestat"
 	"auto-context/internal/fsutil"
-	"auto-context/internal/units"
 )
 
-// Snapshot maps root-relative slash paths to their stat data.
-type Snapshot map[string]units.Stat
+// Entry is one file of a snapshot: its root-relative slash path and stat data.
+type Entry struct {
+	Path string
+	Stat filestat.Stat
+}
+
+// Snapshot is the stat data of the tracked files, sorted by path, each path
+// once. Kept as a sorted slice rather than a map: on large trees a second map
+// of every file is a large share of a hook's memory, and Diff merges two
+// sorted snapshots in one pass. Build one with FromTree, FromMap or
+// LoadSnapshot.
+type Snapshot []Entry
 
 // FromTree builds a snapshot from the stat data Discover already collected,
-// so a hook does not stat every tracked file twice.
-// The map is taken over, not copied: Tree.Stats already returns a copy.
-func FromTree(stats map[string]units.Stat) Snapshot { return Snapshot(stats) }
+// so a hook does not stat every tracked file twice. tracked is the tree's
+// sorted file list (Tree.Tracked) and stats its stat map (Tree.StatsView),
+// which is only read; a file without stat data is left out.
+func FromTree(tracked []string, stats map[string]filestat.Stat) Snapshot {
+	s := make(Snapshot, 0, len(stats))
+	for _, p := range tracked {
+		if st, ok := stats[p]; ok {
+			s = append(s, Entry{p, st})
+		}
+	}
+	return s.normalized()
+}
 
-// Diff returns sorted unique paths that changed, were removed or were added.
+// FromMap builds a snapshot from a path -> stat map.
+func FromMap(m map[string]filestat.Stat) Snapshot {
+	s := make(Snapshot, 0, len(m))
+	for p, st := range m {
+		s = append(s, Entry{p, st})
+	}
+	return s.normalized()
+}
+
+// normalized sorts s by path if it is not sorted yet and keeps the last
+// entry of a path given more than once (as a map would).
+func (s Snapshot) normalized() Snapshot {
+	if s.isNormalized() {
+		return s
+	}
+	slices.SortStableFunc(s, func(a, b Entry) int { return strings.Compare(a.Path, b.Path) })
+	out := s[:0]
+	for i, e := range s {
+		if i+1 < len(s) && s[i+1].Path == e.Path {
+			continue // a later entry of the same path wins
+		}
+		out = append(out, e)
+	}
+	clear(s[len(out):])
+	return out
+}
+
+// sortedCopy returns s when it is normalized, else a normalized copy (s is
+// not changed). The check is one pass over s.
+func (s Snapshot) sortedCopy() Snapshot {
+	if s.isNormalized() {
+		return s
+	}
+	return slices.Clone(s).normalized()
+}
+
+// isNormalized reports whether s is sorted by path with each path once.
+func (s Snapshot) isNormalized() bool {
+	for i := 1; i < len(s); i++ {
+		if s[i-1].Path >= s[i].Path {
+			return false
+		}
+	}
+	return true
+}
+
+// Get returns the stat data of path p, if s holds it. s must be normalized
+// (sorted by path, each path once), as every constructor here leaves it.
+func (s Snapshot) Get(p string) (filestat.Stat, bool) {
+	i, ok := slices.BinarySearchFunc(s, p, func(e Entry, p string) int { return strings.Compare(e.Path, p) })
+	if !ok {
+		return filestat.Stat{}, false
+	}
+	return s[i].Stat, true
+}
+
+// Has reports whether s holds path p.
+func (s Snapshot) Has(p string) bool {
+	_, ok := s.Get(p)
+	return ok
+}
+
+// Diff returns the sorted paths that changed, were removed or were added,
+// merging the two snapshots in one pass. Both should be normalized (sorted by
+// path, each path once), as every constructor here leaves them; one that is
+// not (a hand-built slice) is normalized into a copy first.
 func Diff(before, after Snapshot) []string {
+	before, after = before.sortedCopy(), after.sortedCopy()
 	var out []string
-	for p, b := range before {
-		if a, ok := after[p]; !ok || a != b {
-			out = append(out, p)
+	i, j := 0, 0
+	for i < len(before) && j < len(after) {
+		b, a := before[i], after[j]
+		switch c := strings.Compare(b.Path, a.Path); {
+		case c < 0:
+			out = append(out, b.Path) // removed
+			i++
+		case c > 0:
+			out = append(out, a.Path) // added
+			j++
+		default:
+			if a.Stat != b.Stat {
+				out = append(out, a.Path)
+			}
+			i++
+			j++
 		}
 	}
-	for p := range after {
-		if _, ok := before[p]; !ok {
-			out = append(out, p)
-		}
+	for ; i < len(before); i++ {
+		out = append(out, before[i].Path)
 	}
-	slices.Sort(out)
-	return slices.Compact(out)
+	for ; j < len(after); j++ {
+		out = append(out, after[j].Path)
+	}
+	return out
 }
 
 // SanitizeID maps a session id to a safe, short file name component. An id
@@ -92,7 +190,9 @@ func journalPath(root, sessionID string) string {
 }
 
 // snapshotHeader starts a snapshot file; records follow as
-// "<mtime_ns> <size> <path>\x00" (paths may contain spaces and newlines).
+// "<mtime_ns> <size> <path>\x00" (paths may contain spaces and newlines),
+// sorted by path since sorted snapshots (older files of the same format are
+// not, and are sorted on load).
 const snapshotHeader = "auto-context snapshot 1\n"
 
 // SnapshotTime returns the modification time (ns) of a session's snapshot
@@ -122,7 +222,7 @@ func LoadSnapshot(root, sessionID string) (Snapshot, error) {
 	if !ok {
 		return nil, fmt.Errorf("snapshot %s: no header", SnapshotPath(root, sessionID))
 	}
-	s := Snapshot{}
+	s := make(Snapshot, 0, bytes.Count(body, []byte{0}))
 	for len(body) > 0 {
 		rec, rest, found := bytes.Cut(body, []byte{0})
 		if !found {
@@ -139,9 +239,11 @@ func LoadSnapshot(root, sessionID string) (Snapshot, error) {
 		if err1 != nil || err2 != nil {
 			return nil, fmt.Errorf("snapshot %s: bad number", SnapshotPath(root, sessionID))
 		}
-		s[string(path)] = units.Stat{MtimeNs: m, Size: n}
+		s = append(s, Entry{string(path), filestat.Stat{MtimeNs: m, Size: n}})
 	}
-	return s, nil
+	// Written sorted; a file from before snapshots were sorted (same
+	// format) is sorted here.
+	return s.normalized(), nil
 }
 
 // snapshotMaxAge caps the age of a snapshot: a turn does not outlive a day, and
@@ -189,16 +291,20 @@ func RemoveStale(root string, maxAge time.Duration, now time.Time) error {
 	return errors.Join(errs...)
 }
 
-// Save writes the session's snapshot atomically.
+// Save writes the session's snapshot atomically, in path order.
 func (s Snapshot) Save(root, sessionID string) error {
-	buf := make([]byte, 0, len(snapshotHeader)+len(s)*48)
+	n := len(snapshotHeader)
+	for _, e := range s {
+		n += len(e.Path) + 2*20 + 3 // two numbers, two spaces, the NUL
+	}
+	buf := make([]byte, 0, n)
 	buf = append(buf, snapshotHeader...)
-	for p, st := range s {
-		buf = strconv.AppendInt(buf, st.MtimeNs, 10)
+	for _, e := range s {
+		buf = strconv.AppendInt(buf, e.Stat.MtimeNs, 10)
 		buf = append(buf, ' ')
-		buf = strconv.AppendInt(buf, st.Size, 10)
+		buf = strconv.AppendInt(buf, e.Stat.Size, 10)
 		buf = append(buf, ' ')
-		buf = append(buf, p...)
+		buf = append(buf, e.Path...)
 		buf = append(buf, 0)
 	}
 	return fsutil.WriteState(root, SnapshotPath(root, sessionID), buf)

@@ -3,13 +3,13 @@ package units
 
 import (
 	"errors"
-	"maps"
 	"path"
 	"slices"
 	"strings"
 	"unicode"
 
 	"auto-context/internal/config"
+	"auto-context/internal/filestat"
 )
 
 // ErrUnknownUnit is wrapped by errors about a name that is no discovered unit.
@@ -45,36 +45,24 @@ const (
 	KindContextDoc      // context/<unit>.md
 )
 
-// Stat is the change-detection fingerprint of one tracked file.
-type Stat struct {
-	MtimeNs int64
-	Size    int64
-}
-
 // Tree is the result of one Discover: units, their files and the stat data
-// seen. It is not safe for concurrent use (matching .gitignore rules spends a
-// shared work budget); a hook builds and uses one on a single goroutine.
+// seen. It is immutable once Discover returns, so it may be read from several
+// goroutines: the state matching spends (a glob budget, memos, warnings)
+// lives in a matcher that Discover keeps to itself, and Classify makes a
+// fresh one per call.
 type Tree struct {
-	root          string // as Discover resolved it
-	cfg           config.Config
-	units         map[string]Unit
-	files         map[string][]string   // unit -> code files (sorted)
-	hashUnits     map[string]Unit       // index view (index entries only); units itself when the views agree
-	hashFiles     map[string][]string   // index view: unit -> code files (sorted); files itself likewise
-	tracked       []string              // sorted
-	ignores       map[string]ignoreFile // dir ("." for root) -> its .gitignore
-	rules         int                   // .gitignore rules loaded, against maxRulesTotal
-	globRules     int                   // of them with wildcards, against maxGlobRules
-	globBudget    int                   // doublestar work left (maxGlobWork)
-	budgetWarned  bool                  // the budget warning was given
-	excludes      patternSet            // cfg.Exclude, compiled
-	tracks        patternSet            // cfg.Track, compiled
-	ctxCodeWarned bool                  // the context/-holds-code warning was given
-	warnCount     int                   // all warnings, also those past maxWarnings
-	warnings      []string
-	viaGit        bool            // files were listed by git, not walked
-	stats         map[string]Stat // tracked file -> stat data seen by Discover
-	skipped       map[string]bool // skipDir results per directory
+	root      string // as Discover resolved it
+	cfg       config.Config
+	units     map[string]Unit
+	files     map[string][]string // unit -> code files (sorted)
+	hashUnits map[string]Unit     // index view (index entries only); units itself when the views agree
+	hashFiles map[string][]string // index view: unit -> code files (sorted); files itself likewise
+	tracked   []string            // sorted
+	pats      *patterns           // exclude/track patterns and .gitignore files Discover loaded
+	warnCount int                 // all warnings, also those past maxWarnings
+	warnings  []string
+	viaGit    bool                     // files were listed by git, not walked
+	stats     map[string]filestat.Stat // tracked file -> stat data seen by Discover
 }
 
 // Units returns all units: _root first, the rest sorted by Path.
@@ -113,8 +101,32 @@ func unitOf(units map[string]Unit, rel string) string {
 // Classify says what a repo path is to the plugin and which unit it belongs
 // to: a unit's index file or context doc, a source of a unit, or nothing
 // (KindIgnore, also for docs of directories that are no unit). It applies the
-// same rules as Discover, so a file created since is classified too.
-func (t *Tree) Classify(rel string) (Kind, string) {
+// same rules as Discover, so a file created since is classified too; each
+// call has a glob budget of its own and records no warning. For many paths
+// use a Classifier: its calls share one budget.
+func (t *Tree) Classify(rel string) (Kind, string) { return t.classify(rel, nil) }
+
+// Classifier classifies many paths against one tree with one glob budget
+// (maxGlobWork) and one skipDir memo, so a pass over many paths stays
+// bounded however hostile the .gitignore rules. It never changes the tree
+// and is not safe for concurrent use: make one per pass (and goroutine).
+type Classifier struct {
+	t *Tree
+	m *matcher
+}
+
+// Classifier returns a new Classifier over t.
+func (t *Tree) Classifier() *Classifier {
+	return &Classifier{t: t, m: newMatcher(t.pats, true, func(string) {})}
+}
+
+// Classify is Tree.Classify, spending the Classifier's budget.
+func (c *Classifier) Classify(rel string) (Kind, string) { return c.t.classify(rel, c.m) }
+
+// classify is Classify with matcher m, or a fresh one when m is nil (only
+// made when the .gitignore rules are needed). Warnings go nowhere: the tree
+// stays as Discover built it.
+func (t *Tree) classify(rel string, m *matcher) (Kind, string) {
 	rel = path.Clean(rel)
 	if path.Base(rel) == t.IndexFile() {
 		dir := path.Dir(rel)
@@ -136,10 +148,16 @@ func (t *Tree) Classify(rel string) (Kind, string) {
 	if strings.HasPrefix(rel, "context/") || strings.HasPrefix(rel, ".auto-context/") {
 		return KindIgnore, ""
 	}
-	if t.isSource(rel) && !t.untracked(rel) {
-		return KindCode, t.UnitOf(rel)
+	if !t.isSource(rel) {
+		return KindIgnore, ""
 	}
-	return KindIgnore, ""
+	if m == nil {
+		m = newMatcher(t.pats, false, func(string) {})
+	}
+	if m.untracked(rel) {
+		return KindIgnore, ""
+	}
+	return KindCode, t.UnitOf(rel)
 }
 
 // Files returns the sorted source files of unit in the full view: tracked
@@ -186,12 +204,15 @@ func (t *Tree) Stat(rel string) (mtimeNs, size int64, ok bool) {
 	return s.MtimeNs, s.Size, ok
 }
 
-// Stats returns the stat data Discover saw for every tracked file.
-func (t *Tree) Stats() map[string]Stat { return maps.Clone(t.stats) }
+// StatsView returns the stat data Discover saw for every tracked file. It is
+// the tree's own map, not a copy (with many files a copy is a large share
+// of a hook's memory): callers must not modify it.
+func (t *Tree) StatsView() map[string]filestat.Stat { return t.stats }
 
 // maxWarnings caps Tree.warnings; a "more warnings omitted" line follows.
 const maxWarnings = 20
 
+// warn records a warning; only Discover calls it, while it builds the tree.
 func (t *Tree) warn(msg string) {
 	t.warnCount++
 	switch {

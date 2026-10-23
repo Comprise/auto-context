@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"auto-context/internal/filestat"
 )
 
 func TestJournalRoundTrip(t *testing.T) {
@@ -50,8 +52,8 @@ func TestJournalsIsolatedBySession(t *testing.T) {
 	root := t.TempDir()
 	Journal{CodeChanged: []string{"1"}}.Save(root, "s1")
 	Journal{CodeChanged: []string{"2"}}.Save(root, "s2")
-	Snapshot{"a": {MtimeNs: 1, Size: 1}}.Save(root, "s1")
-	Snapshot{"b": {MtimeNs: 1, Size: 1}}.Save(root, "s2")
+	Snapshot{{"a", filestat.Stat{MtimeNs: 1, Size: 1}}}.Save(root, "s1")
+	Snapshot{{"b", filestat.Stat{MtimeNs: 1, Size: 1}}}.Save(root, "s2")
 	if err := Clear(root, "s1"); err != nil {
 		t.Fatal(err)
 	}

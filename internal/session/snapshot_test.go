@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/filestat"
 	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
@@ -91,7 +93,7 @@ func TestPathSanitized(t *testing.T) {
 
 // take stats every tracked file, as Discover does.
 func take(root string, tracked []string) (Snapshot, error) {
-	s := make(Snapshot, len(tracked))
+	m := make(map[string]filestat.Stat, len(tracked))
 	for _, rel := range tracked {
 		fi, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
@@ -100,9 +102,9 @@ func take(root string, tracked []string) (Snapshot, error) {
 			}
 			return nil, err
 		}
-		s[rel] = units.Stat{MtimeNs: fi.ModTime().UnixNano(), Size: fi.Size()}
+		m[rel] = filestat.Of(fi)
 	}
-	return s, nil
+	return FromMap(m), nil
 }
 
 func BenchmarkTake(b *testing.B) {
@@ -121,7 +123,7 @@ func BenchmarkTake(b *testing.B) {
 	cfg := config.Default()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tree, err := units.Discover(root, cfg)
+		tree, err := units.DiscoverContext(context.Background(), root, cfg)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -169,7 +171,7 @@ func TestRemoveStale(t *testing.T) {
 // Paths with spaces and newlines survive; a file without the header is an error.
 func TestSnapshotFormat(t *testing.T) {
 	root := t.TempDir()
-	s := Snapshot{"a b/c.go": {MtimeNs: 1, Size: 2}, "x\ny.go": {MtimeNs: -3, Size: 0}}
+	s := FromMap(map[string]filestat.Stat{"a b/c.go": {MtimeNs: 1, Size: 2}, "x\ny.go": {MtimeNs: -3, Size: 0}})
 	if err := s.Save(root, "s"); err != nil {
 		t.Fatal(err)
 	}
@@ -283,5 +285,57 @@ func TestRemoveStaleSnapshots24h(t *testing.T) {
 	}
 	if _, err := os.Stat(journalPath(root, "s")); err != nil {
 		t.Errorf("journal removed before maxAge: %v", err)
+	}
+}
+
+// A snapshot of the same format written before snapshots were sorted (in
+// map order, maybe with a path twice) loads sorted, the last record of a
+// path winning, and diffs as before.
+func TestSnapshotLoadsUnsorted(t *testing.T) {
+	root := t.TempDir()
+	if err := (Snapshot{}).Save(root, "s"); err != nil {
+		t.Fatal(err)
+	}
+	body := snapshotHeader + "1 1 z.go\x002 2 a.go\x003 3 m.go\x004 4 a.go\x00"
+	if err := os.WriteFile(SnapshotPath(root, "s"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSnapshot(root, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Snapshot{{"a.go", filestat.Stat{MtimeNs: 4, Size: 4}}, {"m.go", filestat.Stat{MtimeNs: 3, Size: 3}}, {"z.go", filestat.Stat{MtimeNs: 1, Size: 1}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if st, ok := got.Get("m.go"); !ok || st.Size != 3 || got.Has("b.go") {
+		t.Errorf("Get(m.go) = %v %v, Has(b.go) = %v", st, ok, got.Has("b.go"))
+	}
+	after := FromMap(map[string]filestat.Stat{"a.go": {MtimeNs: 4, Size: 4}, "b.go": {MtimeNs: 1, Size: 1}, "m.go": {MtimeNs: 9, Size: 3}})
+	if d := Diff(got, after); !reflect.DeepEqual(d, []string{"b.go", "m.go", "z.go"}) {
+		t.Errorf("Diff = %v", d)
+	}
+}
+
+// FromTree keeps the tree's order and skips files without stat data.
+func TestFromTree(t *testing.T) {
+	stats := map[string]filestat.Stat{"a.go": {MtimeNs: 1}, "b/c.go": {MtimeNs: 2}}
+	got := FromTree([]string{"a.go", "b/c.go", "gone.go"}, stats)
+	want := Snapshot{{"a.go", filestat.Stat{MtimeNs: 1}}, {"b/c.go", filestat.Stat{MtimeNs: 2}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// Diff normalizes a hand-built, unsorted snapshot (into a copy) instead of
+// merging it wrongly.
+func TestDiffUnsortedInput(t *testing.T) {
+	before := Snapshot{{"b.go", filestat.Stat{MtimeNs: 1}}, {"a.go", filestat.Stat{MtimeNs: 1}}}
+	after := FromMap(map[string]filestat.Stat{"a.go": {MtimeNs: 1}, "b.go": {MtimeNs: 2}})
+	if d := Diff(before, after); !reflect.DeepEqual(d, []string{"b.go"}) {
+		t.Errorf("Diff = %v", d)
+	}
+	if before[0].Path != "b.go" {
+		t.Error("Diff reordered its input")
 	}
 }

@@ -241,7 +241,7 @@ func hookRoot(in hooks.Input, cwd string, a hooks.Agent) string {
 	if err != nil {
 		return ""
 	}
-	return config.FindRoot(abs)
+	return project.FindRoot(abs)
 }
 
 // pluginRoot is the plugin's install directory the agent passes: Codex sets
@@ -333,9 +333,9 @@ func logHook(root, format string, args ...any) {
 // repository acts on the project the hooks use; else the root found from cwd.
 func cliRoot(cwd string) string {
 	if d := os.Getenv("CLAUDE_PROJECT_DIR"); d != "" && filepath.IsAbs(d) && inside(d, cwd) {
-		return config.FindRoot(filepath.Clean(d))
+		return project.FindRoot(filepath.Clean(d))
 	}
-	return config.FindRoot(cwd)
+	return project.FindRoot(cwd)
 }
 
 // inside reports whether p is dir or below it, comparing the paths as given

@@ -616,7 +616,7 @@ func TestFindRootStopsAtHome(t *testing.T) {
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := config.FindRoot(proj); got != proj {
+	if got := project.FindRoot(proj); got != proj {
 		t.Errorf("FindRoot = %q, want %q", got, proj)
 	}
 }
@@ -1577,7 +1577,7 @@ func TestUpgradeFromV1Project(t *testing.T) {
 	testutil.Git(t, root, "commit", "-qm", "v1 project")
 	testutil.WriteFile(t, root, "svc/scratch.go", "package main\n// untracked\n")
 	writeFiles(t, root, "tmp") // an untracked unit
-	tree, err := units.Discover(root, config.Default())
+	tree, err := units.DiscoverContext(context.Background(), root, config.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1617,7 +1617,7 @@ func TestUpgradeFromV1ProjectCosts(t *testing.T) {
 	testutil.Git(t, root, "init", "-q")
 	testutil.Git(t, root, "add", "-A")
 	testutil.Git(t, root, "commit", "-qm", "v1 project")
-	tree, err := units.Discover(root, config.Default())
+	tree, err := units.DiscoverContext(context.Background(), root, config.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -169,7 +169,7 @@ func TestPromptSubmitWritesSnapshotAndClearsJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := snap["svc/main.go"]; !ok {
+	if !snap.Has("svc/main.go") {
 		t.Errorf("snapshot lacks svc/main.go: %v", snap)
 	}
 }
