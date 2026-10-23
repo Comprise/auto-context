@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 
 	"auto-context/internal/docstate"
 	"auto-context/internal/testutil"
+	"auto-context/internal/units"
 )
 
 // gitRepoWithUnit is a git repo with one committed unit and no global config.
@@ -196,5 +198,15 @@ func TestLogSection(t *testing.T) {
 	}
 	if len(logArgs) != 9 {
 		t.Errorf("logArgs changed: %q", logArgs)
+	}
+}
+
+// A name that is no unit is refused with units.ErrUnknownUnit, like docstate.
+func TestChangesUnknownUnit(t *testing.T) {
+	root := gitRepoWithUnit(t, "svc")
+	var b strings.Builder
+	err := open(t, root).WriteChanges(&b, "nope")
+	if !errors.Is(err, units.ErrUnknownUnit) || err.Error() != "unknown unit nope" {
+		t.Errorf("err = %v", err)
 	}
 }

@@ -32,7 +32,7 @@ case "$(uname -m)" in
   *) arch=unknown ;;
 esac
 # active reports whether the plugin is enabled for the project, finding its
-# root like config.FindRoot (without its ownership check): the nearest
+# root like project.FindRoot (without its ownership check): the nearest
 # directory up with .git or .auto-context/config.yaml, stopping below $HOME
 # when started under it, else the start directory.
 active() {

@@ -60,7 +60,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		return ErrConfigBroken // the units would be the defaults
 	}
 	if !p.tree.IsUnit(unit) {
-		return fmt.Errorf("unknown unit %s", unit)
+		return fmt.Errorf("%w %s", units.ErrUnknownUnit, unit)
 	}
 	root := p.root
 	spec := "."

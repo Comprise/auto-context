@@ -320,3 +320,18 @@ func TestSummaryCapped(t *testing.T) {
 		t.Fatal("not a prefix")
 	}
 }
+
+// In a CRLF file the unknown keys keep their comments, as in an LF file: the
+// block is parsed with LF line ends and written back with CRLF.
+func TestSetHashKeepsCommentsCRLF(t *testing.T) {
+	in := "---\r\nunit: old\r\nsource_hash: x\r\n# about tags\r\ntags: [a, b] # inline\r\n---\r\n# T\r\n"
+	p := write(t, in)
+	if err := SetHash(filepath.Dir(p), p, "u", "h", "", day); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	want := "---\r\nunit: u\r\nsource_hash: h\r\nupdated: \"2026-10-19\"\r\n# about tags\r\ntags: [a, b] # inline\r\n---\r\n# T\r\n"
+	if string(data) != want {
+		t.Fatalf("got %q\nwant %q", data, want)
+	}
+}

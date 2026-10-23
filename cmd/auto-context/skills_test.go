@@ -73,8 +73,11 @@ func TestSkillsSyncHasNoAllowedTools(t *testing.T) {
 	if strings.Contains(s, "allowed-tools") || strings.Contains(s, "!`") {
 		t.Error("sync must not use allowed-tools or a !` injection")
 	}
-	if !strings.Contains(s, "status --stale --json") {
-		t.Error("sync must run `status --stale --json`")
+	if !strings.Contains(s, "status --json") {
+		t.Error("sync must run `status --json` (--stale hides old-scheme units)")
+	}
+	if !strings.Contains(s, "old hash scheme") || !strings.Contains(s, "ack --upgrade") {
+		t.Error("sync must surface old-hash-scheme units and suggest `ack --upgrade`")
 	}
 }
 
