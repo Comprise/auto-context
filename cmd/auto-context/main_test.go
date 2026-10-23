@@ -1829,13 +1829,13 @@ func TestExcludeBrokenConfig(t *testing.T) {
 // P-L4: units and changes do not read the hash cache; status does and warns.
 func TestUnitsDoesNotLoadCache(t *testing.T) {
 	root := repo(t)
-	testutil.WriteFile(t, root, ".auto-context/cache.json", "{corrupt")
+	testutil.WriteFile(t, root, ".auto-context/cache.v5.bin", "{corrupt")
 	for _, args := range [][]string{{"units"}, {"ack", "--exclude", "svc"}} {
 		if _, out, errs := do(root, "", args...); strings.Contains(out+errs, "cache") {
 			t.Errorf("%v reads the cache: out=%q stderr=%q", args, out, errs)
 		}
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.json")); string(data) != "{corrupt" {
+	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.v5.bin")); string(data) != "{corrupt" {
 		t.Errorf("cache rewritten: %q", data)
 	}
 	if _, out, _ := do(root, "", "status"); !strings.Contains(out, "warning: the hash cache") {
@@ -1852,7 +1852,7 @@ func TestVersionVerbose(t *testing.T) {
 	for _, want := range []string{
 		"auto-context dev\n", "revision ", "go " + runtime.Version() + "\n",
 		"platform " + runtime.GOOS + "/" + runtime.GOARCH + "\n",
-		"cache 4\n", "snapshot 1\n", "journal 1\n", "hash v2\n",
+		"cache 5\n", "snapshot 1\n", "journal 1\n", "hash v2\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)
@@ -1860,7 +1860,7 @@ func TestVersionVerbose(t *testing.T) {
 	}
 	// The format numbers are copies: they must follow the packages.
 	for file, decl := range map[string]string{
-		"../../internal/hashing/hashing.go": "const cacheVersion = 4\n",
+		"../../internal/hashing/hashing.go": "const cacheVersion = 5\n",
 		"../../internal/session/session.go": "const journalVersion = 1\n",
 	} {
 		if data, err := os.ReadFile(file); err != nil || !strings.Contains(string(data), decl) {

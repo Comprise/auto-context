@@ -56,7 +56,7 @@ func TestOpenAckRefreshSave(t *testing.T) {
 	if err := p.SaveCache(); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.json")); strings.Contains(string(data), "svc/a.go") {
+	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.v5.bin")); strings.Contains(string(data), "svc/a.go") {
 		t.Errorf("cache not pruned: %s", data)
 	}
 }
@@ -66,7 +66,7 @@ func TestCacheIsLazy(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
-	testutil.WriteFile(t, root, ".auto-context/cache.json", "garbage")
+	testutil.WriteFile(t, root, ".auto-context/cache.v5.bin", "garbage")
 	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestCacheIsLazy(t *testing.T) {
 	if err := p.SaveCache(); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.json")); string(data) != "garbage" {
+	if data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.v5.bin")); string(data) != "garbage" {
 		t.Errorf("cache touched: %q", data)
 	}
 	if p.CacheErr() == nil {
@@ -150,13 +150,13 @@ func TestConfigCommittable(t *testing.T) {
 	if err := config.AddExclude(root, "gen/**"); err != nil {
 		t.Fatal(err)
 	}
-	testutil.WriteFile(t, root, ".auto-context/cache.json", "{}")
+	testutil.WriteFile(t, root, ".auto-context/cache.v5.bin", "{}")
 	ignored := func(rel string) bool {
 		return exec.Command("git", "-C", root, "check-ignore", "-q", rel).Run() == nil
 	}
-	if ignored(config.FileName) || ignored(".auto-context/.gitignore") || !ignored(".auto-context/cache.json") {
+	if ignored(config.FileName) || ignored(".auto-context/.gitignore") || !ignored(".auto-context/cache.v5.bin") {
 		t.Errorf("config ignored=%v gitignore ignored=%v cache ignored=%v",
-			ignored(config.FileName), ignored(".auto-context/.gitignore"), ignored(".auto-context/cache.json"))
+			ignored(config.FileName), ignored(".auto-context/.gitignore"), ignored(".auto-context/cache.v5.bin"))
 	}
 	p, err := Open(context.Background(), root)
 	if err != nil {

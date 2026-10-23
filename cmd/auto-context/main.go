@@ -62,7 +62,7 @@ const formatVersion = 1
 // On-disk formats named by `version -v`: copies of the packages' constants
 // (hashing.cacheVersion, the session snapshot, session.journalVersion,
 // docstate.HashPrefix), kept in step by TestVersionVerbose.
-const formatsText = "cache 4\nsnapshot 1\njournal 1\nhash v2\n"
+const formatsText = "cache 5\nsnapshot 1\njournal 1\nhash v2\n"
 
 func main() {
 	os.Exit(start(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getwd))

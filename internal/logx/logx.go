@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"auto-context/internal/filelock"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/textx"
 )
@@ -70,28 +71,19 @@ func write(root, msg string) error {
 
 const rotationFailed = "log rotation failed"
 
-// lockWait bounds the wait for the rotation lock: a hook never hangs on it.
-// lockPoll is the retry interval.
-const (
-	lockWait = 500 * time.Millisecond
-	lockPoll = 5 * time.Millisecond
-)
-
 // rotate moves the oversized log to log.1 under the lock file log.lock and
 // re-checks the size there: of parallel hooks that all saw the log oversized,
 // the first rotates and the others find the fresh log and only append (an
 // unguarded second rotation would replace the rotated log with the fresh
-// one). A lock not taken within lockWait skips this rotation; a later write
+// one). A lock not taken within filelock.Wait skips this rotation; a later write
 // rotates.
 func rotate(root, path string) error {
-	lockPath, err := fsutil.Resolve(root, path+".lock")
-	if err != nil {
+	lockPath := fsutil.StatePath(root, "log.lock")
+	if _, err := fsutil.Resolve(root, lockPath); err != nil {
 		return err
 	}
-	if st, err := os.Lstat(lockPath); err == nil && !st.Mode().IsRegular() {
-		return fmt.Errorf("%s: %w", lockPath, fsutil.ErrNotRegular)
-	}
-	unlock, ok, err := lock(lockPath)
+	// The lexical path: filelock refuses a symlink or FIFO there.
+	unlock, ok, err := filelock.Lock(lockPath)
 	if err != nil || !ok {
 		return err
 	}

@@ -42,7 +42,7 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 			testutil.WriteFile(t, root, ".gitignore", "[a\n")
 		}, "1 discovery warning(s)"},
 		{"hash cache unusable", func(t *testing.T, root string) {
-			testutil.WriteFile(t, root, ".auto-context/cache.json", "garbage")
+			testutil.WriteFile(t, root, ".auto-context/cache.v5.bin", "garbage")
 		}, "the hash cache was unusable and is rebuilt"},
 		{"broken frontmatter", func(t *testing.T, root string) {
 			testutil.WriteFile(t, root, "context/svc.md", "---\nunit: [\n---\n# svc\n\nText.\n")
@@ -86,10 +86,10 @@ func TestSessionStartProblemPhrases(t *testing.T) {
 		{"cache not saved", func(t *testing.T, root string) {
 			// A directory where the cache file goes: unusable, and the
 			// atomic rename onto it fails.
-			if err := os.Remove(filepath.Join(root, ".auto-context", "cache.json")); err != nil {
+			if err := os.Remove(filepath.Join(root, ".auto-context", "cache.v5.bin")); err != nil {
 				t.Fatal(err)
 			}
-			testutil.WriteFile(t, root, ".auto-context/cache.json/x", "")
+			testutil.WriteFile(t, root, ".auto-context/cache.v5.bin/x", "")
 		}, "the hash cache cannot be saved"},
 	}
 	for _, c := range cases {

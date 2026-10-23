@@ -1,6 +1,6 @@
 //go:build darwin || dragonfly || freebsd || linux || netbsd || openbsd
 
-package logx
+package filelock
 
 import (
 	"errors"
@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// lock takes an exclusive flock on path, polling for at most lockWait
+// lock takes an exclusive flock on path, polling for at most Wait
 // (ok=false when it stays taken). The kernel drops the lock when the holder
 // exits, so a killed hook leaves none behind.
 func lock(path string) (unlock func(), ok bool, err error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return nil, false, err
 	}
@@ -22,7 +22,7 @@ func lock(path string) (unlock func(), ok bool, err error) {
 		f.Close()
 		return nil, false, err
 	}
-	deadline := time.Now().Add(lockWait)
+	deadline := time.Now().Add(Wait)
 	for {
 		var ferr error
 		err := rc.Control(func(fd uintptr) {
@@ -42,6 +42,6 @@ func lock(path string) (unlock func(), ok bool, err error) {
 			f.Close()
 			return nil, false, nil
 		}
-		time.Sleep(lockPoll)
+		time.Sleep(poll)
 	}
 }

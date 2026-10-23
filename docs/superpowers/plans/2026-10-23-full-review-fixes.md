@@ -396,8 +396,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** `filelock.Lock(path string) (unlock func(), ok bool, err error)` — перенос `logx/lock_*.go`; logx использует его. Кэш — `.auto-context/cache.v4.bin`: заголовок `acache 4\n`, записи `uvarint(len) path | varint mtime | uvarint size | [32]byte sum | flags` по `raw/2B-performance.md` P-M4; старые `cache.json` разных версий не трогаются и не вытесняют друг друга (A-M4). `Save` под `filelock` перечитывает файл и сливает записи, совпадающие по mtime/size с текущим stat (P-L6). API `LoadCache/Save/Prewarm/SourceHash` прежний. Исключение из правила фазы C: T27 меняет в тестах `internal/hooks/hooks_test.go`, `session_problems_test.go`, `internal/project/ops_test.go`, `project_test.go` только имя файла кэша (`cache.json` → `cache.v4.bin`) и способ подложить битый кэш.
 
-- [ ] **Step 1: Tests.** `TestCacheRoundTrip`, `TestCacheMergeConcurrentSave` (два процесса через helper-process — записи обоих сохранены), `TestCacheIgnoresOtherVersions`, `BenchmarkLoadSave200k` (< 50 мс на загрузку).
-- [ ] **Step 2–4:** FAIL → реализовать → PASS.
+- [x] **Step 1: Tests.** `TestCacheRoundTrip`, `TestCacheMergeConcurrentSave` (два процесса через helper-process — записи обоих сохранены), `TestCacheIgnoresOtherVersions`, `BenchmarkLoadSave200k` (< 50 мс на загрузку).
+- [x] **Step 2–4:** FAIL → реализовать → PASS.
 
 ### Task T28: пакет `internal/turn` — правила хода (A-M1)
 
@@ -604,7 +604,7 @@ waves:
     tasks:
       - id: T27
         title: "Hash cache format, versions, merge under lock"
-        owns: ["internal/hashing/**", "internal/logx/**", "internal/filelock/**", internal/hooks/hooks_test.go, internal/hooks/session_problems_test.go, internal/project/ops_test.go, internal/project/project_test.go, context/internal/hashing.md, context/internal/logx.md, context/internal/filelock.md]
+        owns: ["internal/hashing/**", "internal/logx/**", "internal/filelock/**", internal/hooks/hooks_test.go, internal/hooks/session_problems_test.go, internal/hooks/concurrent_test.go, internal/hooks/stop_test.go, internal/project/ops_test.go, internal/project/project_test.go, internal/project/conc_test.go, internal/project/project.go, cmd/auto-context/main.go, cmd/auto-context/main_test.go, context/internal/hashing.md, context/internal/logx.md, context/internal/filelock.md]
         depends: [T10, T24, T28]
         verify: "go test ./internal/hashing/ ./internal/logx/ ./internal/filelock/ ./internal/hooks/ ./internal/project/"
   - id: W13
@@ -623,7 +623,7 @@ waves:
         verify: "go vet ./... && go test -race ./..."
       - id: T32
         title: "Docs after the refactors"
-        owns: [context/_root.md]
+        owns: [context/_root.md, CHANGELOG.md, CHANGELOG.ru.md]
         depends: [T21, T26, T27, T28, T30]
         verify: "test -s context/_root.md"
 ```

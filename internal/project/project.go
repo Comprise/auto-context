@@ -502,7 +502,7 @@ func (p *Project) SaveCache() error {
 		return err
 	}
 	if !p.cache.Dirty() {
-		if _, err := os.Lstat(fsutil.StatePath(p.root, "cache.json")); err == nil {
+		if _, err := os.Lstat(hashing.CachePath(p.root)); err == nil {
 			return nil // unchanged: skip the O(files) prune
 		}
 	}
