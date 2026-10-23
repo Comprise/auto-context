@@ -172,13 +172,6 @@ func addDirs(dirs map[string]*dirInfo, dir string) {
 	}
 }
 
-// Discover is DiscoverContext without a deadline.
-//
-// Deprecated: kept only for the internal/docstate tests; use DiscoverContext.
-func Discover(root string, cfg config.Config) (*Tree, error) {
-	return DiscoverContext(context.Background(), root, cfg)
-}
-
 // view qualifies the units among dirs and assigns their code files: the
 // units (with _root and file counts) and unit -> sorted files.
 func (t *Tree) view(dirs map[string]*dirInfo) (map[string]Unit, map[string][]string) {
@@ -334,9 +327,7 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	for range min(runtime.GOMAXPROCS(0), 8) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				i := int(next.Add(1) - 1)
 				if i >= len(rels) {
@@ -353,7 +344,7 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 				}
 				out[i].info = statInfo{fi.Mode(), fi.ModTime().UnixNano(), fi.Size()}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return out

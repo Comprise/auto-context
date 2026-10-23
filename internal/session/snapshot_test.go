@@ -109,12 +109,12 @@ func take(root string, tracked []string) (Snapshot, error) {
 
 func BenchmarkTake(b *testing.B) {
 	root := b.TempDir()
-	for d := 0; d < 500; d++ {
+	for d := range 500 {
 		dir := filepath.Join(root, fmt.Sprintf("pkg%03d", d))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			b.Fatal(err)
 		}
-		for f := 0; f < 100; f++ {
+		for f := range 100 {
 			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%03d.go", f)), []byte("package x\n"), 0o644); err != nil {
 				b.Fatal(err)
 			}

@@ -426,14 +426,14 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Files:** Modify `internal/**/*.go`, `cmd/**/*.go`.
 
-- [ ] **Step 1:** `go fix ./...` (или закреплённый `modernize -fix`): `errors.AsType`, `wg.Go`, `for range n`, `b.Loop`; `slices.Equal` вместо `reflect.DeepEqual` только там, где nil и пустой срез не различаются.
-- [ ] **Step 2: Verify** `go vet ./... && go tool -modfile=tools/go.mod staticcheck ./... && go test -race ./...` — чисто.
+- [x] **Step 1:** `go fix ./...` (или закреплённый `modernize -fix`): `errors.AsType`, `wg.Go`, `for range n`, `b.Loop`; `slices.Equal` вместо `reflect.DeepEqual` только там, где nil и пустой срез не различаются.
+- [x] **Step 2: Verify** `go vet ./... && go tool -modfile=tools/go.mod staticcheck ./... && go test -race ./...` — чисто.
 
 ### Task T32: документы после рефакторингов
 
 **Files:** Modify `context/_root.md`.
 
-- [ ] **Step 1:** список пакетов-кирпичей — `filestat` (T26), `filelock` (T27), `turn` (T28), `Diagnose` (T30); файл кэша `cache.v4.bin` и слияние под lock вместо «побеждает последняя запись» (T27); `FindRoot` в `project` (T26).
+- [x] **Step 1:** список пакетов-кирпичей — `filestat` (T26), `filelock` (T27), `turn` (T28), `Diagnose` (T30); файл кэша `cache.v4.bin` и слияние под lock вместо «побеждает последняя запись» (T27); `FindRoot` в `project` (T26).
 
 ---
 

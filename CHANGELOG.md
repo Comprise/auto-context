@@ -6,6 +6,9 @@ Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are 
 
 ### Breaking
 
+- **Upgrade every machine in the team together.** Plugin v1.0.0 does not understand `v2:` hashes
+  and rewrites them back to `sha256:` on its own auto-ack. With mixed plugin versions the
+  frontmatter flips back and forth in commits.
 - **Hash scheme v2.** `source_hash` is now `v2:sha256:<hex>` and is computed over the files of the
   unit as git sees them (only entries in the git index; untracked files no longer count; in
   walk mode, all files found). `_root` hashes the units in the same index view. Docs with an old
@@ -22,7 +25,8 @@ Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are 
 - **`--json`** for `status` and `units` (`format_version: 1`); combines with `--stale` and `--exit-code`.
 - **Limits:** at most 800 000 files per repository; files larger than 32 MiB are hashed by sampling
   (size plus the first and last 1 MiB).
-- **Hash cache version 4:** older `.auto-context/cache.json` files are discarded once, silently.
+- **Hash cache is now `.auto-context/cache.v5.bin`** (binary). Older cache files are ignored and
+  can be deleted; `auto-context version -v` reports `cache 5`.
 - **Frontmatter:** unknown keys are now kept on write. The first `ack` may reformat nested or folded
   values of unknown keys.
 - Projects created with v1 may pin the four default keys (`code_extensions`, `module_markers`,
@@ -44,6 +48,8 @@ Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are 
 - Unit set changes inside a turn, SessionStart steps, `--exclude`, the cheap index view and `changes`
   in the service layer, hook input handling and several smaller defects from the full review of
   2026-10-23.
+- A hook that runs out of time stops git, file discovery and hashing and answers with what it has (units not hashed, or a time-up notice) instead of being killed.
+- Parallel sessions in one tree keep each other's hashes in the cache.
 
 ### Added
 

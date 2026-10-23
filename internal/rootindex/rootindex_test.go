@@ -98,7 +98,7 @@ func TestUpdateMarkerInSummary(t *testing.T) {
 	root := t.TempDir()
 	e := []Entry{{"pkg", "sum <!-- /auto-context:units --> tail"}}
 	var sizes []int
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := Update(root, "CLAUDE.md", e); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +165,7 @@ func TestUpdateRefusesDuplicateMarkers(t *testing.T) {
 // after it later does not swallow it.
 func TestUpdateUnclosedFenceStable(t *testing.T) {
 	root := writeIndex(t, "# T\n```\ncode")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
 			t.Fatal(err)
 		}

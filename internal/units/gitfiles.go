@@ -107,6 +107,6 @@ func gitFailed(root string, gerr error, what string) (warning string, err error)
 }
 
 func timedOut(err error) bool {
-	var ge *gitx.Error
-	return errors.As(err, &ge) && ge.TimedOut
+	ge, ok := errors.AsType[*gitx.Error](err)
+	return ok && ge.TimedOut
 }

@@ -11,8 +11,8 @@ import (
 // NotRepo reports whether err from Run means dir is not inside a git
 // repository (exit 128 with git's "not a git repository").
 func NotRepo(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Code == 128 && strings.Contains(e.Stderr, "not a git repository")
+	e, ok := errors.AsType[*Error](err)
+	return ok && e.Code == 128 && strings.Contains(e.Stderr, "not a git repository")
 }
 
 // WorkTreeOK reports whether git at root works on root's own tree: the real

@@ -44,7 +44,7 @@ func TestEnsureStateDirIgnoresItself(t *testing.T) {
 	if err := os.WriteFile(gi, []byte("bin"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := EnsureStateDir(root); err != nil {
 			t.Fatal(err)
 		}

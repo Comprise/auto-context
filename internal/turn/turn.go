@@ -186,10 +186,8 @@ func turnNew(u string, reason units.Reason, before session.Snapshot, direct map[
 		if direct[u] > 0 {
 			return false
 		}
-		for _, f := range files(u) {
-			if before.Has(f) {
-				return false
-			}
+		if slices.ContainsFunc(files(u), before.Has) {
+			return false
 		}
 	}
 	return true

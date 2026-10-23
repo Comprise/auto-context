@@ -49,8 +49,7 @@ func (e *Error) Error() string {
 // Code returns the exit status of err from Run: 0 for nil, -1 when git did
 // not exit normally.
 func Code(err error) int {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code
 	}
 	if err == nil {
@@ -62,9 +61,9 @@ func Code(err error) int {
 // Brief names a Run failure without git's own text (which may quote repo
 // paths or config): "timed out", "could not be run" or "exit N".
 func Brief(err error) string {
-	var e *Error
+	e, ok := errors.AsType[*Error](err)
 	switch {
-	case !errors.As(err, &e):
+	case !ok:
 		return "failed"
 	case e.TimedOut:
 		return "timed out"
@@ -79,8 +78,8 @@ func Brief(err error) string {
 // NotRun reports whether err means git could not be started (e.g. it is not
 // installed).
 func NotRun(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.NotRun
+	e, ok := errors.AsType[*Error](err)
+	return ok && e.NotRun
 }
 
 // waitDelay bounds how long Run waits for stdout/stderr after git exited or

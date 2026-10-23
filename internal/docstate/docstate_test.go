@@ -26,7 +26,7 @@ func setup(t *testing.T) (string, *units.Tree) {
 	}
 	cfg := config.Default()
 	cfg.Include = []string{"ok", "stale", "svc", "bad"}
-	tr, err := units.Discover(root, cfg)
+	tr, err := units.DiscoverContext(context.Background(), root, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 	cfg := config.Default()
 	cfg.Include = []string{"ok", "stale", "svc", "bad"}
 	cfg.Exclude = append(cfg.Exclude, "bad/**")
-	tr2, err := units.Discover(root, cfg)
+	tr2, err := units.DiscoverContext(context.Background(), root, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestSourceHashIgnoresUntracked(t *testing.T) {
 	cfg := config.Default()
 	cfg.Include = []string{"svc", "tmp"}
 	discover := func(root string) *units.Tree {
-		tr, err := units.Discover(root, cfg)
+		tr, err := units.DiscoverContext(context.Background(), root, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -474,7 +474,7 @@ func TestLegacyGoldenGitMode(t *testing.T) {
 	testutil.WriteFile(t, root, "context/_root.md", doc(units.RootUnit, goldenLegacyRoot))
 	cfg := config.Default()
 	cfg.Include = []string{"svc", "tmp"}
-	tr, err := units.Discover(root, cfg)
+	tr, err := units.DiscoverContext(context.Background(), root, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

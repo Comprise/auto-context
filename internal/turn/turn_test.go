@@ -30,7 +30,7 @@ func newTree(t *testing.T, withLib bool) *units.Tree {
 		testutil.WriteFile(t, root, "lib/go.mod", "module lib\n")
 		testutil.WriteFile(t, root, "lib/lib.go", "package lib\n")
 	}
-	tree, err := units.Discover(root, config.Default())
+	tree, err := units.DiscoverContext(context.Background(), root, config.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +211,11 @@ func TestRecordTurnDeletedFile(t *testing.T) {
 	}
 }
 
+// A unit is new only if no rule could have made it one by the turn-start
+// snapshot, whatever rule makes it one now: no marker then, fewer than
+// min_files source files directly in it then (deleted ones count), and, for
+// an include unit, no file then. A context doc in the snapshot means it is
+// not new (HS-4).
 func TestTurnNew(t *testing.T) {
 	cfg := config.Default()
 	cfg.MinFiles = 3

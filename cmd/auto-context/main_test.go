@@ -813,7 +813,7 @@ func TestChangesInSubdirectoryRoot(t *testing.T) {
 		testutil.Git(t, top, args...)
 	}
 	g("init", "-q")
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		testutil.WriteFile(t, top, fmt.Sprintf("pkg/f%d.go", i), "package p\n")
 		testutil.WriteFile(t, top, fmt.Sprintf("sub/pkg/f%d.go", i), "package p\n")
 	}

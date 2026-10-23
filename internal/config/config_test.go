@@ -66,7 +66,7 @@ func TestLoadBrokenYAML(t *testing.T) {
 
 func TestAddExcludeCreatesAndDedups(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := AddExclude(root, "internal/billing"); err != nil {
 			t.Fatal(err)
 		}
