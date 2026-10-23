@@ -1,7 +1,7 @@
 ---
 unit: internal/fsutil
-source_hash: sha256:db67ea4f392f789ab18259bdabf78b4479215ad86da45ac8142740318a121be2
-commit: b986c6a7235d656f67c8bd59c79ab4f8bd420c14
+source_hash: v2:sha256:db67ea4f392f789ab18259bdabf78b4479215ad86da45ac8142740318a121be2
+commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
 updated: "2026-10-23"
 ---
 # internal/fsutil

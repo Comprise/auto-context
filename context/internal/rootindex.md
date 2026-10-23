@@ -1,7 +1,7 @@
 ---
 unit: internal/rootindex
-source_hash: sha256:dfb5bf5d60d44ccde19f8640a2a7d91b916ac5377c8bb3dc4101e8c63700c27a
-commit: 594af1786829b54f7b5248c191bbed194bdfe7e2
+source_hash: v2:sha256:dfb5bf5d60d44ccde19f8640a2a7d91b916ac5377c8bb3dc4101e8c63700c27a
+commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
 updated: "2026-10-23"
 ---
 # internal/rootindex
