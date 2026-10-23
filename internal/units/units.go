@@ -2,6 +2,7 @@
 package units
 
 import (
+	"errors"
 	"maps"
 	"path"
 	"slices"
@@ -10,6 +11,9 @@ import (
 
 	"auto-context/internal/config"
 )
+
+// ErrUnknownUnit is wrapped by errors about a name that is no discovered unit.
+var ErrUnknownUnit = errors.New("unknown unit")
 
 // RootUnit is the unit of the repository root (files outside any other unit).
 const RootUnit = "_root"
@@ -175,15 +179,28 @@ func ContextPath(unit string) string { return "context/" + unit + ".md" }
 // taken from the config Discover was given.
 func (t *Tree) IndexFile() string { return t.cfg.IndexFile }
 
+// Limits on a name SafeName accepts, in bytes.
+const (
+	maxNameLen    = 128
+	maxSegmentLen = 64
+)
+
 // SafeName reports whether a repo path may be shown as is: unit names end up
 // in the root index file, in Claude's context and in suggested commands, so
-// only letters, digits, marks, spaces and "._-@+/" are allowed.
+// only letters, digits, marks and "._-@+/" are allowed (no spaces), no
+// segment starts with "-" (it would read as an option), and the name is at
+// most 128 bytes, each segment at most 64.
 func SafeName(p string) bool {
-	if p == RootUnit {
+	if p == RootUnit || len(p) > maxNameLen {
 		return false
 	}
+	for seg := range strings.SplitSeq(p, "/") {
+		if len(seg) > maxSegmentLen || strings.HasPrefix(seg, "-") {
+			return false
+		}
+	}
 	for _, r := range p {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) && !strings.ContainsRune("._-@+/ ", r) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) && !strings.ContainsRune("._-@+/", r) {
 			return false
 		}
 	}

@@ -111,18 +111,18 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 - Docs: `context/internal/gitx.md`
 
 **Interfaces:**
-- Produces: `func NotRepo(err error) bool` — `*Error` с `Code == 128` и `"not a git repository"` в `Stderr`; `func WorkTreeOK(root string) (bool, error)` — `rev-parse --show-toplevel --absolute-git-dir`: true, если реальный root равен toplevel или лежит под ним, и git-каталог (а) под toplevel, или (б) содержит файл `gitdir`, который указывает на `<root>/.git` (связанный worktree), или (в) лежит под `<A>/.git/` для строгого предка `A` корня (сабмодуль). false и nil-ошибка — топология чужая; ошибка — git не ответил.
+- Produces: `func NotRepo(err error) bool` — `*Error` с `Code == 128` и `"not a git repository"` в `Stderr`; `func WorkTreeOK(root string) (bool, error)` — `rev-parse --show-toplevel --absolute-git-dir`: true, если реальный root равен toplevel или лежит под ним, и git-каталог (а) под toplevel, или (б) содержит файл `gitdir`, который указывает на `<root>/.git` (связанный worktree), или (в) лежит под `<A>/.git/modules/` или `<A>/.git/worktrees/<n>/modules/` для строгого предка `A` корня (сабмодуль); если toplevel ≠ реальный root, git-каталог не может лежать под root (`core.worktree`, указывающий вверх). false и nil-ошибка — топология чужая; ошибка — git не ответил.
 
-- [ ] **Step 1: Write the failing tests** (`gitx_test.go`):
+- [x] **Step 1: Write the failing tests** (`gitx_test.go`):
   - `TestRunNoLazyFetch` — таблица `uploadpack`, `core.sshCommand`, `ext::` (`protocol.ext.allow=always`), `core.gitProxy`: репо по PoC из `raw/2A-security.md` S-1 (skip-worktree `.gitignore`, удалённый блоб, `extensions.partialClone`), `Run(root, 0, "ls-files", "-co", "--exclude-standard", "-z")` → файл-маркер скрипта не появился. Skip, если `git config extensions.partialClone` не поддерживается.
   - `TestRunIgnoresShowSignature` — локальный `log.showSignature=true`, `gpg.program=<скрипт, создающий маркер>`, коммит с заголовком `gpgsig` (объект собрать `git hash-object -t commit -w` и `update-ref`), `Run(root, 0, "log", "-n1")` → маркера нет.
   - `TestRunTimeoutWithGrandchild` — `testutil.FakeGit` со скриптом `sleep 30 & wait`, `Timeout = 200ms` → `Run` вернулся быстрее 2 с, `TimedOut == true`.
   - `TestNotRepo` — `Run` в каталоге без git → `NotRepo(err)`; ошибка с кодом 128 и другим stderr → false.
   - `topology_test.go`: `TestWorkTreeOK` (обычный репо → true), `TestWorkTreeOKCoreWorktreeOutside` (`core.worktree=../other` → false), `TestWorkTreeOKForeignGitdir` (`.git`-файл `gitdir:` на другой репо → false), `TestWorkTreeOKLinkedWorktree` (`git worktree add` → true), `TestWorkTreeOKSubmodule` (`git submodule add` локального репо, root = каталог сабмодуля → true).
-- [ ] **Step 2: Run** `go test ./internal/gitx/` — Expected: FAIL (маркеры появляются; таймаут ждёт 30 с; `NotRepo`/`WorkTreeOK` не определены).
-- [ ] **Step 3: Implement.** В `Run`: env добавить `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `GIT_PROTOCOL_FROM_USER=0`; фиксированные аргументы — `-c log.showSignature=false` рядом с `core.fsmonitor`; `cmd.WaitDelay = time.Second`; на Unix `SysProcAttr{Setpgid: true}` и `cmd.Cancel`, убивающий группу (`syscall.Kill(-pid, SIGKILL)`), в `proc_unix.go`; в `proc_other.go` — без изменений поведения. `NotRepo` и `WorkTreeOK` — по Interfaces.
-- [ ] **Step 4: Run** `go test ./internal/gitx/` — Expected: PASS.
-- [ ] **Step 5: Docs.** В `context/internal/gitx.md` перечислить фактические защиты (env, `-c`, WaitDelay/группа) и `WorkTreeOK`; добавить ограничение I-1.
+- [x] **Step 2: Run** `go test ./internal/gitx/` — Expected: FAIL (маркеры появляются; таймаут ждёт 30 с; `NotRepo`/`WorkTreeOK` не определены).
+- [x] **Step 3: Implement.** В `Run`: env добавить `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `GIT_PROTOCOL_FROM_USER=0`; фиксированные аргументы — `-c log.showSignature=false` рядом с `core.fsmonitor`; `cmd.WaitDelay = time.Second`; на Unix `SysProcAttr{Setpgid: true}` и `cmd.Cancel`, убивающий группу (`syscall.Kill(-pid, SIGKILL)`), в `proc_unix.go`; в `proc_other.go` — без изменений поведения. `NotRepo` и `WorkTreeOK` — по Interfaces.
+- [x] **Step 4: Run** `go test ./internal/gitx/` — Expected: PASS.
+- [x] **Step 5: Docs.** В `context/internal/gitx.md` перечислить фактические защиты (env, `-c`, WaitDelay/группа) и `WorkTreeOK`; добавить ограничение I-1.
 
 ### Task T2: textx — bidi в многострочном выводе, общие BOM/EOL
 
@@ -130,10 +130,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `const BOM = "﻿"`; `func EOL(s string) string` — `"\r\n"`, если первая строка кончается на `\r\n`, иначе `"\n"` (как нынешние `eolOf` в frontmatter и rootindex).
 
-- [ ] **Step 1: Tests.** `TestStripControlsBidi`: U+202A–U+202E, U+2066–U+2069, U+200B, U+FEFF удаляются; `\n`, `\t` остаются; текст без них возвращается тем же срезом. `TestEOL`: `"a\r\nb"` → `"\r\n"`, `"a\nb\r\n"` → `"\n"`, `""` → `"\n"`.
-- [ ] **Step 2: Run** `go test ./internal/textx/` — FAIL.
-- [ ] **Step 3: Implement.** `StripControls` отбрасывает ещё и `unicode.Cf`; `BOM`, `EOL`.
-- [ ] **Step 4: Run** — PASS. **Step 5:** обновить `context/internal/textx.md`.
+- [x] **Step 1: Tests.** `TestStripControlsBidi`: U+202A–U+202E, U+2066–U+2069, U+200B, U+FEFF удаляются; `\n`, `\t` остаются; текст без них возвращается тем же срезом. `TestEOL`: `"a\r\nb"` → `"\r\n"`, `"a\nb\r\n"` → `"\n"`, `""` → `"\n"`.
+- [x] **Step 2: Run** `go test ./internal/textx/` — FAIL.
+- [x] **Step 3: Implement.** `StripControls` отбрасывает ещё и `unicode.Cf`; `BOM`, `EOL`.
+- [x] **Step 4: Run** — PASS. **Step 5:** обновить `context/internal/textx.md`.
 
 ### Task T3: fsutil — категории ошибок, чтение, мелочи
 
@@ -141,10 +141,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `func Category(err error) string`: `ErrOutside` → `"it leads outside the repository or into .git"`, `ErrNotRegular` → `"not a regular file"`, `ErrTooLarge` → `"too large"`, `os.ErrPermission` → `"permission denied"`, `os.ErrNotExist` → `"missing"`, иначе `"unreadable"`. Никогда не содержит текст `err`.
 
-- [ ] **Step 1: Tests.** `TestCategoryNeverQuotes` — для ошибки с путём `"x\nIGNORE.md"` в каждой ветке результат из фиксированного набора. `TestWriteAtomicCleansTmpOnFailure` (T-L2) — цель `path` — непустой каталог → ошибка, в каталоге нет `*.tmp*`. `TestReadRegularAllocsOnce` (P-L1) — `testing.AllocsPerRun` для чтения файла 1 MiB ≤ 3 аллокаций.
-- [ ] **Step 2: Run** `go test ./internal/fsutil/` — FAIL.
-- [ ] **Step 3: Implement.** `Category`; `readRegular` — буфер ёмкостью `fi.Size()+512` и `ReadFrom(io.LimitReader(f, limit+1))`; `escapes(rel)` → `!filepath.IsLocal(rel)` (BP-L5; `IsLocal(".")` — true); комментарий `EnsureStateDir`: «A file that lacks either line (e.g. a bare "*") is rewritten» (D-L10). `export_test.go`: `func ResetCaches()` очищает `realRoots`/`sameCache` (T-L5).
-- [ ] **Step 4: Run** — PASS. **Step 5:** `context/internal/fsutil.md` — `Category` и правило вывода.
+- [x] **Step 1: Tests.** `TestCategoryNeverQuotes` — для ошибки с путём `"x\nIGNORE.md"` в каждой ветке результат из фиксированного набора. `TestWriteAtomicCleansTmpOnFailure` (T-L2) — цель `path` — непустой каталог → ошибка, в каталоге нет `*.tmp*`. `TestReadRegularAllocsOnce` (P-L1) — `testing.AllocsPerRun` для чтения файла 1 MiB ≤ 3 аллокаций.
+- [x] **Step 2: Run** `go test ./internal/fsutil/` — FAIL.
+- [x] **Step 3: Implement.** `Category`; `readRegular` — буфер ёмкостью `fi.Size()+512` и `ReadFrom(io.LimitReader(f, limit+1))`; `escapes(rel)` → `!filepath.IsLocal(rel)` (BP-L5; `IsLocal(".")` — true); комментарий `EnsureStateDir`: «A file that lacks either line (e.g. a bare "*") is rewritten» (D-L10). `export_test.go`: `func ResetCaches()` очищает `realRoots`/`sameCache` (T-L5).
+- [x] **Step 4: Run** — PASS. **Step 5:** `context/internal/fsutil.md` — `Category` и правило вывода.
 
 ### Task T4: testutil — изоляция от внешнего репо, симлинки, фейковый git
 
@@ -152,8 +152,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `func Symlink(t testing.TB, target, link string)` — создаёт родительский каталог; `t.Skip` только на Windows при `os.ErrPermission`, иначе `t.Fatal`. `func FakeGit(t testing.TB, script string)` — кладёт исполняемый `git` (`#!/bin/sh` + script) во временный каталог в начале `PATH` (`t.Setenv`); skip на Windows. `ScrubEnv` ставит `GIT_CEILING_DIRECTORIES=filepath.Dir(os.TempDir())`.
 
-- [ ] **Step 1: Tests.** `TestScrubEnvCeiling` — после `ScrubEnv` git в `t.TempDir()` под внешним репо (`TMPDIR` внутри временного git-репо) говорит «not a git repository». `TestSymlinkCreatesParent`. `TestFakeGit` — `exec.Command("git", "x")` выполняет скрипт.
-- [ ] **Step 2–4:** FAIL → реализовать → `go test ./internal/testutil/` PASS. **Step 5:** док.
+- [x] **Step 1: Tests.** `TestScrubEnvCeiling` — после `ScrubEnv` git в `t.TempDir()` под внешним репо (`TMPDIR` внутри временного git-репо) говорит «not a git repository». `TestSymlinkCreatesParent`. `TestFakeGit` — `exec.Command("git", "x")` выполняет скрипт.
+- [x] **Step 2–4:** FAIL → реализовать → `go test ./internal/testutil/` PASS. **Step 5:** док.
 
 ### Task T5: шим — PATH, канонический HOME, концы строк
 
@@ -172,10 +172,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces поле `Config.DiscoveryReset bool` с тегом `yaml:"-"` — true, если `fix` сбросил или отбросил что-то в `include`, `exclude`, `track`, `min_files`, `code_extensions`, `module_markers`. `func EscapePattern(dir string) string` — экранирует `\ * ? [ ] { }` обратной косой (doublestar). Тип `Problems` и сигнатура `Load` не меняются.
 
-- [ ] **Step 1: Tests.** `TestLoadDuplicateKey` (Q-M3): `min_files: 3\nmin_files: 7` → проблема `line 2: duplicate key min_files`, `MinFiles` = 3 (первое значение), нет «wrong type»; дубликат `index_file` — по-прежнему `ErrBadIndexFile`. `TestProblemsNeverQuotePattern` (Q-L7): шаблон с текстом `IGNORE` длиной > лимита → в `Problems` только `invalid pattern`. `TestDiscoveryReset`: неверный шаблон в `exclude` → `DiscoveryReset`; неверный `language` → нет. `TestAddExcludeAnchor` (CL-6): `exclude: &ex [a/**]\ntrack: *ex` → после `AddExclude("b")` `track` прежний, `exclude` содержит `b`. `TestAddExcludeKeepsBlankLines` — пустые строки и `%YAML` сохраняются. `TestAddExcludeBrokenNamesFile` (Q-L9): ошибка начинается с `.auto-context/config.yaml cannot be used:`. `TestFindRootHomeTrailingSlash`, `TestFindRootHomeSymlink` (CL-5). `TestEscapePattern`: `lib[v1]` → `lib\[v1\]`, и `doublestar.Match(EscapePattern(d), d)` для `a*b`, `x?`, `{y}`.
-- [ ] **Step 2: Run** `go test ./internal/config/` — FAIL.
-- [ ] **Step 3: Implement.** Разбор один раз в `yaml.Node`, дальше по ключам из `raw/1A-code-quality.md` Q-M3 (merge-ключи `<<` декодировать целым узлом, поведение закрепить тестом). Проверки в `fix` возвращают безопасную причину (`type check func(string) (reason string, ok bool)`), без разбора текста ошибки. `AddExclude`: узел с `Anchor` или ключ через alias/merge → заменить `exclude` новым узлом-списком; ошибки разбора — `fmt.Errorf("%s cannot be used: %s", FileName, Describe(err))`. `FindRoot`: `home` и `cwd` через `filepath.Clean` + `EvalSymlinks` перед сравнением.
-- [ ] **Step 4: Run** — PASS. **Step 5:** док (`DiscoveryReset`, `EscapePattern`, правило дубликатов).
+- [x] **Step 1: Tests.** `TestLoadDuplicateKey` (Q-M3): `min_files: 3\nmin_files: 7` → проблема `line 2: duplicate key min_files`, `MinFiles` = 3 (первое значение), нет «wrong type»; дубликат `index_file` — по-прежнему `ErrBadIndexFile`. `TestProblemsNeverQuotePattern` (Q-L7): шаблон с текстом `IGNORE` длиной > лимита → в `Problems` только `invalid pattern`. `TestDiscoveryReset`: неверный шаблон в `exclude` → `DiscoveryReset`; неверный `language` → нет. `TestAddExcludeAnchor` (CL-6): `exclude: &ex [a/**]\ntrack: *ex` → после `AddExclude("b")` `track` прежний, `exclude` содержит `b`. `TestAddExcludeKeepsBlankLines` — пустые строки и `%YAML` сохраняются. `TestAddExcludeBrokenNamesFile` (Q-L9): ошибка начинается с `.auto-context/config.yaml cannot be used:`. `TestFindRootHomeTrailingSlash`, `TestFindRootHomeSymlink` (CL-5). `TestEscapePattern`: `lib[v1]` → `lib\[v1\]`, и `doublestar.Match(EscapePattern(d), d)` для `a*b`, `x?`, `{y}`.
+- [x] **Step 2: Run** `go test ./internal/config/` — FAIL.
+- [x] **Step 3: Implement.** Разбор один раз в `yaml.Node`, дальше по ключам из `raw/1A-code-quality.md` Q-M3 (merge-ключи `<<` декодировать целым узлом, поведение закрепить тестом). Проверки в `fix` возвращают безопасную причину (`type check func(string) (reason string, ok bool)`), без разбора текста ошибки. `AddExclude`: узел с `Anchor` или ключ через alias/merge → заменить `exclude` новым узлом-списком; ошибки разбора — `fmt.Errorf("%s cannot be used: %s", FileName, Describe(err))`. `FindRoot`: `home` и `cwd` через `filepath.Clean` + `EvalSymlinks` перед сравнением.
+- [x] **Step 4: Run** — PASS. **Step 5:** док (`DiscoveryReset`, `EscapePattern`, правило дубликатов).
 
 ### Task T7: units (часть 1) — имена юнитов, формы .gitignore, вложенные репо, обход
 
@@ -183,10 +183,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `var ErrUnknownUnit = errors.New("unknown unit")` (BP-L7). `SafeName` — по Global Constraints.
 
-- [ ] **Step 1: Tests.** `TestSafeNameRules`: `"a b"`, `"-rf"`, `"x/--exclude"`, 129 байт, сегмент 65 байт → false; `"svc/auth"`, `"модуль"`, `"a.b@c+d"` → true. `TestSpaceDirNoLongerUnit` (Review Focus 4; заменить ожидание `"ok dir"` в `units_test.go:410`). `TestIgnorePOSIXClasses`: `a[[:digit:]].go`, `a[![:digit:]].go`, `[[:alpha:]]*.go` в обходе совпадают с `git check-ignore`. `TestIgnoreTripleStar`: `***/c.go` как `**/c.go`. `TestWalkSkipsNestedRepo`: `inner/.git` (каталог и файл) → файлы `inner/` не перечислены, `inner` не юнит. `FuzzIgnoreMatchesGit` — дифференциально против `git check-ignore --no-index` (алфавит `ab*?[]!-\/.^`, skip без git) — по `raw/3A-testing.md` M-7.
-- [ ] **Step 2: Run** `go test ./internal/units/` — FAIL.
-- [ ] **Step 3: Implement.** `SafeName`; в `bracketClass` перевод ASCII-классов `[:alpha:] [:digit:] [:alnum:] [:upper:] [:lower:] [:space:] [:xdigit:] [:punct:]` в диапазоны; `***` и длиннее → `**`; в обходе пропускать каталог, где есть `.git` (файл или каталог); lstat кандидатов обхода — через `parallelLstat` после `WalkDir`, как в git-ветке (P-L3).
-- [ ] **Step 4: Run** — PASS.
+- [x] **Step 1: Tests.** `TestSafeNameRules`: `"a b"`, `"-rf"`, `"x/--exclude"`, 129 байт, сегмент 65 байт → false; `"svc/auth"`, `"модуль"`, `"a.b@c+d"` → true. `TestSpaceDirNoLongerUnit` (Review Focus 4; заменить ожидание `"ok dir"` в `units_test.go:410`). `TestIgnorePOSIXClasses`: `a[[:digit:]].go`, `a[![:digit:]].go`, `[[:alpha:]]*.go` в обходе совпадают с `git check-ignore`. `TestIgnoreTripleStar`: `***/c.go` как `**/c.go`. `TestWalkSkipsNestedRepo`: `inner/.git` (каталог и файл) → файлы `inner/` не перечислены, `inner` не юнит. `FuzzIgnoreMatchesGit` — дифференциально против `git check-ignore --no-index` (алфавит `ab*?[]!-\/.^`, skip без git) — по `raw/3A-testing.md` M-7.
+- [x] **Step 2: Run** `go test ./internal/units/` — FAIL.
+- [x] **Step 3: Implement.** `SafeName`; в `bracketClass` перевод ASCII-классов `[:alpha:] [:digit:] [:alnum:] [:upper:] [:lower:] [:space:] [:xdigit:] [:punct:]` в диапазоны; `***` и длиннее → `**`; в обходе пропускать каталог, где есть `.git` (файл или каталог); lstat кандидатов обхода — через `parallelLstat` после `WalkDir`, как в git-ветке (P-L3).
+- [x] **Step 4: Run** — PASS.
 
 ### Task T8: hooks (ввод) — строгий `command`, имя события, корень плагина
 

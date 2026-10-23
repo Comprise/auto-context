@@ -622,3 +622,107 @@ func TestGitignoreBracketEdgesMatchGit(t *testing.T) {
 		}
 	}
 }
+
+// buildIgnoreTree writes files and .gitignore files (dir -> content) into a
+// new temp dir.
+func buildIgnoreTree(t *testing.T, files []string, ignores map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	mkfiles(t, root, files...)
+	for dir, s := range ignores {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(dir), ".gitignore"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// compareWithGit discovers the same tree with and without git and wants the
+// same tracked files; it returns them.
+func compareWithGit(t *testing.T, files []string, ignores map[string]string) []string {
+	t.Helper()
+	plain, viaGit := buildIgnoreTree(t, files, ignores), buildIgnoreTree(t, files, ignores)
+	gitInit(t, viaGit)
+	cfg := config.Default()
+	cfg.Include = []string{"**"}
+	a, b := discover(t, plain, cfg), discover(t, viaGit, cfg)
+	if !b.viaGit {
+		t.Fatal("git listing not used in a git repo")
+	}
+	if !slices.Equal(a.Tracked(), b.Tracked()) {
+		t.Errorf("tracked differ:\nwalk %v\ngit  %v", a.Tracked(), b.Tracked())
+	}
+	if w := a.Warnings(); len(w) != 0 {
+		t.Errorf("walk warnings = %v", w)
+	}
+	return b.Tracked()
+}
+
+// POSIX character classes in a bracket expression match as in git; an
+// unknown class name makes the rule match nothing.
+func TestIgnorePOSIXClasses(t *testing.T) {
+	var files []string
+	for _, d := range []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7"} {
+		for _, f := range []string{"a1.go", "ab.go", "aB.go", "a-.go", "a_.go", "af.go", "ag.go", "1a.go", "Zz.go", "keep.md.go"} {
+			files = append(files, d+"/"+f)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		files = append(files, "p6/a .go")
+	}
+	got := compareWithGit(t, files, map[string]string{
+		"p1": "a[[:digit:]].go\n",
+		"p2": "a[![:digit:]].go\n",
+		"p3": "[[:alpha:]]*.go\n",
+		"p4": "a[[:upper:][:punct:]].go\n",
+		"p5": "a[[:foo:]].go\na[[::]].go\n",
+		"p6": "a[[:space:][:lower:]].go\n",
+		"p7": "a[[:xdigit:]].go\n[[:alnum:]-]z.go\n",
+	})
+	for _, c := range []struct {
+		f    string
+		want bool
+	}{
+		{"p1/a1.go", false}, {"p1/ab.go", true},
+		{"p2/a1.go", true}, {"p2/ab.go", false}, {"p2/a-.go", false},
+		{"p3/1a.go", true}, {"p3/ab.go", false}, {"p3/Zz.go", false},
+		{"p4/aB.go", false}, {"p4/a_.go", false}, {"p4/a-.go", false}, {"p4/ab.go", true},
+		{"p5/a1.go", true}, {"p5/ab.go", true},
+		{"p6/ab.go", false}, {"p6/aB.go", true},
+		{"p7/a1.go", false}, {"p7/af.go", false}, {"p7/ag.go", true}, {"p7/Zz.go", false},
+	} {
+		if slices.Contains(got, c.f) != c.want {
+			t.Errorf("%s tracked = %v, want %v", c.f, !c.want, c.want)
+		}
+	}
+}
+
+// A run of three or more "*" is read as git reads it: "**" between slashes,
+// "*" inside a name.
+func TestIgnoreTripleStar(t *testing.T) {
+	got := compareWithGit(t,
+		[]string{"c.go", "s/c.go", "s/t/c.go", "d.go", "q/a.go", "q/r/b.go", "qa.go", "mxn.go", "m/n.go", "mn.go", "w/x/y/z.go", "w/z.go", "w/x/z.go"},
+		map[string]string{".": "***/c.go\nq/***\nm***n.go\nw/****/z.go\n"})
+	want := []string{"d.go", "m/n.go", "qa.go"}
+	if !slices.Equal(got, want) {
+		t.Errorf("tracked = %v, want %v", got, want)
+	}
+}
+
+// Without git, a directory holding a nested repository (a .git directory or
+// file) is not walked: git lists nothing in it either.
+func TestWalkSkipsNestedRepo(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "inner/go.mod", "inner/a.go", "inner/sub/b.go", "inner/.git/HEAD",
+		"wt/go.mod", "wt/a.go", "other/go.mod", "other/a.go", "top.go")
+	if err := os.WriteFile(filepath.Join(root, "wt", ".git"), []byte("gitdir: /nowhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := discover(t, root, config.Default())
+	if got := tr.Tracked(); !slices.Equal(got, []string{"other/a.go", "other/go.mod", "top.go"}) {
+		t.Errorf("tracked = %v", got)
+	}
+	if got := paths(tr.Units()); !slices.Equal(got, []string{RootUnit, "other"}) {
+		t.Errorf("units = %v", got)
+	}
+}

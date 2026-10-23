@@ -98,11 +98,17 @@ func NotRun(err error) bool {
 	return errors.As(err, &e) && e.NotRun
 }
 
+// waitDelay bounds how long Run waits for stdout/stderr after git exited or
+// was killed: a leftover child holding the pipes must not hang the hook.
+const waitDelay = time.Second
+
 // Run runs `git <args>` in dir and returns at most limit bytes of stdout
-// (0 = no limit). fsmonitor and the pager are off, the system config is not
-// read, git never prompts, speaks English (callers match its messages) and is
-// killed after Timeout or at the deadline (see SetDeadline), whichever comes
-// first. stderr (bounded) is part of the returned error.
+// (0 = no limit). fsmonitor, the pager and signature checks in log are off,
+// the system config is not read, no transport may run (so a promisor remote
+// never lazy-fetches through a repo-chosen command), git never prompts,
+// speaks English (callers match its messages) and is killed with its whole
+// process group after Timeout or at the deadline (see SetDeadline), whichever
+// comes first. stderr (bounded) is part of the returned error.
 func Run(dir string, limit int, args ...string) (Result, error) {
 	wait := Timeout
 	if d := deadline.Load(); d != 0 {
@@ -113,10 +119,16 @@ func Run(dir string, limit int, args ...string) (Result, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
-	full := append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "--no-pager"}, args...)
+	full := append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "core.pager=cat",
+		"-c", "log.showSignature=false", "--no-pager"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = append(environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_NO_LAZY_FETCH=1",     // git >= 2.45: no fetch for a missing object
+		"GIT_ALLOW_PROTOCOL=none", // any git: no transport at all, overrides protocol.*.allow
+		"GIT_PROTOCOL_FROM_USER=0",
 		"LC_ALL=C", "LANGUAGE=C")
+	cmd.WaitDelay = waitDelay
+	killGroup(cmd)
 	var out, errb bytes.Buffer
 	lw := &limitWriter{w: &out, n: limit}
 	cmd.Stdout = lw
@@ -134,6 +146,9 @@ func Run(dir string, limit int, args ...string) (Result, error) {
 		e.Stderr = "timed out after " + wait.Round(time.Millisecond).String()
 	case errors.As(err, &ee):
 		e.Code = ee.ExitCode()
+	case errors.Is(err, exec.ErrWaitDelay):
+		// git exited, but something it started kept the pipes open.
+		e.Stderr = "output still open " + waitDelay.String() + " after exit"
 	default:
 		e.NotRun = true
 		e.Stderr = err.Error()

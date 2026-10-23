@@ -6,6 +6,7 @@ import (
 	"iter"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -104,7 +105,7 @@ type ignoreRule struct {
 	dirOnly  bool   // trailing "/"
 	anchored bool   // contains "/": matched against the path, else the base name
 	glob     bool   // has *, ? or [ ; else an exact name or path
-	under    bool   // ends in "/**": what is inside X, not X itself
+	under    bool   // ends in "/**": what is inside X, not X itself (matchInside)
 	// head and tail are literal text every match starts and ends with, mid
 	// the longest literal run it contains: cheap tests before doublestar.
 	head, mid, tail string
@@ -159,10 +160,17 @@ func parseIgnore(lines iter.Seq[string]) ignoreFile {
 		if rest, ok := strings.CutPrefix(l, "/"); ok {
 			r.anchored, l = true, rest
 		}
+		// "\/" is "/" to git; a rule that then starts with "/" (like "//x")
+		// or holds "//" asks for a path no clean path is: git never matches it.
+		if l = normalizeRule(l); strings.HasPrefix(l, "/") || emptySegment(l) {
+			continue
+		}
 		if rest, ok := strings.CutPrefix(l, "**/"); ok && !strings.Contains(rest, "/") {
 			l, r.anchored = rest, false // "**/x" and "/**/x" are "x" at any depth
 		}
-		if l == "" {
+		// Only one trailing "/" is cut: a rule still ending in "/" asks for a
+		// path ending in "/", which git never matches.
+		if l == "" || strings.HasSuffix(l, "/") {
 			continue
 		}
 		r.anchored = r.anchored || strings.Contains(l, "/")
@@ -210,6 +218,93 @@ func parseIgnore(lines iter.Seq[string]) ignoreFile {
 	return f
 }
 
+// normalizeRule rewrites a rule (its leading "/" and one trailing "/" cut)
+// as git's wildmatch reads it: an escaped "/" is a "/"; a run of unescaped
+// "*" is "**" between slashes (or the ends of the rule) when it is two or
+// more, any other run is "*"; and "**" segments in a row are one.
+func normalizeRule(l string) string {
+	if !strings.Contains(l, "**") && !strings.Contains(l, "\\/") {
+		return l
+	}
+	var b strings.Builder
+	for i := 0; i < len(l); i++ {
+		c := l[i]
+		if c == '\\' {
+			if i+1 < len(l) && l[i+1] == '/' {
+				continue // the "/" is written next
+			}
+			b.WriteByte(c)
+			if i+1 < len(l) {
+				i++
+				b.WriteByte(l[i])
+			}
+			continue
+		}
+		if c != '*' {
+			b.WriteByte(c)
+			continue
+		}
+		j := i + 1
+		for j < len(l) && l[j] == '*' {
+			j++
+		}
+		switch {
+		case j-i < 2 || (i > 0 && l[i-1] != '/'):
+			b.WriteByte('*')
+		case j == len(l) || l[j] == '/':
+			b.WriteString("**")
+		case strings.HasPrefix(l[j:], "\\/"):
+			// Before an escaped "/", "**" may not stand for no directory, as
+			// it may before a plain one: at least one.
+			b.WriteString("*/**")
+		default:
+			b.WriteByte('*')
+		}
+		i = j - 1
+	}
+	// "**/**" is "**": merged, so "X/**" rules never have an X that can match
+	// nothing (see ignoreRule.under).
+	segs := strings.Split(b.String(), "/")
+	segs = slices.CompactFunc(segs, func(a, b string) bool { return a == "**" && b == "**" })
+	return strings.Join(segs, "/")
+}
+
+// emptySegment reports whether rule l holds "//" outside a bracket class.
+func emptySegment(l string) bool {
+	for i := 0; i < len(l); i++ {
+		switch l[i] {
+		case '\\':
+			i++
+		case '[':
+			if _, n, _ := bracketClass(l[i+1:]); n > 0 {
+				i += n
+			}
+		case '/':
+			if i+1 < len(l) && l[i+1] == '/' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// posixClasses are the ASCII ranges of the [:name:] classes git's wildmatch
+// knows (its ctype is ASCII only).
+var posixClasses = map[string][][2]rune{
+	"alnum":  {{'0', '9'}, {'A', 'Z'}, {'a', 'z'}},
+	"alpha":  {{'A', 'Z'}, {'a', 'z'}},
+	"blank":  {{'\t', '\t'}, {' ', ' '}},
+	"cntrl":  {{0, 0x1f}, {0x7f, 0x7f}},
+	"digit":  {{'0', '9'}},
+	"graph":  {{'!', '~'}},
+	"lower":  {{'a', 'z'}},
+	"print":  {{' ', '~'}},
+	"punct":  {{'!', '/'}, {':', '@'}, {'[', '`'}, {'{', '~'}},
+	"space":  {{'\t', '\n'}, {'\r', '\r'}, {' ', ' '}},
+	"upper":  {{'A', 'Z'}},
+	"xdigit": {{'0', '9'}, {'A', 'F'}, {'a', 'f'}},
+}
+
 // globPattern turns a git glob rule into a doublestar pattern: braces, literal
 // in git, are escaped, and bracket classes are rewritten member by member as
 // git's wildmatch reads them. Other bytes, not UTF-8 ones included (a Latin-1
@@ -230,7 +325,7 @@ func globPattern(l string) (p string, ok bool) {
 			b.WriteByte(c)
 		case '[':
 			class, n, ok := bracketClass(l[i+1:])
-			if n < 0 { // unterminated or with a [:name:]: left as written
+			if n < 0 { // unterminated: left as written
 				b.WriteByte(c)
 				continue
 			}
@@ -252,9 +347,11 @@ func globPattern(l string) (p string, ok bool) {
 // its first end even when reversed; and a class never matches "/" (git
 // matches with WM_PATHNAME), so "/" is dropped from the members, or added to
 // them when negated. A member is a UTF-8 character or, where the bytes are
-// not UTF-8, one byte, written back as it was. n is the bytes consumed
+// not UTF-8, one byte, written back as it was; "[:name:]" is a POSIX class,
+// turned into its ASCII ranges ("[:" without ":]" is a "[" member, an unknown
+// name makes the rule match nothing, as in git). n is the bytes consumed
 // through the closing "]", or -1 for a class left to doublestar as written
-// (unterminated, or with a [:name:]). ok is false when no member is left.
+// (unterminated). ok is false when no member is left.
 func bracketClass(s string) (class string, n int, ok bool) {
 	type end struct {
 		v   rune   // for ordering: the character, or the byte value
@@ -289,7 +386,22 @@ func bracketClass(s string) (class string, n int, ok bool) {
 			break
 		}
 		if s[i] == '[' && i+1 < len(s) && s[i+1] == ':' {
-			return "", -1, false
+			// As git: the name runs to the next "]", which must follow a ":".
+			j := strings.IndexByte(s[i+2:], ']')
+			if j < 0 {
+				return "", -1, false
+			}
+			if j > 0 && s[i+2+j-1] == ':' {
+				ranges, known := posixClasses[s[i+2:i+2+j-1]]
+				if !known {
+					return "", 0, false
+				}
+				for _, r := range ranges {
+					spans = append(spans, span{end{r[0], string(r[0])}, end{r[1], string(r[1])}})
+				}
+				i += 2 + j + 1
+				continue // a "-" after a class is a member, not a range
+			}
 		}
 		lo, ok := member()
 		if !ok {
@@ -429,11 +541,11 @@ func (f *ignoreFile) match(sub string, isDir bool, budget *int) (ignored, matche
 			continue
 		}
 		*budget -= len(r.pattern) * len(target)
-		if !doublestar.MatchUnvalidated(r.pattern, target) {
-			continue
-		}
-		// doublestar's "X/**" also matches X; git's only what is inside X.
-		if r.under && doublestar.MatchUnvalidated(strings.TrimSuffix(r.pattern, "/**"), target) {
+		if r.under {
+			if !matchInside(strings.TrimSuffix(r.pattern, "/**"), target, budget) {
+				continue
+			}
+		} else if !doublestar.MatchUnvalidated(r.pattern, target) {
 			continue
 		}
 		best = i
@@ -443,6 +555,27 @@ func (f *ignoreFile) match(sub string, isDir bool, budget *int) (ignored, matche
 		return false, false
 	}
 	return !f.rules[best].negated, true
+}
+
+// matchInside reports whether target is inside a directory matching x, as
+// git reads "x/**": doublestar's "x/**" also matches x itself, and testing
+// x against target on its own is wrong when x matches both a path and a
+// directory above it ("**/*/**" and "a/a").
+func matchInside(x, target string, budget *int) bool {
+	for k := strings.IndexByte(target, '/'); k >= 0; k = nextSlash(target, k) {
+		*budget -= len(x) * k
+		if doublestar.MatchUnvalidated(x, target[:k]) {
+			return true
+		}
+	}
+	return false
+}
+
+func nextSlash(s string, k int) int {
+	if j := strings.IndexByte(s[k+1:], '/'); j >= 0 {
+		return k + 1 + j
+	}
+	return -1
 }
 
 // Limits on .gitignore files, so a hostile repo cannot make every hook slow:

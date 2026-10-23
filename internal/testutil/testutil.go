@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -29,10 +30,13 @@ func ScrubEnv() {
 	for k, v := range map[string]string{
 		"GIT_CONFIG_GLOBAL":   os.DevNull,
 		"GIT_CONFIG_NOSYSTEM": "1",
-		"GIT_AUTHOR_NAME":     "t",
-		"GIT_AUTHOR_EMAIL":    "t@t",
-		"GIT_COMMITTER_NAME":  "t",
-		"GIT_COMMITTER_EMAIL": "t@t",
+		// Stop git's upward repo search at the temp dir's parent, so a test
+		// directory never resolves to a repo enclosing the temp root.
+		"GIT_CEILING_DIRECTORIES": filepath.Dir(os.TempDir()),
+		"GIT_AUTHOR_NAME":         "t",
+		"GIT_AUTHOR_EMAIL":        "t@t",
+		"GIT_COMMITTER_NAME":      "t",
+		"GIT_COMMITTER_EMAIL":     "t@t",
 	} {
 		os.Setenv(k, v)
 	}
@@ -76,4 +80,33 @@ func Git(t testing.TB, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s%s", args, err, out, stderr.String())
 	}
 	return string(out)
+}
+
+// Symlink creates link -> target, making the parent directory first. It skips
+// on Windows when symlinks are not permitted and fails the test otherwise.
+func Symlink(t testing.TB, target, link string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" && os.IsPermission(err) {
+			t.Skipf("symlinks not permitted: %v", err)
+		}
+		t.Fatal(err)
+	}
+}
+
+// FakeGit puts an executable `git` (#!/bin/sh + script) first on PATH for the
+// test. It skips on Windows.
+func FakeGit(t testing.TB, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script git is not supported on Windows")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

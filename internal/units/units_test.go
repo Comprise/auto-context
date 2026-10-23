@@ -407,14 +407,14 @@ func TestUnsafeDirNamesAreNotUnits(t *testing.T) {
 		mkfiles(t, root, n+"/go.mod", n+"/a.go")
 		names = append(names, n)
 	}
-	mkfiles(t, root, "ok dir/go.mod", "ok dir/a.go", "модуль/go.mod", "модуль/a.go")
+	mkfiles(t, root, "ok.dir/go.mod", "ok.dir/a.go", "модуль/go.mod", "модуль/a.go")
 	tr := discover(t, root, config.Default())
 	for _, n := range names {
 		if n != "_root" && tr.IsUnit(n) {
 			t.Errorf("%q became a unit", n)
 		}
 	}
-	for _, n := range []string{"ok dir", "модуль"} {
+	for _, n := range []string{"ok.dir", "модуль"} {
 		if !tr.IsUnit(n) {
 			t.Errorf("%q is not a unit", n)
 		}
@@ -663,6 +663,57 @@ func TestGitignoreNonUTF8Rules(t *testing.T) {
 	} {
 		if got, _ := f.match(c.path, false, &budget); got != c.want {
 			t.Errorf("%q: %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestSafeNameRules(t *testing.T) {
+	seg64 := strings.Repeat("a", 64)
+	for name, want := range map[string]bool{
+		"a b":                         false,
+		"-rf":                         false,
+		"x/--exclude":                 false,
+		"x/-":                         false,
+		seg64 + "/" + seg64:           false, // 129 bytes
+		seg64 + "a":                   false, // a 65-byte segment
+		seg64[1:] + "/" + seg64:       true,  // 128 bytes
+		"svc/auth":                    true,
+		"модуль":                      true,
+		"a.b@c+d":                     true,
+		"a-b/c-":                      true,
+		RootUnit:                      false,
+		"tab\tx":                      false,
+		strings.Repeat("я", 32):       true,  // 64 bytes
+		strings.Repeat("я", 32) + "a": false, // 65 bytes
+	} {
+		if got := SafeName(name); got != want {
+			t.Errorf("SafeName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// A directory with a space in its name, a unit before, is no unit any more:
+// its files belong to the root unit and its context doc to nothing.
+func TestSpaceDirNoLongerUnit(t *testing.T) {
+	build := func() string {
+		root := t.TempDir()
+		mkfiles(t, root, "ok dir/go.mod", "ok dir/a.go", "ok dir/CLAUDE.md", "context/ok dir.md", "-x/go.mod", "-x/a.go", "top.go")
+		return root
+	}
+	plain, viaGit := build(), build()
+	gitInit(t, viaGit)
+	for name, tr := range map[string]*Tree{"walk": discover(t, plain, config.Default()), "git": discover(t, viaGit, config.Default())} {
+		if got := paths(tr.Units()); !slices.Equal(got, []string{RootUnit}) {
+			t.Errorf("%s units = %v", name, got)
+		}
+		if got := tr.Files(RootUnit); !slices.Contains(got, "ok dir/a.go") || !slices.Contains(got, "-x/a.go") {
+			t.Errorf("%s root files = %v", name, got)
+		}
+		if k, u := tr.Classify("context/ok dir.md"); k != KindIgnore {
+			t.Errorf("%s: context doc classified %v %q", name, k, u)
+		}
+		if k, u := tr.Classify("ok dir/CLAUDE.md"); k != KindIgnore {
+			t.Errorf("%s: index file classified %v %q", name, k, u)
 		}
 	}
 }
