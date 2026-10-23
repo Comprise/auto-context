@@ -750,7 +750,7 @@ func runUnits(ctx context.Context, args []string, stdout, stderr io.Writer, cwd 
 		fmt.Fprintln(stderr, project.ErrConfigBroken) // the units would be the defaults
 		return exitError
 	}
-	us := p.Tree().Units()
+	us := p.Units()
 	if asJSON {
 		r := unitsJSON{FormatVersion: formatVersion, Units: make([]unitJSONItem, 0, len(us))}
 		for _, u := range us {

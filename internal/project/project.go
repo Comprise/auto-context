@@ -15,6 +15,7 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
+	"auto-context/internal/filestat"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/gitx"
 	"auto-context/internal/hashing"
@@ -99,8 +100,38 @@ func (p *Project) Root() string { return p.root }
 // Config is the config in effect: the defaults when it is broken.
 func (p *Project) Config() config.Config { return p.cfg }
 
-// Tree is the unit tree Discover built.
+// Tree is the unit tree Discover built. Only cmd/auto-context's changes.go
+// still uses it (outside T28's files); the narrow queries below replace it.
 func (p *Project) Tree() *units.Tree { return p.tree }
+
+// Units returns all units: _root first, the rest sorted by path.
+func (p *Project) Units() []units.Unit { return p.tree.Units() }
+
+// IsUnit reports whether dir is a unit.
+func (p *Project) IsUnit(dir string) bool { return p.tree.IsUnit(dir) }
+
+// UnitOf returns the nearest ancestor unit of rel's directory, else _root.
+func (p *Project) UnitOf(rel string) string { return p.tree.UnitOf(rel) }
+
+// Classify says what the repo path rel is to the plugin and its unit
+// (units.Tree.Classify).
+func (p *Project) Classify(rel string) (units.Kind, string) { return p.tree.Classify(rel) }
+
+// Classifier returns a classifier for many paths (one glob budget and memo).
+func (p *Project) Classifier() *units.Classifier { return p.tree.Classifier() }
+
+// Files lists the files of unit (a copy).
+func (p *Project) Files(unit string) []string { return p.tree.Files(unit) }
+
+// Stats returns the tracked files and their stats as discovery took them,
+// the input of session.FromTree. The map is shared: read only.
+func (p *Project) Stats() (tracked []string, stats map[string]filestat.Stat) {
+	return p.tree.Tracked(), p.tree.StatsView()
+}
+
+// WarningCount is the number of discovery warnings, including those
+// dropped past the cap of Warnings.
+func (p *Project) WarningCount() int { return p.tree.WarningCount() }
 
 // ConfigProblems lists settings of the config that were dropped (nil if none).
 func (p *Project) ConfigProblems() config.Problems { return p.cfgProblems }

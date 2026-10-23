@@ -5,7 +5,7 @@
 - `agent.go` — `Agent` (claude|codex): как тексты называют навыки и команды
 - `session_start.go` — корневой индекс, stale/missing доки и проблемы проекта
 - `prompt_submit.go` — начало хода: сброс журнала и новый снимок
-- `stop.go` — сравнение со снимком, авто-ack, обратная связь «код изменён, доки нет»
+- `stop.go` — ввод для `turn.Evaluate`, авто-ack и увиденные доки, текст обратной связи «код изменён, доки нет»
 - `pre_tool_use.go` — авто-одобрение Bash-вызовов собственного CLI
 - `permission_request.go` — то же авто-одобрение для Codex (PermissionRequest)
 - `session_end.go` — удаление файлов сессии

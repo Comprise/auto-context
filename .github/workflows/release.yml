@@ -333,6 +333,21 @@ jobs:
           latest=false
           if [ "$branch" = release ] && [ "$cur" = "$new" ]; then latest=true; fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      - name: Release branch clone size
+        # Codex clones the whole branch (not shallow, measured 2026-10-24), and
+        # every release adds about 24 MB of binaries to its history. Only a
+        # warning: see "Release branch size" in docs/RELEASING.md.
+        run: |
+          branch=release
+          case "${GITHUB_REF_NAME#v}" in *-*) branch=release-next ;; esac
+          git clone -q --bare --single-branch --branch "$branch" \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$RUNNER_TEMP/size.git" || {
+            echo "::notice::cannot clone $branch to measure it"; exit 0; }
+          kb=$(du -sk "$RUNNER_TEMP/size.git" | cut -f1)
+          echo "$branch clone: $((kb / 1024)) MiB"
+          if [ "$kb" -gt 204800 ]; then
+            echo "::warning::branch $branch clones at $((kb / 1024)) MiB (over 200 MiB); see Release branch size in docs/RELEASING.md"
+          fi
       - name: Publish GitHub Release
         if: steps.draft.outputs.published != 'true'
         env:

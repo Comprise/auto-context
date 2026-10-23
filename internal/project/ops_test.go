@@ -200,8 +200,8 @@ func TestExcludeGlobMetachars(t *testing.T) {
 		"libv/b.go":                 "package lib\n",
 	})
 	p := open(t, root)
-	if !p.Tree().IsUnit("libv") {
-		t.Fatalf("libv not a unit: %v", p.Tree().Units())
+	if !p.IsUnit("libv") {
+		t.Fatalf("libv not a unit: %v", p.Units())
 	}
 	if err := p.Exclude("lib[v1]"); err != nil {
 		t.Fatal(err)
@@ -211,8 +211,8 @@ func TestExcludeGlobMetachars(t *testing.T) {
 		t.Fatalf("exclude = %v", ex)
 	}
 	// End to end: the reloaded tree (and a fresh Open) keep the sibling.
-	if !p.Tree().IsUnit("libv") || !open(t, root).Tree().IsUnit("libv") {
-		t.Errorf("libv excluded: %v", p.Tree().Units())
+	if !p.IsUnit("libv") || !open(t, root).IsUnit("libv") {
+		t.Errorf("libv excluded: %v", p.Units())
 	}
 	for name, want := range map[string]bool{"lib[v1]": true, "libv": false, "lib1": false} {
 		if got, err := doublestar.Match(`lib\[v1\]`, name); err != nil || got != want {
@@ -301,15 +301,15 @@ func TestExcludeReloads(t *testing.T) {
 		"lib/a.go":                  "package lib\n",
 	})
 	p := open(t, root)
-	if !p.Tree().IsUnit("lib") {
+	if !p.IsUnit("lib") {
 		t.Fatal("lib not a unit")
 	}
 	p.Statuses() // the cache is loaded before the reload
 	if err := p.Exclude("lib"); err != nil {
 		t.Fatal(err)
 	}
-	if p.Tree().IsUnit("lib") || !p.Tree().IsUnit("svc") || !slices.Contains(p.Config().Exclude, "lib") {
-		t.Errorf("not reloaded: units %v, exclude %v", p.Tree().Units(), p.Config().Exclude)
+	if p.IsUnit("lib") || !p.IsUnit("svc") || !slices.Contains(p.Config().Exclude, "lib") {
+		t.Errorf("not reloaded: units %v, exclude %v", p.Units(), p.Config().Exclude)
 	}
 	if err := p.SaveCache(); err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestUpgrade(t *testing.T) {
 		"context/new.md":            "# new\n\nNew.\n",
 	})
 	p := open(t, root)
-	old, err := hashing.SourceHash(context.Background(), root, p.Tree().Files("svc"), nil, hashing.NewCache())
+	old, err := hashing.SourceHash(context.Background(), root, p.Files("svc"), nil, hashing.NewCache())
 	if err != nil {
 		t.Fatal(err)
 	}
