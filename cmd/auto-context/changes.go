@@ -3,22 +3,34 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"auto-context/internal/project"
 )
 
-// runChanges prints Project.WriteChanges for one unit.
+// runChanges prints Project.WriteChanges for one unit. It needs no hash cache.
 func runChanges(args []string, stdout, stderr io.Writer, cwd string) int {
 	if len(args) != 1 {
 		fmt.Fprint(stderr, usage)
-		return 2
+		return exitUsage
 	}
-	p, err := loadRepo(stderr, cwd)
+	p, warns, err := loadRepo(cwd)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+		return openErr(stderr, cwd, err)
 	}
-	if err := p.WriteChanges(stdout, normUnit(args[0])); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	printWarnings(stderr, warns)
+	unit := normUnit(args[0])
+	switch {
+	case p.ConfigBroken():
+		fmt.Fprintln(stderr, project.ErrConfigBroken) // the units would be the defaults
+		return exitError
+	case !p.Tree().IsUnit(unit):
+		fmt.Fprintln(stderr, "unknown unit "+shownName(unit))
+		return exitError
 	}
-	return 0
+	// Git failures are notes in the report; an error here is a failed write.
+	if err := p.WriteChanges(stdout, unit); err != nil {
+		fmt.Fprintf(stderr, "the report could not be written: %s\n", errText(p.Root(), err, "changes"))
+		return exitError
+	}
+	return exitOK
 }
