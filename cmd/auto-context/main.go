@@ -21,12 +21,9 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
-	"auto-context/internal/fsutil"
-	"auto-context/internal/gitx"
 	"auto-context/internal/hooks"
 	"auto-context/internal/logx"
 	"auto-context/internal/project"
-	"auto-context/internal/rootindex"
 	"auto-context/internal/units"
 )
 
@@ -363,19 +360,19 @@ func detail(root string, err error, what string) string {
 	return " (details in .auto-context/log)"
 }
 
+// cliRender renders the problems of p for the CLI (project.CLI): errors as
+// fixed categories ("interrupted" once the command's context is canceled),
+// their full text in the log.
+func cliRender(p *project.Project) project.Render {
+	root := p.Root()
+	return project.Render{IndexFile: p.IndexFile(), Ctx: p.Context(), Detail: func(err error, what string) string { return detail(root, err, what) }}
+}
+
 // errText is how an error of a CLI operation is shown: the fixed texts of
 // the project sentinels as they are, anything else as a fixed category, with
-// the full text in the log.
-func errText(root string, err error, what string) string {
-	switch {
-	case errors.Is(err, project.ErrConfigBroken):
-		return project.ErrConfigBroken.Error()
-	case errors.Is(err, project.ErrConfigDegraded):
-		return project.ErrConfigDegraded.Error()
-	case errors.Is(err, rootindex.ErrBrokenMarkers):
-		return rootindex.ErrBrokenMarkers.Error()
-	}
-	return fsutil.Category(err) + detail(root, err, what)
+// the full text in the log (project.Render.ErrText).
+func errText(p *project.Project, err error, what string) string {
+	return cliRender(p).ErrText(err, what)
 }
 
 // shownName is a name from the command line or the repo as it may be echoed.
@@ -387,10 +384,11 @@ func shownName(name string) string {
 }
 
 // ackErrText explains why unit could not be acked, without the error's text.
-func ackErrText(root, unit string, err error) string {
+func ackErrText(p *project.Project, unit string, err error) string {
+	root := p.Root()
 	switch {
 	case errors.Is(err, project.ErrConfigBroken), errors.Is(err, project.ErrConfigDegraded):
-		return errText(root, err, "ack")
+		return errText(p, err, "ack")
 	case errors.Is(err, units.ErrUnknownUnit):
 		return "unknown unit " + shownName(unit)
 	}
@@ -401,39 +399,33 @@ func ackErrText(root, unit string, err error) string {
 		}
 		return fmt.Sprintf("no context/%s.md: create docs or run auto-context ack --exclude %s", unit, unit)
 	}
-	return name + ": " + errText(root, err, "ack "+unit)
+	return name + ": " + errText(p, err, "ack "+unit)
 }
 
 // loadRepo finds the root and opens the project for CLI commands, returning
-// the warnings about it; none quotes repository text. The hash cache is not
-// loaded: only status and ack need it (see cacheWarning).
+// the warnings about it (project.DiagnoseOpen); none quotes repository text.
+// The hash cache is not loaded: only status and ack need it (see
+// cacheWarning).
 func loadRepo(ctx context.Context, cwd string) (*project.Project, []string, error) {
 	p, err := project.Open(ctx, cliRoot(cwd))
 	if err != nil {
 		return nil, nil, err
 	}
+	r := cliRender(p)
 	var warns []string
-	if p.StateDirErr() != nil {
-		warns = append(warns, fsutil.StateDir+" leads outside the repository, so the hooks are disabled")
+	for _, pr := range p.DiagnoseOpen() {
+		if pr.Severity == project.SeverityWarning {
+			warns = append(warns, pr.Text(project.CLI, r))
+		}
 	}
-	switch {
-	case p.ConfigErr() != nil:
-		warns = append(warns, fmt.Sprintf("config: %s cannot be used: %s (using defaults; docs tracking is paused until it is fixed)", config.FileName, config.Describe(p.ConfigErr())))
-	case p.ConfigProblems() != nil:
-		warns = append(warns, fmt.Sprintf("%v (the other settings apply)", p.ConfigProblems()))
-	}
-	if ignored, err := p.ConfigIgnored(); err != nil {
-		warns = append(warns, fmt.Sprintf("git could not tell whether %s is ignored (%s)", config.FileName, gitx.Brief(err)))
-	} else if ignored {
-		warns = append(warns, config.FileName+" is ignored by git, so the settings are not committed")
-	}
-	return p, append(warns, p.Warnings()...), nil
+	return p, warns, nil
 }
 
-// openErr reports a project that could not be opened.
-func openErr(w io.Writer, cwd string, err error) int {
+// openErr reports a project that could not be opened: a fixed category,
+// "interrupted" after Ctrl-C.
+func openErr(ctx context.Context, w io.Writer, cwd string, err error) int {
 	root := cliRoot(cwd)
-	fmt.Fprintf(w, "error: the project cannot be opened: %s\n", fsutil.Category(err)+detail(root, err, "open"))
+	fmt.Fprintf(w, "error: the project cannot be opened: %s\n", project.CauseOfCtx(ctx, err).Text(project.CLI)+detail(root, err, "open"))
 	return exitError
 }
 
@@ -446,7 +438,8 @@ func printWarnings(w io.Writer, warns []string) {
 // cacheWarning explains a hash cache that could not be used (loading it).
 func cacheWarning(p *project.Project) []string {
 	if err := p.CacheErr(); err != nil {
-		return []string{"the hash cache cannot be used, so the files are hashed again: " + errText(p.Root(), err, "hash cache")}
+		pr := project.Problem{Code: project.ProblemCacheUnusable, Err: err}
+		return []string{pr.Text(project.CLI, cliRender(p))}
 	}
 	return nil
 }
@@ -455,7 +448,8 @@ func cacheWarning(p *project.Project) []string {
 // warning on failure.
 func saveCache(p *project.Project) []string {
 	if err := p.SaveCache(); err != nil {
-		return []string{"the hash cache cannot be saved: " + errText(p.Root(), err, "saving the hash cache")}
+		pr := project.Problem{Code: project.ProblemCacheSave, Err: err}
+		return []string{pr.Text(project.CLI, cliRender(p))}
 	}
 	return nil
 }
@@ -465,7 +459,7 @@ func indexWarning(p *project.Project, err error) []string {
 	if err == nil {
 		return nil
 	}
-	return []string{"root index: " + errText(p.Root(), err, "root index")}
+	return []string{"root index: " + errText(p, err, "root index")}
 }
 
 func normUnit(arg string) string {
@@ -491,7 +485,7 @@ func runAck(ctx context.Context, args []string, stdout, stderr io.Writer, cwd st
 	}
 	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
-		return openErr(stderr, cwd, err)
+		return openErr(ctx, stderr, cwd, err)
 	}
 	printWarnings(stderr, warns)
 	if p.ConfigBroken() {
@@ -510,7 +504,7 @@ func runAck(ctx context.Context, args []string, stdout, stderr io.Writer, cwd st
 	for _, a := range args {
 		u := normUnit(a)
 		if err := p.Ack(u, time.Now()); err != nil {
-			fmt.Fprintln(stderr, ackErrText(p.Root(), u, err))
+			fmt.Fprintln(stderr, ackErrText(p, u, err))
 			code = exitError
 		} else {
 			acked++
@@ -540,7 +534,7 @@ func runExclude(p *project.Project, dir string, stderr io.Writer) int {
 		if strings.Contains(err.Error(), "names are case-sensitive") {
 			fmt.Fprintf(stderr, "no directory %s (names are case-sensitive)\n", shownName(dir))
 		} else {
-			fmt.Fprintf(stderr, "%s cannot be excluded: %s\n", shownName(dir), errText(p.Root(), err, "ack --exclude"))
+			fmt.Fprintf(stderr, "%s cannot be excluded: %s\n", shownName(dir), errText(p, err, "ack --exclude"))
 		}
 		return exitError
 	}
@@ -555,7 +549,7 @@ func runUpgrade(p *project.Project, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "upgraded %d unit(s) to hash scheme v2\n", len(acked))
 	code := exitOK
 	for _, u := range slices.Sorted(maps.Keys(failed)) {
-		fmt.Fprintln(stderr, ackErrText(p.Root(), u, failed[u]))
+		fmt.Fprintln(stderr, ackErrText(p, u, failed[u]))
 		code = exitError
 	}
 	printWarnings(stderr, append(cacheWarning(p), saveCache(p)...))
@@ -600,28 +594,18 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, cwd
 			return exitUsage
 		}
 	}
-	// Text goes to stdout, warnings included: status is a report, and the
-	// sync skill's `!` injection may not show stderr. JSON output is only
-	// the document, so an open error goes to stderr then.
-	p, warns, err := loadRepo(ctx, cwd)
+	// Text goes to stdout, warnings included: status is a report, read as
+	// a whole. JSON output is only the document, so an open error goes to
+	// stderr then.
+	p, err := project.Open(ctx, cliRoot(cwd))
 	if err != nil {
 		if asJSON {
-			return openErr(stderr, cwd, err)
+			return openErr(ctx, stderr, cwd, err)
 		}
-		return openErr(stdout, cwd, err)
+		return openErr(ctx, stdout, cwd, err)
 	}
 	root := p.Root()
-	r := statusJSON{FormatVersion: formatVersion, Paused: p.ConfigBroken(), Units: []statusUnitJSON{}, Warnings: warns}
-	if r.Warnings == nil {
-		r.Warnings = []string{}
-	}
-	var notes []string
-	switch {
-	case project.ActivationRefused(root):
-		notes = append(notes, "auto-context is not enabled here: .auto-context/config.yaml or context/_root.md exists but is not used (it links outside the repository, is not a regular file, or cannot be inspected)")
-	case !project.Active(root):
-		notes = append(notes, "auto-context is not enabled here (no .auto-context/config.yaml or context/_root.md); run /auto-context:init to enable it")
-	}
+	r := statusJSON{FormatVersion: formatVersion, Paused: p.ConfigBroken(), Units: []statusUnitJSON{}, Orphans: orphansJSON{Shown: []string{}}}
 	outdated := false
 	if !r.Paused {
 		for _, s := range p.Statuses() {
@@ -632,27 +616,15 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, cwd
 			}
 			r.Units = append(r.Units, statusUnitJSON{Unit: s.Unit, State: string(s.State), Doc: s.ContextPath, Note: string(s.Note), Detail: s.Detail})
 		}
-		r.Warnings = append(r.Warnings, cacheWarning(p)...)
-		r.Warnings = append(r.Warnings, saveCache(p)...)
 		shown, hidden := project.ShowNames(p.Orphans())
 		r.Orphans = orphansJSON{Shown: append([]string{}, shown...), Hidden: hidden}
-		name := p.IndexFile()
-		switch err := rootindex.Check(root, name); {
-		case errors.Is(err, rootindex.ErrBrokenMarkers):
-			r.Warnings = append(r.Warnings, fmt.Sprintf("the auto-context:units markers in the root %s are unbalanced or repeated, so the units index is not updated", name))
-		case err != nil:
-			r.Warnings = append(r.Warnings, fmt.Sprintf("the root %s cannot be used for the units index: %s", name, errText(root, err, "root index")))
-		}
-		if lang := p.Config().Language; lang != "" {
-			notes = append(notes, fmt.Sprintf("write unit docs in language %s (language in %s)", lang, config.FileName))
-		}
-	} else {
-		r.Orphans.Shown = []string{}
 	}
-	logNotes, logWarns := logState(root)
-	r.Notes = append(append([]string{}, notes...), logNotes...)
-	r.Warnings = append(r.Warnings, logWarns...)
-
+	diag := p.Diagnose()
+	var saved []string
+	if !r.Paused {
+		saved = saveCache(p) // after the statuses hashed
+	}
+	r.Warnings, r.Notes = renderStatusProblems(p, diag, saved)
 	if asJSON {
 		data, _ := json.Marshal(r)
 		fmt.Fprintf(stdout, "%s\n", data)
@@ -670,6 +642,58 @@ func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, cwd
 		return exitStale
 	}
 	return exitOK
+}
+
+// renderStatusProblems renders the problems of Diagnose for status, in the
+// report's order: warnings (project setup, the hash cache, saved, the
+// warnings of saving it, the root index, the log) and notes (activation, the
+// docs language, the log). The log is checked last, again
+// (Project.LogProblems): its count includes the details this report has
+// just logged; a log that cannot be read is all status says of the log.
+func renderStatusProblems(p *project.Project, diag []project.Problem, saved []string) (warns, notes []string) {
+	r := cliRender(p)
+	var cache, index []string
+	for _, pr := range diag {
+		switch pr.Code {
+		case project.ProblemLogUnreadable, project.ProblemLogUnwritable, project.ProblemLogErrors:
+			continue // checked again below
+		case project.ProblemCacheUnusable:
+			cache = append(cache, pr.Text(project.CLI, r))
+		case project.ProblemIndexMarkers, project.ProblemIndexUnusable:
+			index = append(index, pr.Text(project.CLI, r))
+		default:
+			if pr.Severity == project.SeverityNote {
+				notes = append(notes, pr.Text(project.CLI, r))
+			} else {
+				warns = append(warns, pr.Text(project.CLI, r))
+			}
+		}
+	}
+	warns = append(append(warns, cache...), saved...)
+	if !p.ConfigBroken() {
+		if lang := p.Config().Language; lang != "" {
+			notes = append(notes, fmt.Sprintf("write unit docs in language %s (language in %s)", lang, config.FileName))
+		}
+	}
+	warns = append(warns, index...)
+	logs := p.LogProblems()
+	if slices.ContainsFunc(logs, func(pr project.Problem) bool { return pr.Code == project.ProblemLogUnreadable }) {
+		logs = slices.DeleteFunc(logs, func(pr project.Problem) bool { return pr.Code != project.ProblemLogUnreadable })
+	}
+	for _, pr := range logs {
+		if pr.Severity == project.SeverityNote {
+			notes = append(notes, pr.Text(project.CLI, r))
+		} else {
+			warns = append(warns, pr.Text(project.CLI, r))
+		}
+	}
+	if warns == nil {
+		warns = []string{}
+	}
+	if notes == nil {
+		notes = []string{}
+	}
+	return warns, notes
 }
 
 // printStatus renders the status report as text.
@@ -703,26 +727,6 @@ func printStatus(w io.Writer, r statusJSON) {
 	}
 }
 
-// logState surfaces hook errors, which are otherwise only in the log (log
-// and log.1). It gives their number only: the file may come from the repo
-// itself, so its text is never echoed into Claude's context.
-func logState(root string) (notes, warns []string) {
-	entries, err := logx.Entries(root)
-	if err != nil {
-		return []string{".auto-context/log could not be read: " + fsutil.Category(err)}, nil
-	}
-	if n := len(entries); n > 0 {
-		notes = append(notes, fmt.Sprintf("%d error(s) in .auto-context/log (ask the user to check it; do not read it yourself; delete it and log.1 once dealt with)", n))
-	}
-	if !project.Active(root) {
-		return notes, nil
-	}
-	if err := logx.Writable(root); err != nil {
-		warns = append(warns, ".auto-context/log cannot be written, so hook errors are lost: "+fsutil.Category(err))
-	}
-	return notes, warns
-}
-
 // unitsJSON is `units --json`, format_version 1.
 type unitsJSON struct {
 	FormatVersion int            `json:"format_version"`
@@ -743,7 +747,7 @@ func runUnits(ctx context.Context, args []string, stdout, stderr io.Writer, cwd 
 	}
 	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
-		return openErr(stderr, cwd, err)
+		return openErr(ctx, stderr, cwd, err)
 	}
 	printWarnings(stderr, warns)
 	if p.ConfigBroken() {

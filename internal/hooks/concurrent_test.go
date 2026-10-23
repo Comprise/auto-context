@@ -27,7 +27,7 @@ var concurrentUnits = []string{"svc", "lib"}
 
 // Parallel sessions in one repo are normal: several processes run a turn at
 // once, each editing the same docs and auto-acking them. Afterwards every doc
-// parses and is up to date, the cache is valid JSON, the root index has one
+// parses and is up to date, the cache file has the v5 header, the root index has one
 // marker pair and no temporary file is left (T-M4).
 func TestConcurrentStopHooks(t *testing.T) {
 	env := newRepo(t, true)
