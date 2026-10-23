@@ -667,7 +667,7 @@ func compareWithGit(t *testing.T, files []string, ignores map[string]string) []s
 func TestIgnorePOSIXClasses(t *testing.T) {
 	var files []string
 	for _, d := range []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7"} {
-		for _, f := range []string{"a1.go", "ab.go", "aB.go", "a-.go", "a_.go", "af.go", "ag.go", "1a.go", "Zz.go", "keep.md.go"} {
+		for _, f := range []string{"a1.go", "ab.go", "aQ.go", "a-.go", "a_.go", "af.go", "ag.go", "1a.go", "Zz.go", "keep.md.go"} {
 			files = append(files, d+"/"+f)
 		}
 	}
@@ -690,9 +690,9 @@ func TestIgnorePOSIXClasses(t *testing.T) {
 		{"p1/a1.go", false}, {"p1/ab.go", true},
 		{"p2/a1.go", true}, {"p2/ab.go", false}, {"p2/a-.go", false},
 		{"p3/1a.go", true}, {"p3/ab.go", false}, {"p3/Zz.go", false},
-		{"p4/aB.go", false}, {"p4/a_.go", false}, {"p4/a-.go", false}, {"p4/ab.go", true},
+		{"p4/aQ.go", false}, {"p4/a_.go", false}, {"p4/a-.go", false}, {"p4/ab.go", true},
 		{"p5/a1.go", true}, {"p5/ab.go", true},
-		{"p6/ab.go", false}, {"p6/aB.go", true},
+		{"p6/ab.go", false}, {"p6/aQ.go", true},
 		{"p7/a1.go", false}, {"p7/af.go", false}, {"p7/ag.go", true}, {"p7/Zz.go", false},
 	} {
 		if slices.Contains(got, c.f) != c.want {
