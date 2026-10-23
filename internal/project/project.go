@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
+	"auto-context/internal/frontmatter"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/gitx"
 	"auto-context/internal/hashing"
@@ -29,22 +32,21 @@ func markerPaths() []string {
 // regular file inside the repo. A bare context/ directory is too common a name
 // to count. Inactive projects are never written to.
 func Active(root string) bool {
-	for _, m := range markerPaths() {
-		p, err := fsutil.Resolve(root, fsutil.Abs(root, m))
-		if err != nil {
-			continue
-		}
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return true
-		}
-	}
-	return false
+	active, _ := markerState(root)
+	return active
 }
 
 // ActivationRefused reports a marker (.auto-context/config.yaml or context/_root.md)
 // that exists but is not used: it links outside the repo or into .git, is not
 // a regular file, or cannot be inspected, so the plugin stays off.
 func ActivationRefused(root string) bool {
+	_, refused := markerState(root)
+	return refused
+}
+
+// markerState inspects the markers once: active when one is a regular file
+// inside the repo, refused when one exists but is not usable.
+func markerState(root string) (active, refused bool) {
 	for _, m := range markerPaths() {
 		full := fsutil.Abs(root, m)
 		if _, err := os.Lstat(full); err != nil {
@@ -52,17 +54,21 @@ func ActivationRefused(root string) bool {
 		}
 		p, err := fsutil.Resolve(root, full)
 		if err != nil {
-			return true
+			refused = true
+			continue
 		}
-		if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() {
-			return true
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			active = true
+		} else {
+			refused = true
 		}
 	}
-	return false
+	return active, refused
 }
 
 // Project is an opened repository, read-only after Open (but for the lazily
-// loaded cache): the tree, cache and config belong together.
+// loaded cache, and Exclude, which reloads config and tree in place): the
+// tree, cache and config belong together.
 type Project struct {
 	root string
 	cfg  config.Config
@@ -111,6 +117,11 @@ func Open(root string) (*Project, error) {
 // while the config cannot be read or parsed.
 var ErrConfigBroken = errors.New(config.FileName + " cannot be read or parsed; fix it first")
 
+// ErrConfigDegraded refuses an ack while a setting that decides the units
+// (include, exclude, track, min_files, code_extensions, module_markers) was
+// dropped or reset: the hash would be over units the user did not mean.
+var ErrConfigDegraded = errors.New(config.FileName + " has invalid settings that decide the units; fix it first")
+
 // IndexFile is the name of the per-unit index file from the config.
 func (p *Project) IndexFile() string { return p.cfg.IndexFile }
 
@@ -129,8 +140,7 @@ func (p *Project) ConfigIgnored() (bool, error) {
 	switch {
 	case err == nil:
 		return true, nil
-	case gitx.Code(err) == 1, gitx.NotRun(err),
-		gitx.Code(err) == 128 && strings.Contains(err.Error(), "not a git repository"):
+	case gitx.Code(err) == 1, gitx.NotRun(err), gitx.NotRepo(err):
 		return false, nil
 	}
 	return false, err
@@ -201,6 +211,9 @@ func ShowNames(paths []string) (shown []string, hidden int) {
 // Prewarm hashes the changed files among files in parallel (see
 // hashing.Cache.Prewarm), saving the cache along the way.
 func (p *Project) Prewarm(files []string) {
+	if len(files) == 0 {
+		return // nothing to hash: do not load the cache
+	}
 	p.Cache().Prewarm(p.root, files, func() { _ = p.SaveCache() }, cacheSaveEvery)
 }
 
@@ -211,14 +224,22 @@ const cacheSaveEvery = 5 * time.Second
 // Statuses computes the state of every unit. The cache is updated, and saved
 // along the way when hashing takes long.
 func (p *Project) Statuses() []docstate.UnitStatus {
-	c := p.Cache()
+	// Hash what changed in parallel first (the caller's final SaveCache
+	// reports save errors), only for the units whose docs record a hash: the
+	// others are missing or not acked and need none.
 	var files []string
 	for _, u := range p.tree.Units() {
-		files = append(files, p.tree.Files(u.Path)...)
+		meta, _, err := frontmatter.Read(p.root, fsutil.Abs(p.root, units.ContextPath(u.Path)))
+		switch {
+		case err != nil || meta.SourceHash == "":
+		case strings.HasPrefix(meta.SourceHash, docstate.HashPrefix):
+			files = append(files, p.tree.HashFiles(u.Path)...)
+		default:
+			files = append(files, p.tree.Files(u.Path)...) // the old scheme
+		}
 	}
-	// Hash what changed in parallel first (the caller's final SaveCache
-	// reports save errors).
 	p.Prewarm(files)
+	c := p.Cache()
 	var out []docstate.UnitStatus
 	for _, u := range p.tree.Units() {
 		out = append(out, docstate.StatusOf(p.root, p.tree, c, u.Path))
@@ -233,10 +254,38 @@ func (p *Project) UpToDate(unit string) bool {
 
 // Ack records the current source hash of unit in its context doc.
 func (p *Project) Ack(unit string, now time.Time) error {
-	if p.ConfigBroken() {
-		return ErrConfigBroken
+	_, err := p.ackIfNeeded(unit, now)
+	return err
+}
+
+// ackIfNeeded acks unit unless the config is broken or degraded, and tells
+// whether the doc was rewritten.
+func (p *Project) ackIfNeeded(unit string, now time.Time) (bool, error) {
+	switch {
+	case p.ConfigBroken():
+		return false, ErrConfigBroken
+	case p.cfg.DiscoveryReset:
+		return false, ErrConfigDegraded
 	}
-	return docstate.Ack(p.root, p.tree, p.Cache(), unit, now, p.headCommit)
+	return docstate.AckIfNeeded(p.root, p.tree, p.Cache(), unit, now, p.headCommit)
+}
+
+// Upgrade acks the units whose docs are up to date by the old hash scheme
+// (docstate.NoteOldScheme), rewriting their hash in scheme v2. It returns the
+// units acked and per unit why its ack failed.
+func (p *Project) Upgrade(now time.Time) (acked []string, failed map[string]error) {
+	failed = map[string]error{}
+	for _, st := range p.Statuses() {
+		if !docstate.OldScheme(st) {
+			continue
+		}
+		if _, err := p.ackIfNeeded(st.Unit, now); err != nil {
+			failed[st.Unit] = err
+			continue
+		}
+		acked = append(acked, st.Unit)
+	}
+	return acked, failed
 }
 
 // headCommit returns HEAD's full commit id, or "" when git fails or there are
@@ -264,7 +313,7 @@ func (p *Project) AckTouched(touched []string, now time.Time) (acked []string, f
 		if kind, _, _ := docstate.Doc(p.root, u); !p.tree.IsUnit(u) || kind != docstate.DocPresent {
 			continue
 		}
-		if err := p.Ack(u, now); err != nil {
+		if _, err := p.ackIfNeeded(u, now); err != nil {
 			failed[u] = err
 			continue
 		}
@@ -278,29 +327,47 @@ func (p *Project) AckTouched(touched []string, now time.Time) (acked []string, f
 
 // UpdateIndex rewrites the root index file units index from sts, which must be
 // the statuses of every unit (a partial list drops units from the index), and
-// reports whether the file changed. An inactive project gets nothing.
+// reports whether the file changed. An inactive project gets nothing; a
+// broken or degraded config is refused (ErrConfigBroken, ErrConfigDegraded).
 func (p *Project) UpdateIndex(sts []docstate.UnitStatus) (bool, error) {
-	if p.ConfigBroken() {
-		return false, ErrConfigBroken
-	}
-	if !Active(p.root) {
-		return false, nil
-	}
 	entries := make([]rootindex.Entry, 0, len(sts))
 	for _, s := range sts {
 		entries = append(entries, rootindex.Entry{Unit: s.Unit, Summary: s.Summary})
 	}
+	return p.writeIndex(entries)
+}
+
+// writeIndex writes entries into the root index file, unless the config is
+// broken or degraded (the committed index would list units the user did not
+// mean) or the project inactive.
+func (p *Project) writeIndex(entries []rootindex.Entry) (bool, error) {
+	switch {
+	case p.ConfigBroken():
+		return false, ErrConfigBroken
+	case p.cfg.DiscoveryReset:
+		return false, ErrConfigDegraded
+	}
+	if !Active(p.root) {
+		return false, nil
+	}
 	return rootindex.Update(p.root, p.IndexFile(), entries)
 }
 
-// RefreshIndex recomputes the statuses and rewrites the root index.
+// RefreshIndex rewrites the root index from the summaries of the docs
+// (docstate.SummaryOf), without hashing any sources.
 func (p *Project) RefreshIndex() error {
-	_, err := p.UpdateIndex(p.Statuses())
+	us := p.tree.Units()
+	entries := make([]rootindex.Entry, 0, len(us))
+	for _, u := range us {
+		entries = append(entries, rootindex.Entry{Unit: u.Path, Summary: docstate.SummaryOf(p.root, u.Path)})
+	}
+	_, err := p.writeIndex(entries)
 	return err
 }
 
-// Exclude adds dir (an existing directory, not the root unit) to the config's
-// exclude list.
+// Exclude adds dir (an existing directory, not the root unit, named exactly
+// as on disk) to the config's exclude list as a literal pattern, then reloads
+// the config and the unit tree in place.
 func (p *Project) Exclude(dir string) error {
 	if dir == units.RootUnit {
 		return fmt.Errorf("the root unit cannot be excluded; create context/_root.md instead")
@@ -309,16 +376,67 @@ func (p *Project) Exclude(dir string) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", dir, err)
 	}
+	if err := p.exactName(dir); err != nil {
+		return err
+	}
 	if fi, err := os.Stat(full); err != nil || !fi.IsDir() {
 		if err == nil || errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("no directory %s in %s", dir, p.root)
 		}
 		return err
 	}
-	if err := config.ValidatePattern(dir); err != nil {
+	pattern := config.EscapePattern(dir)
+	if err := config.ValidatePattern(pattern); err != nil {
 		return err
 	}
-	return config.AddExclude(p.root, dir)
+	if err := config.AddExclude(p.root, pattern); err != nil {
+		return err
+	}
+	return p.reload()
+}
+
+// exactName checks that every segment of dir is spelled as its parent
+// directory lists it: on a case-insensitive file system a wrong case would
+// still stat, but the pattern would never match.
+func (p *Project) exactName(dir string) error {
+	cur := p.root
+	for seg := range strings.SplitSeq(dir, "/") {
+		entries, err := os.ReadDir(cur)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				return fmt.Errorf("no directory %s in %s", dir, p.root)
+			}
+			return err
+		}
+		exact, folded := false, false
+		for _, e := range entries {
+			exact = exact || e.Name() == seg
+			folded = folded || strings.EqualFold(e.Name(), seg)
+		}
+		switch {
+		case exact:
+		case folded:
+			return fmt.Errorf("no directory %s (names are case-sensitive)", dir)
+		default:
+			return fmt.Errorf("no directory %s in %s", dir, p.root)
+		}
+		cur = filepath.Join(cur, seg)
+	}
+	return nil
+}
+
+// reload rereads the config and the unit tree after Exclude changed the
+// config; a loaded cache is kept and reads the new tree's stats.
+func (p *Project) reload() error {
+	q, err := Open(p.root)
+	if err != nil {
+		return err
+	}
+	p.cfg, p.tree, p.cfgProblems, p.cfgErr = q.cfg, q.tree, q.cfgProblems, q.cfgErr
+	if p.cache != nil {
+		p.cache.UseStats(p.tree.Stat)
+	}
+	return nil
 }
 
 // SaveCache drops entries of untracked files and writes the hash cache, only
@@ -332,6 +450,17 @@ func (p *Project) SaveCache() error {
 	}
 	if p.cache == nil {
 		return nil // never loaded: nothing changed
+	}
+	// A project enabled by context/_root.md alone, or one from v1.0.0, may
+	// lack the state dir or its .gitignore: create them, so the cache never
+	// shows as untracked.
+	if err := fsutil.EnsureStateDir(p.root); err != nil {
+		return err
+	}
+	if !p.cache.Dirty() {
+		if _, err := os.Lstat(fsutil.StatePath(p.root, "cache.json")); err == nil {
+			return nil // unchanged: skip the O(files) prune
+		}
 	}
 	p.cache.Prune(p.tree.Tracked())
 	return p.cache.Save(p.root)

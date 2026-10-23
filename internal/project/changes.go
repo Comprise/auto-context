@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +25,9 @@ const maxChangesOutput = 64 << 10
 // commits since its `updated` date (the whole ack day included; by commit
 // date, so an older commit merged later is missed, and the title says so)
 // and, when every git filter is trusted, the uncommitted diff stat (if there
-// is a HEAD) and `git status` (untracked and modified files). It runs fixed git invocations itself, so
+// is a HEAD) and `git status` (untracked and modified files). Git whose work
+// tree or git dir lies outside the project (gitx.WorkTreeOK) is not used, and
+// git errors are written as gitx.Brief only. It runs fixed git invocations itself, so
 // the sync skill needs no git permissions (a pre-approved `git log *` would
 // also allow `--output=<any file>`). Paths are relative to the root, which may
 // be below the git top level. Git failures are written as notes, not returned.
@@ -66,8 +69,22 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	ctx := units.ContextPath(unit)
 	ack := ackPoint(root, ctx)
 
-	if _, err := gitx.Run(root, 0, "rev-parse", "--is-inside-work-tree"); err != nil {
-		fmt.Fprintf(w, "(git unavailable: %s; read the code against %s)\n", textx.Err(err), ctx)
+	// Git errors are written by gitx.Brief only: git's stderr may quote
+	// values from the repo's config.
+	switch ok, err := gitx.WorkTreeOK(root); {
+	case gitx.NotRun(err):
+		fmt.Fprintf(w, "(git unavailable: git could not be run; read the code against %s)\n", ctx)
+		return nil
+	case gitx.NotRepo(err):
+		fmt.Fprintf(w, "(git unavailable: not a git repository; read the code against %s)\n", ctx)
+		return nil
+	case err != nil:
+		fmt.Fprintf(w, "(git failed: %s; read the code against %s)\n", gitx.Brief(err), ctx)
+		return nil
+	case !ok:
+		// core.worktree or a .git file sends git elsewhere: its file names
+		// and commits are not this project's.
+		fmt.Fprintf(w, "(git unavailable: the work tree or git dir lies outside the project; read the code against %s)\n", ctx)
 		return nil
 	}
 	// `rev-parse --verify -q` exits 1 for a missing HEAD; anything else is a
@@ -75,40 +92,20 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	_, headErr := gitx.Run(root, 0, "rev-parse", "--verify", "-q", "HEAD")
 	hasCommits := headErr == nil
 	if headErr != nil && gitx.Code(headErr) != 1 {
-		fmt.Fprintf(w, "(git failed: %s; read the code against %s)\n", textx.Err(headErr), ctx)
+		fmt.Fprintf(w, "(git failed: %s; read the code against %s)\n", gitx.Brief(headErr), ctx)
 		return nil
 	}
-	type section struct {
-		title string
-		args  []string
-	}
 	var sections []section
-	logArgs := []string{"log", "--relative", "--no-ext-diff", "--no-textconv", "--stat", "--date=short", "--format=%h %ad %s", "-n", "50"}
-	byCommit := false
-	dateNote := "no acked commit recorded"
-	if hasCommits && ack.commit != "" {
-		// The id is checked hex, so it cannot be read as an option.
-		_, err := gitx.Run(root, 0, "merge-base", "--is-ancestor", ack.commit, "HEAD")
-		byCommit = err == nil
-		dateNote = "the acked commit is not in HEAD's history"
-		if err != nil && gitx.Code(err) != 1 {
-			// Exit 1 is "not an ancestor"; anything else (an unknown commit, a
-			// shallow clone without it, a timeout) means it could not be checked.
-			dateNote = "the acked commit is not in this clone or could not be checked"
-		}
-	}
-	switch {
-	case !hasCommits:
+	if !hasCommits {
 		fmt.Fprintln(w, "(the repository has no commits yet)")
-	case byCommit:
-		sections = append(sections, section{"## commits touching " + unit + " since the acked commit " + ack.commit[:12],
-			append(logArgs, ack.commit+"..HEAD")})
-	case ack.since != "":
-		sections = append(sections, section{"## commits touching " + unit + " since " + ack.since + " (docs last acked; " + dateNote +
-			", so commits are picked by commit date and older commits merged later are missed; the whole day is included)",
-			append(logArgs, "--since="+ack.since)})
-	default:
-		sections = append(sections, section{"## last commits touching " + unit + " (" + ack.why + ": compare the code with " + ctx + ")", logArgs})
+	} else {
+		sections = append(sections, logSection(unit, ctx, ack, func() (bool, bool) {
+			// The id is checked hex, so it cannot be read as an option. Exit 1
+			// is "not an ancestor"; anything else (an unknown commit, a
+			// shallow clone without it, a timeout) means it could not be checked.
+			_, err := gitx.Run(root, 0, "merge-base", "--is-ancestor", ack.commit, "HEAD")
+			return err == nil, err == nil || gitx.Code(err) == 1
+		}))
 	}
 	// Comparing with the work tree runs clean filters, so do it only when every
 	// filter git would use comes from a trusted scope (see trustedFilters).
@@ -127,7 +124,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		res, err := gitx.Run(root, maxChangesOutput, append(sec.args, "--", spec)...)
 		switch {
 		case err != nil:
-			fmt.Fprintf(w, "(git failed: %s)\n", textx.Err(err))
+			fmt.Fprintf(w, "(git failed: %s)\n", gitx.Brief(err))
 			continue
 		case len(res.Out) == 0:
 			fmt.Fprintln(w, "(none)")
@@ -141,6 +138,41 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 		fmt.Fprintln(w, "(for _root this also lists changes inside other units; ignore those)")
 	}
 	return nil
+}
+
+// section is one titled git invocation of the changes report.
+type section struct {
+	title string
+	args  []string
+}
+
+// logArgs list up to 50 commits, newest first, with their stat.
+var logArgs = []string{"log", "--relative", "--no-ext-diff", "--no-textconv", "--stat", "--date=short", "--format=%h %ad %s", "-n", "50"}
+
+// logSection picks the commits section of a repository with commits: after
+// the acked commit when it is in HEAD's history, else since the ack date
+// (saying why), else the last commits. ancestor is called only with a
+// recorded commit and reports whether it is an ancestor of HEAD and whether
+// that could be checked.
+func logSection(unit, ctx string, a ack, ancestor func() (is, checked bool)) section {
+	dateNote := "no acked commit recorded"
+	if a.commit != "" {
+		is, checked := ancestor()
+		if is {
+			return section{"## commits touching " + unit + " since the acked commit " + a.commit[:12],
+				slices.Concat(logArgs, []string{a.commit + "..HEAD"})}
+		}
+		dateNote = "the acked commit is not in HEAD's history"
+		if !checked {
+			dateNote = "the acked commit is not in this clone or could not be checked"
+		}
+	}
+	if a.since != "" {
+		return section{"## commits touching " + unit + " since " + a.since + " (docs last acked; " + dateNote +
+			", so commits are picked by commit date and older commits merged later are missed; the whole day is included)",
+			slices.Concat(logArgs, []string{"--since=" + a.since})}
+	}
+	return section{"## last commits touching " + unit + " (" + a.why + ": compare the code with " + ctx + ")", slices.Clone(logArgs)}
 }
 
 // ack is the last ack of a unit from its frontmatter: the acked commit (""
@@ -205,7 +237,7 @@ func trustedFilters(root string) (bool, string) {
 		return true, "" // no filter anywhere
 	case 0:
 	default:
-		return false, "the git filter config could not be checked (" + textx.Err(err) + ")"
+		return false, "the git filter config could not be checked (git " + gitx.Brief(err) + ")"
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(res.Out)), "\n") {
 		scope, _, _ := strings.Cut(line, "\t")
