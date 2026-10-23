@@ -71,3 +71,34 @@ func TestStopReportsAckFailureAfterNotice(t *testing.T) {
 		t.Errorf("reported twice: %s", out)
 	}
 }
+
+// A failed auto-ack is reported with the command to run and not retried on
+// later Stops until the doc changes again.
+func TestStopFailedAckNotRetriedUntilDocChanges(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permissions")
+	}
+	calls := countAckTouched(t)
+	env := turn(t)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	feedback(t, stop(t, env))
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nUpdated.\n")
+	ctx := filepath.Join(env.Root, "context")
+	if err := os.Chmod(ctx, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(ctx, 0o755)
+	if r := feedback(t, stop(t, env)); !strings.Contains(r, "auto-ack of svc failed") || !strings.Contains(r, "run `auto-context ack svc`") {
+		t.Errorf("reason = %q", r)
+	}
+	if out := stop(t, env); out != nil || *calls != 1 {
+		t.Errorf("retried: out=%s calls=%d, want 1", out, *calls)
+	}
+	if err := os.Chmod(ctx, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nUpdated again.\n")
+	if out := stop(t, env); out != nil || *calls != 2 {
+		t.Errorf("after the doc changed: out=%s calls=%d, want 2", out, *calls)
+	}
+}

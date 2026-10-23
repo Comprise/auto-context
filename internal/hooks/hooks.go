@@ -89,6 +89,29 @@ func load(env Env) (*project.Project, error) {
 	return project.Open(env.Root)
 }
 
+// hookOutput is the answer of every hook; unset fields are left out, so each
+// hook writes only its own keys.
+type hookOutput struct {
+	SystemMessage string        `json:"systemMessage,omitempty"`
+	Decision      string        `json:"decision,omitempty"` // Codex Stop: "block"
+	Reason        string        `json:"reason,omitempty"`   // Codex Stop
+	Hook          *hookSpecific `json:"hookSpecificOutput,omitempty"`
+}
+
+// hookSpecific is hookSpecificOutput.
+type hookSpecific struct {
+	EventName                string `json:"hookEventName"`
+	AdditionalContext        string `json:"additionalContext,omitempty"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+	// Decision is PermissionRequest's {"behavior": ...}.
+	Decision *permissionDecision `json:"decision,omitempty"`
+}
+
+type permissionDecision struct {
+	Behavior string `json:"behavior"`
+}
+
 // encodeJSON marshals v without HTML escaping and without a trailing newline.
 func encodeJSON(v any) ([]byte, error) {
 	var buf bytes.Buffer

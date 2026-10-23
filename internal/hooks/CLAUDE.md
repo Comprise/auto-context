@@ -9,6 +9,7 @@
 - `pre_tool_use.go` — авто-одобрение Bash-вызовов собственного CLI
 - `permission_request.go` — то же авто-одобрение для Codex (PermissionRequest)
 - `session_end.go` — удаление файлов сессии
-- `testdata/session_start.golden.json` — эталон вывода SessionStart
+- `testdata/*.golden.json` — эталоны вывода SessionStart и Stop (Claude и Codex)
+- `concurrent_test.go` — параллельные Stop из нескольких процессов, бенчмарк Stop
 
 Подробно: context/internal/hooks.md

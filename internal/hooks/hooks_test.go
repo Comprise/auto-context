@@ -3,12 +3,17 @@ package hooks
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"auto-context/internal/docstate"
+	"auto-context/internal/frontmatter"
+	"auto-context/internal/hashing"
 	"auto-context/internal/logx"
 	"auto-context/internal/project"
 	"auto-context/internal/session"
@@ -246,11 +251,17 @@ func TestActive(t *testing.T) {
 	// A marker linking outside the repo does not count.
 	linked, outside := t.TempDir(), t.TempDir()
 	testutil.WriteFile(t, outside, "conf.yaml", "min_files: 1\n")
-	if err := os.Symlink(filepath.Join(outside, "conf.yaml"), filepath.Join(linked, ".auto-context/config.yaml")); err != nil {
-		t.Skip("symlinks unsupported:", err)
-	}
-	if project.Active(linked) {
+	testutil.Symlink(t, filepath.Join(outside, "conf.yaml"), filepath.Join(linked, ".auto-context/config.yaml"))
+	if project.Active(linked) || !project.ActivationRefused(linked) {
 		t.Error("marker linked outside activates")
+	}
+	// A marker that is no regular file does not count either.
+	notFile := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(notFile, "context", "_root.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if project.Active(notFile) || !project.ActivationRefused(notFile) {
+		t.Error("context/_root.md directory activates")
 	}
 }
 
@@ -510,9 +521,7 @@ func TestSessionStartRefusedMarker(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(t.TempDir(), "cfg.yaml")
 	testutil.WriteFile(t, filepath.Dir(out), "cfg.yaml", "")
-	if err := os.Symlink(out, filepath.Join(root, ".auto-context/config.yaml")); err != nil {
-		t.Skip("symlinks unavailable:", err)
-	}
+	testutil.Symlink(t, out, filepath.Join(root, ".auto-context/config.yaml"))
 	got, err := SessionStart(testEnv(root), Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -520,8 +529,12 @@ func TestSessionStartRefusedMarker(t *testing.T) {
 	if v := decodeSession(t, got); !strings.Contains(v.SystemMessage, "the plugin is off here") {
 		t.Errorf("out = %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".auto-context")); !os.IsNotExist(err) {
-		t.Errorf("state written: %v", err)
+	// Nothing is written beside the link itself.
+	if es, err := os.ReadDir(filepath.Join(root, ".auto-context")); err != nil || len(es) != 1 {
+		t.Errorf("state written: %v %v", es, err)
+	}
+	if es, err := os.ReadDir(root); err != nil || len(es) != 1 {
+		t.Errorf("repo written: %v %v", es, err)
 	}
 }
 
@@ -575,5 +588,156 @@ func TestSessionStartFirstRunLogIsFine(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".auto-context", "log")); err == nil {
 		t.Error("empty log left behind")
+	}
+}
+
+// Hooks that keep session state skip a payload without a session id: no
+// shared "_" files, a log entry instead (Q-L10).
+func TestHooksSkipEmptySessionID(t *testing.T) {
+	env := newRepo(t, false)
+	for _, id := range []string{"", "  "} {
+		for name, h := range map[string]func(Env, Input) ([]byte, error){
+			"PromptSubmit": PromptSubmit, "Stop": Stop, "SessionEnd": SessionEnd,
+		} {
+			if out, err := h(env, Input{SessionID: id}); out != nil || err != nil {
+				t.Errorf("%s(%q): out=%q err=%v", name, id, out, err)
+			}
+		}
+	}
+	es, _ := os.ReadDir(filepath.Join(env.Root, ".auto-context", "state"))
+	for _, e := range es {
+		if strings.HasPrefix(e.Name(), "_") {
+			t.Errorf("state file %s written", e.Name())
+		}
+	}
+	data, _ := os.ReadFile(filepath.Join(env.Root, ".auto-context", "log"))
+	if n := strings.Count(string(data), "no session_id"); n != 6 {
+		t.Errorf("%d log entries, want 6: %s", n, data)
+	}
+}
+
+// classifyStatuses groups statuses for the notice; unusable reasons are
+// fixed texts, old-scheme docs are counted (Q-M1).
+func TestSessionStartClassifyStatuses(t *testing.T) {
+	g := classifyStatuses([]docstate.UnitStatus{
+		{Unit: "ok", State: docstate.OK},
+		{Unit: "old", State: docstate.OK, Note: docstate.NoteOldScheme},
+		{Unit: "old2", State: docstate.OK, Note: docstate.NoteOldScheme},
+		{Unit: "plain", State: docstate.Stale},
+		{Unit: "new", State: docstate.Stale, Note: docstate.NoteNotAcked},
+		{Unit: "link", State: docstate.Stale, Note: docstate.NoteOutside},
+		{Unit: "fm", State: docstate.Stale, Note: docstate.NoteBroken},
+		{Unit: "perm", State: docstate.Stale, Note: docstate.NoteUnreadable, Detail: "permission denied"},
+		{Unit: "hash", State: docstate.Stale, Note: docstate.NoteHashError},
+		{Unit: "none", State: docstate.Missing},
+	})
+	want := statusGroups{
+		stale:   []string{"plain", "new", "link", "fm", "perm", "hash"},
+		missing: []string{"none"},
+		unusable: []string{
+			"link (" + docstate.OutsideText + ")", "fm (broken frontmatter)",
+			"perm (unreadable doc or sources)", "hash (unreadable doc or sources)",
+		},
+		oldScheme: 2,
+	}
+	if !slices.Equal(g.stale, want.stale) || !slices.Equal(g.missing, want.missing) || !slices.Equal(g.unusable, want.unusable) || g.oldScheme != want.oldScheme {
+		t.Errorf("got %+v\nwant %+v", g, want)
+	}
+	if g := classifyStatuses(nil); g.stale != nil || g.missing != nil || g.unusable != nil || g.oldScheme != 0 {
+		t.Errorf("empty: %+v", g)
+	}
+}
+
+// A "%" in the plugin root never reaches a format string (Q-L1).
+func TestSessionStartCLIWithPercent(t *testing.T) {
+	env := newRepo(t, false)
+	env.Agent, env.PluginRoot = Codex, "/opt/100%d/p"
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "language: \"bad lang\"\n")
+	testutil.WriteFile(t, env.Root, "context/gone.md", "# gone\n")
+	if _, err := SessionStart(env, Input{SessionID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	logx.Errorf(env.Root, "stop: boom")
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := decodeSession(t, out)
+	all := v.SystemMessage + v.Hook.AdditionalContext
+	if strings.Contains(all, "%!") || !strings.Contains(all, "invalid setting(s)") || !strings.Contains(all, "1 hook error(s)") {
+		t.Errorf("out = %s", out)
+	}
+	if n := strings.Count(all, "'/opt/100%d/p/bin/auto-context' status"); n < 3 {
+		t.Errorf("%d commands with the CLI, want 3+: %s", n, out)
+	}
+}
+
+// Docs acked in the old hash scheme are counted with the upgrade command.
+func TestSessionStartOldSchemeLine(t *testing.T) {
+	env := newRepo(t, false)
+	p, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := hashing.SourceHash(env.Root, p.Tree().Files("svc"), nil, p.Cache())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := frontmatter.SetHash(env.Root, filepath.Join(env.Root, "context", "svc.md"), "svc", h, "", env.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := decodeSession(t, out).Hook.AdditionalContext
+	if !strings.Contains(c, "auto-context: 1 unit(s) were acked by an older auto-context; run `auto-context ack --upgrade`.") || strings.Contains(c, "stale") {
+		t.Errorf("context = %q", c)
+	}
+}
+
+// Invalid settings that decide the units pause the index and auto-ack: a
+// fixed text says so, the index stays as it was (A-L8).
+func TestSessionStartDiscoveryReset(t *testing.T) {
+	env := newRepo(t, false)
+	testutil.WriteFile(t, env.Root, ".auto-context/config.yaml", "min_files: 0\n")
+	before, _ := os.ReadFile(filepath.Join(env.Root, "CLAUDE.md"))
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := decodeSession(t, out).Hook.AdditionalContext
+	if !strings.Contains(c, "config.yaml has invalid settings that decide the units, so the units index and auto-ack are paused until it is fixed; run `auto-context status` to see them.") {
+		t.Errorf("context = %q", c)
+	}
+	if strings.Contains(c, "min_files") || strings.Contains(c, "could not be updated") {
+		t.Errorf("config text or generic index error: %q", c)
+	}
+	if after, _ := os.ReadFile(filepath.Join(env.Root, "CLAUDE.md")); string(after) != string(before) {
+		t.Errorf("index rewritten:\n%s", after)
+	}
+}
+
+// SessionNotice and the orphan list cap the names they show (T-L3).
+func TestSessionNoticeCaps(t *testing.T) {
+	var stale []string
+	for i := range 30 {
+		stale = append(stale, fmt.Sprintf("u%02d", i))
+	}
+	got := SessionNotice(stale, []string{"m"}, 20, Claude)
+	if !strings.Contains(got, "u19 (+11 more)") || strings.Contains(got, "u20") || strings.Contains(got, "missing") {
+		t.Errorf("notice = %q", got)
+	}
+	env := newRepo(t, false)
+	for i := range 25 {
+		testutil.WriteFile(t, env.Root, fmt.Sprintf("context/gone%02d.md", i), "# g\n")
+	}
+	out, err := SessionStart(env, Input{SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := decodeSession(t, out).Hook.AdditionalContext
+	if !strings.Contains(c, "5 more (run `auto-context status`)") || strings.Contains(c, "gone20") {
+		t.Errorf("context = %q", c)
 	}
 }

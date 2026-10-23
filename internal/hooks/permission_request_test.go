@@ -8,7 +8,7 @@ import (
 )
 
 // codexEnv is a Codex env whose plugin root is a plain absolute path; it
-// returns the env and the binary path Codex.CLI() gives for it.
+// returns the env and the binary path env.CLI() gives for it.
 func codexEnv(t *testing.T) (Env, string) {
 	t.Helper()
 	const root = "/home/u/.codex/plugins/cache/auto-context/auto-context/1.0.0"

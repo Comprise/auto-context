@@ -20,7 +20,7 @@ func preInput(tool, cmd string) Input {
 }
 
 // allowedCLICalls are the commands PreToolUse approves for Claude; for Codex
-// both hooks approve them only with the bare name replaced by Codex.CLI().
+// both hooks approve them only with the bare name replaced by Env.CLI().
 var allowedCLICalls = []string{
 	"auto-context ack svc",
 	"auto-context ack _root src/auth cmd/api",
@@ -169,7 +169,7 @@ func TestShadowedOnWindowsPluginShimOnly(t *testing.T) {
 	pluginShim(t, plugin)
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", filepath.Join(plugin, "bin"))
-	if shadowed() {
+	if shadowed(plugin) {
 		t.Error("shadowed() = true with only the plugin shim on PATH")
 	}
 }
@@ -248,7 +248,7 @@ func TestShadowedByAnyRelativeEntry(t *testing.T) {
 			"." + sep + bin,
 		} {
 			t.Setenv("PATH", p)
-			if !shadowed() {
+			if !shadowed(os.Getenv("CLAUDE_PLUGIN_ROOT")) {
 				t.Errorf("root=%v PATH=%q: shadowed() = false", withRoot, p)
 			}
 			if out, _ := PreToolUse(testEnv(t.TempDir()), preInput("Bash", "auto-context status")); out != nil {
@@ -260,7 +260,7 @@ func TestShadowedByAnyRelativeEntry(t *testing.T) {
 	// Windows LookPath ignores the extensionless shim; nothing to compare).
 	t.Setenv("CLAUDE_PLUGIN_ROOT", plugin)
 	t.Setenv("PATH", bin+sep+t.TempDir())
-	if shadowed() {
+	if shadowed(plugin) {
 		t.Error("absolute-only PATH with the plugin bin: shadowed() = true")
 	}
 }
