@@ -1,8 +1,8 @@
 ---
 unit: internal/fsutil
-source_hash: v2:sha256:493198b6bd28974fc0b24213b265f697670924d5a7901e3e1d6214180a03915d
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:32ab2d4219eeeb84d026a626dfb542c90c0ff312be466b0894247b02ffb44d1d
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
+updated: "2026-10-24"
 ---
 # internal/fsutil
 Политика доверия к путям, чтение с лимитом, атомарная запись, `.auto-context/state`.

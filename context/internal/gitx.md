@@ -1,8 +1,8 @@
 ---
 unit: internal/gitx
-source_hash: v2:sha256:0d28aa67cf1b9e5bf9d3ba5949b883e46e6f2729f6598c26a2e5ab176eabdb2d
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:16584c26e5dabf982478d62f06daafde49d0f96b6c0dd400009c8f7aef43260e
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
+updated: "2026-10-24"
 ---
 # internal/gitx
 Единый запуск git для плагина с фиксированной защитой.

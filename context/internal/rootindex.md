@@ -1,8 +1,8 @@
 ---
 unit: internal/rootindex
-source_hash: v2:sha256:a994196d462e8693afa90a4dac86596d3f324c6669495152e96c7389529b2468
-commit: 66e834953ec27e4ec334343eaf07b1c80870ca35
-updated: "2026-10-23"
+source_hash: v2:sha256:6edfbac9ad6e6dda35a12ef64d7172f872e2ddfeb1e330e446c6ddf0a2e7eedc
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
+updated: "2026-10-24"
 ---
 # internal/rootindex
 Генерирует и обновляет секцию оглавления юнитов в корневом индексном файле (CLAUDE.md или AGENTS.md).
