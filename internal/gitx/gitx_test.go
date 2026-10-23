@@ -141,7 +141,7 @@ func TestRunHonorsParentDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := Run(ctx, t.TempDir(), 0, "-c", "alias.zz=!sleep 10", "zz")
+	_, err := Run(ctx, lingeringDir(t), 0, "-c", "alias.zz=!sleep 10", "zz")
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("Run took %v past a 200ms deadline", d)
 	}
@@ -149,6 +149,26 @@ func TestRunHonorsParentDeadline(t *testing.T) {
 	if !errors.As(err, &e) || !e.TimedOut || Code(err) != -1 {
 		t.Errorf("err = %v", err)
 	}
+}
+
+// lingeringDir is a temporary working directory for a git whose children may
+// outlive it: Windows has no process-group kill, so the alias's sleep keeps
+// the directory in use after git is killed. Its removal is retried until the
+// child exits instead of failing the test as t.TempDir's cleanup would.
+func lingeringDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gitx-deadline-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for end := time.Now().Add(20 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+			if err := os.RemoveAll(dir); err == nil || time.Now().After(end) {
+				return
+			}
+		}
+	})
+	return dir
 }
 
 func TestBrief(t *testing.T) {

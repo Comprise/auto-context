@@ -86,7 +86,8 @@ func TestSkillsInitDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, rest, ok := strings.Cut(string(b), "```yaml\n     min_files")
+	// A Windows checkout may have CRLF line ends.
+	_, rest, ok := strings.Cut(strings.ReplaceAll(string(b), "\r\n", "\n"), "```yaml\n     min_files")
 	if !ok {
 		t.Fatal("init: defaults yaml block not found")
 	}

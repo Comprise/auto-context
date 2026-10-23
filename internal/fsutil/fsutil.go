@@ -407,7 +407,7 @@ func writeAtomic(r *os.Root, name string, data []byte, perm os.FileMode, doSync 
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return r.Rename(tmp, name)
+	return rename(r, tmp, name)
 }
 
 // stateGitignore keeps everything in StateDir out of git except the committed

@@ -55,6 +55,7 @@ func FuzzIgnoreMatchesGit(f *testing.F) {
 	}
 	repo := f.TempDir()
 	testutil.Git(f, repo, "init", "-q")
+	testutil.Git(f, repo, "config", "core.ignorecase", "false") // see gitInit
 	for _, s := range [][3]string{
 		{"*.b", "", "a/x.b"},
 		{"a/", "!a/b", "a/b"},

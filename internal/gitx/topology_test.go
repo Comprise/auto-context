@@ -147,7 +147,8 @@ func TestWorkTreeOKSubmoduleInLinkedWorktree(t *testing.T) {
 		testutil.Git(t, main, "worktree", "add", "-q", wt)
 		testutil.Git(t, wt, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
 		gitDir := testutil.Git(t, filepath.Join(wt, "lib"), "rev-parse", "--absolute-git-dir")
-		if !strings.Contains(gitDir, filepath.Join("worktrees", filepath.Base(wt), "modules")) {
+		// git prints forward slashes on Windows too.
+		if !strings.Contains(filepath.ToSlash(gitDir), "worktrees/"+filepath.Base(wt)+"/modules") {
 			t.Fatalf("unexpected submodule git dir %q", gitDir)
 		}
 		wantWorkTree(t, filepath.Join(wt, "lib"), true)

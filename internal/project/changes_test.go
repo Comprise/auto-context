@@ -104,7 +104,12 @@ func TestChangesGitErrorNotQuoted(t *testing.T) {
 func TestChangesOutputCapped(t *testing.T) {
 	root := gitRepoWithUnit(t, "svc")
 	testutil.WriteFile(t, root, "svc/a.go", "package x // edited\n")
-	testutil.Git(t, root, "commit", "-qam", strings.Repeat("x", maxChangesOutput))
+	// From a file: a message this long exceeds the Windows command line.
+	msg := filepath.Join(t.TempDir(), "msg")
+	if err := os.WriteFile(msg, []byte(strings.Repeat("x", maxChangesOutput)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, root, "commit", "-qaF", msg)
 	out := changesFor(t, root, "svc")
 	if !strings.Contains(out, fmt.Sprintf("(output cut at %d KiB)", maxChangesOutput>>10)) || len(out) > 2*maxChangesOutput {
 		t.Errorf("len %d, tail %q", len(out), out[max(0, len(out)-200):])

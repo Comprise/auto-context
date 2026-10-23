@@ -12,6 +12,7 @@ import (
 
 	"auto-context/internal/docstate"
 	"auto-context/internal/frontmatter"
+	"auto-context/internal/fsutil"
 	"auto-context/internal/testutil"
 	"auto-context/internal/units"
 )
@@ -104,13 +105,10 @@ func TestHelperStop(t *testing.T) {
 	}
 	for _, u := range concurrentUnits {
 		// Written atomically, as editors do: another session's ack must never
-		// read a half-written doc.
+		// read a half-written doc. WriteAtomic also retries the rename while
+		// another session has the doc open, which Windows refuses.
 		doc := filepath.Join(root, "context", u+".md")
-		tmp := doc + "." + sid
-		if err := os.WriteFile(tmp, []byte("# "+u+"\n\nEdited by "+sid+".\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Rename(tmp, doc); err != nil {
+		if err := fsutil.WriteAtomic(root, doc, []byte("# "+u+"\n\nEdited by "+sid+".\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

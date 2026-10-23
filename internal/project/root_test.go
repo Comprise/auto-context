@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"auto-context/internal/config"
@@ -30,6 +31,16 @@ func TestFindRoot(t *testing.T) {
 	}
 }
 
+// setHome makes dir the home os.UserHomeDir reports: $USERPROFILE on
+// Windows, $HOME elsewhere.
+func setHome(t *testing.T, dir string) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+		return
+	}
+	t.Setenv("HOME", dir)
+}
+
 // $HOME with a trailing slash still stops the climb into the home directory.
 func TestFindRootHomeTrailingSlash(t *testing.T) {
 	home := t.TempDir()
@@ -40,7 +51,7 @@ func TestFindRootHomeTrailingSlash(t *testing.T) {
 	if err := os.Mkdir(cwd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home+"/")
+	setHome(t, home+"/")
 	if got := FindRoot(cwd); got != cwd {
 		t.Errorf("FindRoot = %q, want %q", got, cwd)
 	}
@@ -61,7 +72,7 @@ func TestFindRootHomeSymlink(t *testing.T) {
 	if err := os.Mkdir(cwd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", link)
+	setHome(t, link)
 	if got := FindRoot(cwd); got != cwd {
 		t.Errorf("FindRoot = %q, want %q", got, cwd)
 	}

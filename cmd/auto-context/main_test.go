@@ -1863,7 +1863,8 @@ func TestVersionVerbose(t *testing.T) {
 		"../../internal/hashing/hashing.go": "const cacheVersion = 5\n",
 		"../../internal/session/session.go": "const journalVersion = 1\n",
 	} {
-		if data, err := os.ReadFile(file); err != nil || !strings.Contains(string(data), decl) {
+		// A Windows checkout may have CRLF line ends.
+		if data, err := os.ReadFile(file); err != nil || !strings.Contains(strings.ReplaceAll(string(data), "\r\n", "\n"), decl) {
 			t.Errorf("%s lacks %q: version -v is out of date", file, decl)
 		}
 	}

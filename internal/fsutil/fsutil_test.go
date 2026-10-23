@@ -526,8 +526,13 @@ func TestReadRegularAllocsOnce(t *testing.T) {
 	})
 	// The real path (Resolve, OpenRoot, Stat, Open, Stat) measured 22
 	// allocations with the presized buffer; growing the buffer by doubling, as
-	// the old ReadAll did, adds ~30 more for 1 MiB.
-	if allocs > 24 {
-		t.Errorf("allocs = %v, want <= 24", allocs)
+	// the old ReadAll did, adds ~30 more for 1 MiB. Windows file calls
+	// allocate more (UTF-16 paths, handles): 39 measured there.
+	limit := 24.0
+	if runtime.GOOS == "windows" {
+		limit = 44
+	}
+	if allocs > limit {
+		t.Errorf("allocs = %v, want <= %v", allocs, limit)
 	}
 }

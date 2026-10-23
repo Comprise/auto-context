@@ -21,6 +21,10 @@ import (
 func gitInit(t *testing.T, root string) {
 	t.Helper()
 	testutil.Git(t, root, "init", "-q")
+	// git init sets core.ignorecase on a case-insensitive file system (macOS,
+	// Windows), and .gitignore then matches without case; the walk matcher
+	// is case-sensitive, as git is by default.
+	testutil.Git(t, root, "config", "core.ignorecase", "false")
 }
 
 // fixture builds a tree exercising ignore rules, units, context docs and links.

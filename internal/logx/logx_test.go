@@ -340,11 +340,17 @@ func TestRotationRefusesSymlinkLock(t *testing.T) {
 	if err := os.Symlink("config.yaml", filepath.Join(dir, "log.lock")); err != nil {
 		t.Skip("no symlinks:", err)
 	}
-	unlock, ok, err := filelock.Lock(cfg)
-	if err != nil || !ok {
-		t.Fatalf("lock: %v %v", ok, err)
+	// Hold the target's flock, so locking through the link would wait. The
+	// Windows lock is an O_EXCL file at the path: an existing target cannot
+	// be locked there, and the target's content check below is what
+	// catches a lock that went through the link (its unlock deletes it).
+	if runtime.GOOS != "windows" {
+		unlock, ok, err := filelock.Lock(cfg)
+		if err != nil || !ok {
+			t.Fatalf("lock: %v %v", ok, err)
+		}
+		defer unlock()
 	}
-	defer unlock()
 	start := time.Now()
 	Errorf(root, "late")
 	if d := time.Since(start); d > filelock.Wait/2 {
