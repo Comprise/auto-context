@@ -1,7 +1,7 @@
 ---
 unit: cmd/auto-context
-source_hash: v2:sha256:c5252253753dc5e8954093f25efbefbadd85e940273d7bba71e87003cd1269f0
-commit: 19511e26ff09abf55f0e0dfd25708180df415a88
+source_hash: v2:sha256:921d6422b2acaff7f03e8c3c0c96288d514172799c80de53033fdbbad795d906
+commit: 66e834953ec27e4ec334343eaf07b1c80870ca35
 updated: "2026-10-23"
 ---
 # cmd/auto-context
