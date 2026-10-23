@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 var entries = []Entry{{"src/auth", "JWT."}, {"_root", "skip"}, {"cmd/api", ""}}
@@ -405,5 +406,127 @@ func TestUpdateLFSingleLine(t *testing.T) {
 	}
 	if got := read(t, root); !strings.HasPrefix(got, "text\n\n<!-- auto-context:units -->\n") || strings.Contains(got, "\r") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// Many unclosed fence openers stay linear: no opener scans the rest of the
+// file for its closer (Q-H1).
+func TestUpdateManyUnclosedFencesFast(t *testing.T) {
+	for _, l := range []string{"~~~a\n", "```a\n"} {
+		root := writeIndex(t, strings.Repeat(l, 50000))
+		start := time.Now()
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+			t.Fatal(err)
+		}
+		if err := Check(root, "CLAUDE.md"); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d > 200*time.Millisecond {
+			t.Errorf("%q x50000: Update+Check took %v", l, d)
+		}
+	}
+}
+
+// The fence rules are unchanged: an opener is closed by the nearest later
+// fence of the same character, not shorter, with no info string; an opener
+// with no such closer hides nothing, and the scan goes on after it.
+func TestFencedSemanticsUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		in, in2, open string
+	}{
+		{"```\nx\n```\n", "111", ""},
+		{"   ~~~~ md\nx\n~~~\n````\n~~~~~\n", "11111", ""},
+		{"````\nx\n```\n````\n", "1111", ""},
+		{"```go\nx\n``` \n", "111", ""},
+		{"``` a`b\nx\n```\n", "000", "```"},
+		{"```\nx\n", "00", "```"},
+		{"```a\n```b\n```\n", "111", ""},
+		{"~~~a\n```\nx\n```\n", "0111", "~~~"},
+		{"```\n~~~\n```\n~~~\n", "1110", "~~~"},
+		{"````\n```\n```\n", "011", "````"},
+		{"```x\n````\n```\n````\n", "1111", ""},
+		{"`` \n~~\nx\n", "000", ""},
+	} {
+		lines := strings.SplitAfter(strings.TrimSuffix(tc.in, "\n"), "\n")
+		in, open := fenced(lines)
+		var got strings.Builder
+		for _, b := range in {
+			if b {
+				got.WriteByte('1')
+			} else {
+				got.WriteByte('0')
+			}
+		}
+		if got.String() != tc.in2 || open != tc.open {
+			t.Errorf("%q: in=%s open=%q, want in=%s open=%q", tc.in, got.String(), open, tc.in2, tc.open)
+		}
+	}
+	// An unclosed fence before the markers hides nothing: the markers are live.
+	sec := "<!-- auto-context:units -->\n- `old`\n<!-- /auto-context:units -->\n"
+	for _, pre := range []string{"```\n", "~~~a\n```b\n", "````\n```\n"} {
+		root := writeIndex(t, pre+sec)
+		if err := Check(root, "CLAUDE.md"); err != nil {
+			t.Errorf("Check %q: %v", pre, err)
+		}
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(t, root); got != pre+Render(entries) {
+			t.Errorf("pre %q: got %q", pre, got)
+		}
+	}
+}
+
+// A huge summary built to make comment-delimiter removal quadratic is cut
+// before the removal loop (Q-H2).
+func TestRenderLongSummary(t *testing.T) {
+	k := (1 << 20) / 4
+	sum := strings.Repeat("<", k) + strings.Repeat("!--", k)
+	start := time.Now()
+	got := Render([]Entry{{"pkg", sum}})
+	if d := time.Since(start); d > 50*time.Millisecond {
+		t.Errorf("Render took %v", d)
+	}
+	line := strings.Split(got, "\n")[2]
+	_, s, ok := strings.Cut(line, " — ")
+	if !ok {
+		t.Fatalf("no summary in %q", line)
+	}
+	if n := len([]rune(strings.TrimSuffix(s, "…"))); n > maxSummary {
+		t.Errorf("summary has %d runes", n)
+	}
+	if strings.Contains(s, "<!--") || strings.Contains(s, "-->") {
+		t.Errorf("unsanitized: %q", s)
+	}
+}
+
+// A file of a lone "\r" (no "\n") gets a section that the next Update keeps
+// as is (T-L1).
+func TestUpdateLoneCR(t *testing.T) {
+	for _, in := range []string{"\r", "text\r", "```\r"} {
+		root := writeIndex(t, in)
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+			t.Fatal(err)
+		}
+		if ch, err := Update(root, "CLAUDE.md", entries); err != nil || ch {
+			t.Errorf("in %q: second Update ch=%v err=%v: %q", in, ch, err, read(t, root))
+		}
+		if !strings.HasPrefix(read(t, root), in) {
+			t.Errorf("in %q: content changed: %q", in, read(t, root))
+		}
+	}
+}
+
+func BenchmarkUpdateUnclosedFences(b *testing.B) {
+	root := b.TempDir()
+	p := filepath.Join(root, "CLAUDE.md")
+	content := []byte(strings.Repeat("~~~a\n", 50000))
+	for b.Loop() {
+		if err := os.WriteFile(p, content, 0o644); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := Update(root, "CLAUDE.md", entries); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

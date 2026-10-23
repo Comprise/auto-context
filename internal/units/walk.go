@@ -64,11 +64,16 @@ type dirInfo struct {
 }
 
 // Discover lists the repository's files once and builds the unit tree. Inside
-// a git work tree (root may be below its top level) it asks git: exact
-// .gitignore semantics and .git/info/exclude. Outside git, or when git lists
-// nothing because the root itself is ignored, it walks the tree with its own
+// a git work tree of its own (root may be below its top level) it asks git:
+// exact .gitignore semantics and .git/info/exclude. Outside git, when git
+// lists nothing because the root itself is ignored, or when git's work tree
+// or git dir lies outside the project, it walks the tree with its own
 // .gitignore matcher; if git fails it walks too, with a warning. A git
-// timeout or a listing over maxList is an error: walking would be slower.
+// timeout or more than maxFiles files is an error: walking would be slower.
+//
+// The tree has two views: the full one (Units, Files, Tracked, Stats) of
+// tracked and untracked files, and the index view (HashUnits, HashFiles) of
+// files in git's index only. Without git they are the same.
 func Discover(root string, cfg config.Config) (*Tree, error) {
 	cfg.Validate() // a Config not from config.Load is checked too
 
@@ -83,7 +88,8 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 	t.root = root
 
 	dirs := map[string]*dirInfo{".": {}}
-	files, ok, warning, err := gitFiles(root)
+	var idxDirs map[string]*dirInfo // index view, when it differs from dirs
+	files, other, ok, warning, err := gitFiles(root)
 	if err != nil {
 		return nil, err
 	}
@@ -97,64 +103,93 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 		// under it, so nothing outside the repository is read.
 		ex := existence{root: root, real: map[string]bool{".": true}, warned: map[string]bool{}}
 		var kept []string
-		for _, rel := range files {
+		var keptOther []bool
+		for i, rel := range files {
 			if strings.HasPrefix(rel, ".auto-context/") || t.excludedPath(rel) || !ex.realDir(t, path.Dir(rel)) {
 				continue
 			}
 			kept = append(kept, rel)
+			keptOther = append(keptOther, other[i])
+		}
+		if slices.Contains(keptOther, true) {
+			idxDirs = map[string]*dirInfo{".": {}}
 		}
 		// Lstat the files that can matter in parallel: on large trees the
 		// syscalls dominate. git lists clean paths: concatenation is enough.
 		stats := parallelLstat(root, kept, t.interesting)
 		for i, rel := range kept {
 			st := stats[i]
+			idx := idxDirs
+			if keptOther[i] {
+				idx = nil // untracked: full view only
+			}
 			// A directory exists only through a file of its own (or below)
 			// that exists: the index lists files deleted from the work tree
 			// too. A known directory has its ancestors already.
-			if dir := path.Dir(rel); dir != "." && !isContext(dir) && dirs[dir] == nil && ex.exists(t, rel, st) {
-				for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
-					dirs[dir] = &dirInfo{}
+			if dir := path.Dir(rel); dir != "." && !isContext(dir) && (dirs[dir] == nil || (idx != nil && idx[dir] == nil)) && ex.exists(t, rel, st) {
+				addDirs(dirs, dir)
+				if idx != nil {
+					addDirs(idx, dir)
 				}
 			}
-			t.addFile(rel, dirs, true, func() (fs.FileInfo, error) { return st.info, st.err })
+			t.addFile(rel, dirs, idx, true, func() (fs.FileInfo, error) { return st.info, st.err })
 		}
 	} else if err := t.walk(root, dirs); err != nil {
 		return nil, err
 	}
 	slices.Sort(t.tracked)
 
-	t.units[RootUnit] = Unit{Path: RootUnit, Reason: ReasonRoot}
+	t.units, t.files = t.view(dirs)
+	t.hashUnits, t.hashFiles = t.units, t.files
+	if idxDirs != nil {
+		t.hashUnits, t.hashFiles = t.view(idxDirs)
+	}
+	return t, nil
+}
+
+// addDirs records dir and its ancestors up to a known one (or the top).
+func addDirs(dirs map[string]*dirInfo, dir string) {
+	for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
+		dirs[dir] = &dirInfo{}
+	}
+}
+
+// view qualifies the units among dirs and assigns their code files: the
+// units (with _root and file counts) and unit -> sorted files.
+func (t *Tree) view(dirs map[string]*dirInfo) (map[string]Unit, map[string][]string) {
+	units := map[string]Unit{RootUnit: {Path: RootUnit, Reason: ReasonRoot}}
+	files := map[string][]string{}
 	for dir, di := range dirs {
 		if dir == "." || t.excluded(dir) || !SafeName(dir) {
 			continue
 		}
 		var reason Reason
 		switch {
-		case matchesAny(cfg.Include, dir):
+		case matchesAny(t.cfg.Include, dir):
 			reason = ReasonInclude
 		case di.marker:
 			reason = ReasonModule
-		case len(di.code) >= cfg.MinFiles:
+		case len(di.code) >= t.cfg.MinFiles:
 			reason = ReasonFiles
 		}
 		if reason != "" {
-			t.units[dir] = Unit{Path: dir, Reason: reason}
+			units[dir] = Unit{Path: dir, Reason: reason}
 		}
 	}
 	for _, di := range dirs {
 		for _, f := range di.code {
-			u := t.UnitOf(f)
-			t.files[u] = append(t.files[u], f)
+			u := unitOf(units, f)
+			files[u] = append(files[u], f)
 		}
 	}
-	for u := range t.files {
-		slices.Sort(t.files[u])
+	for u := range files {
+		slices.Sort(files[u])
 	}
-	for k, u := range t.units {
-		u.FileCount = len(t.files[k])
-		t.units[k] = u
+	for k, u := range units {
+		u.FileCount = len(files[k])
+		units[k] = u
 	}
-	return t, nil
+	return units, files
 }
 
 // existence tells, in git mode, what of a listed path is in the work tree as
@@ -302,8 +337,9 @@ func parallelLstat(root string, rels []string, want func(string) bool) []lstatRe
 // addFile records one listed file. Only files that can matter (context docs,
 // index files, module markers, sources) are checked against the ignore rules
 // and stat'ed; an ignored or excluded marker makes no unit, as with git.
-// checked means the caller already applied excludes and .gitignore.
-func (t *Tree) addFile(rel string, dirs map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
+// checked means the caller already applied excludes and .gitignore. idx, if
+// not nil, is the index view's dirs, which get the file too.
+func (t *Tree) addFile(rel string, dirs, idx map[string]*dirInfo, checked bool, stat func() (fs.FileInfo, error)) {
 	dir := path.Dir(rel)
 	c := t.classifyFile(rel)
 	ctxDoc, isDoc, isMarker, isSrc := c.ctxDoc, c.indexDoc, c.marker, c.source
@@ -343,20 +379,27 @@ func (t *Tree) addFile(rel string, dirs map[string]*dirInfo, checked bool, stat 
 		t.track(rel, fi)
 		return
 	}
+	note(dirs, dir, isMarker, isSrc, rel)
+	if idx != nil {
+		note(idx, dir, isMarker, isSrc, rel)
+	}
+	if isDoc || isSrc {
+		t.track(rel, fi)
+	}
+}
+
+// note records in dirs that dir exists and holds a marker or the source rel.
+func note(dirs map[string]*dirInfo, dir string, marker, src bool, rel string) {
 	di := dirs[dir]
 	if di == nil {
 		di = &dirInfo{}
 		dirs[dir] = di
 	}
-	if isMarker {
+	if marker {
 		di.marker = true
 	}
-	switch {
-	case isDoc:
-		t.track(rel, fi)
-	case isSrc:
+	if src {
 		di.code = append(di.code, rel)
-		t.track(rel, fi)
 	}
 }
 
@@ -375,6 +418,7 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 		prefix += string(filepath.Separator)
 	}
 	var cands []string // interesting files, neither excluded nor ignored
+	n := 0             // regular files seen, against maxFiles
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		// WalkDir yields root and paths under it: cutting the prefix is Rel.
 		rel := "."
@@ -416,6 +460,9 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
+		if n++; n > maxFiles {
+			return ErrListTooLarge
+		}
 		// As in git mode, a directory exists only through a file of its own
 		// (or below) that is neither excluded nor ignored. A known directory
 		// has its ancestors already: .gitignore is checked once per directory.
@@ -438,7 +485,7 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 	stats := parallelLstat(root, cands, func(string) bool { return true })
 	for i, rel := range cands {
 		st := stats[i]
-		t.addFile(rel, dirs, true, func() (fs.FileInfo, error) { return st.info, st.err })
+		t.addFile(rel, dirs, nil, true, func() (fs.FileInfo, error) { return st.info, st.err })
 	}
 	return nil
 }

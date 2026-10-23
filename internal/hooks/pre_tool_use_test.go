@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"auto-context/internal/testutil"
@@ -282,5 +283,81 @@ func TestCodexNeverApprovesBareName(t *testing.T) {
 				t.Errorf("root=%q PermissionRequest %q: out=%q err=%v", root, c, out, err)
 			}
 		}
+	}
+}
+
+// Only the exact key "command" counts: a case variant next to it (or alone)
+// may be what the agent runs, so the command is treated as unknown (HS-5).
+func TestCommandCaseVariantKeys(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	env := testEnv(t.TempDir())
+	for _, raw := range []string{
+		`{"command":"rm -rf ~","Command":"auto-context status"}`,
+		`{"Command":"auto-context status","command":"auto-context status"}`,
+		`{"COMMAND":"auto-context status"}`,
+		`{"Command":"auto-context status"}`,
+	} {
+		in := Input{ToolName: "Bash", ToolInput: []byte(raw)}
+		if got := in.Command(); got != "" {
+			t.Errorf("%s: Command() = %q, want empty", raw, got)
+		}
+		if out, err := PreToolUse(env, in); err != nil || out != nil {
+			t.Errorf("%s: out=%q err=%v, want nothing", raw, out, err)
+		}
+	}
+	in := Input{ToolName: "Bash", ToolInput: []byte(`{"command":"auto-context status","timeout":5}`)}
+	if got := in.Command(); got != "auto-context status" {
+		t.Errorf("exact key: Command() = %q", got)
+	}
+}
+
+// A non-string command, or a tool_input that is not an object, yields "".
+func TestCommandArrayStillEmpty(t *testing.T) {
+	for _, raw := range []string{
+		`{"command":["auto-context","status"]}`,
+		`{"command":null}`,
+		`{"command":1}`,
+		`["auto-context status"]`,
+		`"auto-context status"`,
+		``,
+		`{`,
+	} {
+		if got := (Input{ToolInput: []byte(raw)}).Command(); got != "" {
+			t.Errorf("%s: Command() = %q, want empty", raw, got)
+		}
+	}
+}
+
+func TestCheckEvent(t *testing.T) {
+	names := map[string]string{
+		"session-start":      "SessionStart",
+		"prompt-submit":      "UserPromptSubmit",
+		"stop":               "Stop",
+		"pre-tool-use":       "PreToolUse",
+		"session-end":        "SessionEnd",
+		"permission-request": "PermissionRequest",
+	}
+	for event, name := range names {
+		if err := CheckEvent(event, Input{}); err != nil {
+			t.Errorf("%s with no name: %v", event, err)
+		}
+		if err := CheckEvent(event, Input{HookEventName: name}); err != nil {
+			t.Errorf("%s with %s: %v", event, name, err)
+		}
+		for _, other := range names {
+			if other != name && CheckEvent(event, Input{HookEventName: other}) == nil {
+				t.Errorf("%s accepted %s", event, other)
+			}
+		}
+		if CheckEvent(event, Input{HookEventName: strings.ToLower(name)}) == nil {
+			t.Errorf("%s accepted the lower-case name", event)
+		}
+	}
+	if CheckEvent("bogus", Input{HookEventName: "Stop"}) == nil {
+		t.Error("unknown event accepted a name")
+	}
+	var in Input
+	if err := json.Unmarshal([]byte(`{"hook_event_name":"Stop"}`), &in); err != nil || in.HookEventName != "Stop" {
+		t.Errorf("hook_event_name not decoded: %q, %v", in.HookEventName, err)
 	}
 }

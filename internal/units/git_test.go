@@ -112,7 +112,7 @@ func TestDiscoverWarnsWhenGitFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := discover(t, root, config.Default())
-	if w := strings.Join(tr.Warnings(), "\n"); !strings.Contains(w, "git ls-files failed") {
+	if w := strings.Join(tr.Warnings(), "\n"); !strings.Contains(w, "git rev-parse failed (exit 128); walked the tree instead") {
 		t.Errorf("warnings = %q", w)
 	}
 }
@@ -312,7 +312,7 @@ func TestDiscoverWarnsOnBrokenRepoAnyGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	if w := strings.Join(discover(t, root, config.Default()).Warnings(), "\n"); !strings.Contains(w, "git ls-files failed") {
+	if w := strings.Join(discover(t, root, config.Default()).Warnings(), "\n"); !strings.Contains(w, "git rev-parse failed (exit 128); walked the tree instead") {
 		t.Errorf("warnings = %q", w)
 	}
 	// Without .git the same answer means "no repo here": no warning.
@@ -479,9 +479,10 @@ func fakeGit(t *testing.T, body string) {
 // An empty git listing with a failing check-ignore walks the tree with a
 // warning (no git text in it) instead of dropping every unit.
 func TestDiscoverEmptyListCheckIgnoreFails(t *testing.T) {
-	fakeGit(t, "case \"$*\" in *ls-files*) exit 0;; *check-ignore*) echo 'fatal: SECRET STDERR' >&2; exit 2;; esac")
 	root := t.TempDir()
 	mkfiles(t, root, "svc/go.mod", "svc/a.go")
+	gitInit(t, root) // rev-parse answers through the real git
+	fakeGit(t, "case \"$*\" in *ls-files*) exit 0;; *check-ignore*) echo 'fatal: SECRET STDERR' >&2; exit 2;; esac")
 	tr := discover(t, root, config.Default())
 	if tr.viaGit || !slices.Equal(tr.Tracked(), []string{"svc/a.go", "svc/go.mod"}) || !tr.IsUnit("svc") {
 		t.Errorf("viaGit=%v tracked=%v units=%v", tr.viaGit, tr.Tracked(), tr.Units())
@@ -495,12 +496,13 @@ func TestDiscoverEmptyListCheckIgnoreFails(t *testing.T) {
 // A check-ignore timeout after an empty listing stops discovery with
 // ErrGitTimeout instead of walking.
 func TestDiscoverEmptyListCheckIgnoreTimeout(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "a.go")
+	gitInit(t, root)
 	fakeGit(t, "case \"$*\" in *ls-files*) exit 0;; *check-ignore*) exec sleep 5;; esac")
 	old := gitx.Timeout
 	gitx.Timeout = 200 * time.Millisecond
 	t.Cleanup(func() { gitx.Timeout = old })
-	root := t.TempDir()
-	mkfiles(t, root, "a.go")
 	if _, err := Discover(root, config.Default()); !errors.Is(err, ErrGitTimeout) {
 		t.Errorf("err = %v, want ErrGitTimeout", err)
 	}
@@ -725,4 +727,184 @@ func TestWalkSkipsNestedRepo(t *testing.T) {
 	if got := paths(tr.Units()); !slices.Equal(got, []string{RootUnit, "other"}) {
 		t.Errorf("units = %v", got)
 	}
+}
+
+// commitAll stages everything under root and commits it.
+func commitAll(t *testing.T, root string) {
+	t.Helper()
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-q", "-m", "c")
+}
+
+// The index view leaves untracked files out; the full view keeps them.
+func TestHashViewExcludesUntracked(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "svc/go.mod", "svc/a.go")
+	gitInit(t, root)
+	commitAll(t, root)
+	mkfiles(t, root, "svc/b.go")
+	tr := discover(t, root, config.Default())
+	if got := tr.HashFiles("svc"); !slices.Equal(got, []string{"svc/a.go", "svc/go.mod"}) {
+		t.Errorf("HashFiles = %v", got)
+	}
+	if got := tr.Files("svc"); !slices.Equal(got, []string{"svc/a.go", "svc/b.go", "svc/go.mod"}) {
+		t.Errorf("Files = %v", got)
+	}
+	if got := tr.HashUnits(); !slices.Equal(got, []string{"svc"}) {
+		t.Errorf("HashUnits = %v", got)
+	}
+	if got := tr.HashFiles("nope"); got != nil {
+		t.Errorf("HashFiles(nope) = %v, want nil", got)
+	}
+}
+
+// A directory that is a unit only through untracked files is a unit of the
+// full view, not of the index view; its tracked files go to _root there.
+func TestHashUnitsIgnoreUntrackedOnlyUnits(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "a.go", "tool/x.go")
+	gitInit(t, root)
+	commitAll(t, root)
+	mkfiles(t, root, "tool/go.mod")
+	tr := discover(t, root, config.Default())
+	if !tr.IsUnit("tool") || !slices.Contains(paths(tr.Units()), "tool") {
+		t.Errorf("tool not a unit of the full view: %v", tr.Units())
+	}
+	if got := tr.HashUnits(); len(got) != 0 {
+		t.Errorf("HashUnits = %v, want none", got)
+	}
+	if got := tr.HashFiles("tool"); got != nil {
+		t.Errorf("HashFiles(tool) = %v, want nil", got)
+	}
+	if got := tr.HashFiles(RootUnit); !slices.Equal(got, []string{"a.go", "tool/x.go"}) {
+		t.Errorf("HashFiles(_root) = %v", got)
+	}
+	if got := tr.Files(RootUnit); !slices.Equal(got, []string{"a.go"}) {
+		t.Errorf("Files(_root) = %v", got)
+	}
+}
+
+// .git/info/exclude hides untracked files only: the index view of tracked
+// files does not change.
+func TestHashViewIgnoresLocalExcludes(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "svc/go.mod", "svc/a.go", "lib/a.go", "lib/b.go", "lib/c.go", "lib/d.go", "lib/e.go")
+	gitInit(t, root)
+	commitAll(t, root)
+	before := discover(t, root, config.Default())
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte("*.go\nlib/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkfiles(t, root, "svc/new.go")
+	after := discover(t, root, config.Default())
+	if !slices.Equal(before.HashUnits(), after.HashUnits()) || !slices.Equal(after.HashUnits(), []string{"lib", "svc"}) {
+		t.Errorf("HashUnits before %v after %v", before.HashUnits(), after.HashUnits())
+	}
+	for _, u := range []string{RootUnit, "svc", "lib"} {
+		if !slices.Equal(before.HashFiles(u), after.HashFiles(u)) {
+			t.Errorf("%s: HashFiles before %v after %v", u, before.HashFiles(u), after.HashFiles(u))
+		}
+	}
+	if slices.Contains(after.Files("svc"), "svc/new.go") {
+		t.Errorf("excluded untracked file listed: %v", after.Files("svc"))
+	}
+}
+
+// Without git both views are the same.
+func TestHashViewWalkEqualsFull(t *testing.T) {
+	tr := discover(t, fixture(t), config.Default())
+	var want []string
+	for _, u := range tr.Units() {
+		if u.Path != RootUnit {
+			want = append(want, u.Path)
+		}
+		if !slices.Equal(tr.HashFiles(u.Path), tr.Files(u.Path)) {
+			t.Errorf("%s: HashFiles %v Files %v", u.Path, tr.HashFiles(u.Path), tr.Files(u.Path))
+		}
+	}
+	if !slices.Equal(tr.HashUnits(), want) {
+		t.Errorf("HashUnits %v, want %v", tr.HashUnits(), want)
+	}
+}
+
+// core.worktree sending git to a tree outside the project makes Discover walk
+// the project itself, with a warning.
+func TestDiscoverForeignWorkTreeWalks(t *testing.T) {
+	base := t.TempDir()
+	root, other := filepath.Join(base, "proj"), filepath.Join(base, "other")
+	mkfiles(t, root, "svc/go.mod", "svc/a.go")
+	mkfiles(t, other, "secret/go.mod", "secret/s.go")
+	gitInit(t, root)
+	testutil.Git(t, root, "config", "core.worktree", other)
+	tr := discover(t, root, config.Default())
+	if tr.viaGit {
+		t.Error("git listing used for a foreign work tree")
+	}
+	if got := tr.Tracked(); !slices.Equal(got, []string{"svc/a.go", "svc/go.mod"}) {
+		t.Errorf("tracked = %v", got)
+	}
+	if w := strings.Join(tr.Warnings(), "\n"); !strings.Contains(w, "git's work tree or git dir lies outside the project") {
+		t.Errorf("warnings = %q", w)
+	}
+}
+
+// A linked worktree (git worktree add) is listed by git, without warnings.
+func TestDiscoverInLinkedWorktreeUsesGit(t *testing.T) {
+	base := t.TempDir()
+	main, wt := filepath.Join(base, "main"), filepath.Join(base, "wt")
+	mkfiles(t, main, "svc/go.mod", "svc/a.go")
+	gitInit(t, main)
+	commitAll(t, main)
+	testutil.Git(t, main, "worktree", "add", "-q", wt)
+	tr := discover(t, wt, config.Default())
+	if !tr.viaGit || len(tr.Warnings()) != 0 {
+		t.Errorf("viaGit=%v warnings=%v", tr.viaGit, tr.Warnings())
+	}
+	if got := tr.HashFiles("svc"); !slices.Equal(got, []string{"svc/a.go", "svc/go.mod"}) {
+		t.Errorf("HashFiles = %v", got)
+	}
+}
+
+// A git ls-files that hangs stops discovery with ErrGitTimeout soon after
+// gitx.Timeout, not after the hang.
+func TestDiscoverLsFilesTimeout(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "a.go")
+	gitInit(t, root)
+	fakeGit(t, "case \"$*\" in *ls-files*) sleep 30; exit 0;; esac")
+	old := gitx.Timeout
+	gitx.Timeout = 200 * time.Millisecond
+	t.Cleanup(func() { gitx.Timeout = old })
+	start := time.Now()
+	_, err := Discover(root, config.Default())
+	if !errors.Is(err, ErrGitTimeout) {
+		t.Errorf("err = %v, want ErrGitTimeout", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("took %v", d)
+	}
+	if !strings.Contains(ErrGitTimeout.Error(), "not a regular file") {
+		t.Errorf("message does not name the non-regular ignore file: %q", ErrGitTimeout)
+	}
+}
+
+// More than maxFiles listed files stop discovery, in git and walk modes.
+func TestMaxFiles(t *testing.T) {
+	old := maxFiles
+	maxFiles = 2
+	t.Cleanup(func() { maxFiles = old })
+	walked := t.TempDir()
+	mkfiles(t, walked, "a.go", "b.go", "c.go")
+	if _, err := Discover(walked, config.Default()); !errors.Is(err, ErrListTooLarge) {
+		t.Errorf("walk: err = %v, want ErrListTooLarge", err)
+	}
+	listed := t.TempDir()
+	mkfiles(t, listed, "a.go", "b.go", "c.go")
+	gitInit(t, listed)
+	if _, err := Discover(listed, config.Default()); !errors.Is(err, ErrListTooLarge) {
+		t.Errorf("git: err = %v, want ErrListTooLarge", err)
+	}
+	ok := t.TempDir()
+	mkfiles(t, ok, "a.go", "b.go")
+	discover(t, ok, config.Default())
 }

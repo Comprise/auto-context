@@ -59,6 +59,8 @@ type Tree struct {
 	cfg           config.Config
 	units         map[string]Unit
 	files         map[string][]string   // unit -> code files (sorted)
+	hashUnits     map[string]Unit       // index view (index entries only); units itself when the views agree
+	hashFiles     map[string][]string   // index view: unit -> code files (sorted); files itself likewise
 	tracked       []string              // sorted
 	ignores       map[string]ignoreFile // dir ("." for root) -> its .gitignore
 	rules         int                   // .gitignore rules loaded, against maxRulesTotal
@@ -94,10 +96,13 @@ func (t *Tree) IsUnit(p string) bool {
 }
 
 // UnitOf returns the nearest ancestor unit of rel's directory, else _root.
-func (t *Tree) UnitOf(rel string) string {
+func (t *Tree) UnitOf(rel string) string { return unitOf(t.units, rel) }
+
+// unitOf is UnitOf over the given units.
+func unitOf(units map[string]Unit, rel string) string {
 	dir := path.Dir(path.Clean(rel))
 	for dir != "." && dir != "/" && dir != "" {
-		if t.IsUnit(dir) {
+		if _, ok := units[dir]; ok {
 			return dir
 		}
 		dir = path.Dir(dir)
@@ -137,8 +142,33 @@ func (t *Tree) Classify(rel string) (Kind, string) {
 	return KindIgnore, ""
 }
 
-// Files returns the sorted source files of unit.
+// Files returns the sorted source files of unit in the full view: tracked
+// and untracked, not ignored files.
 func (t *Tree) Files(unit string) []string { return slices.Clone(t.files[unit]) }
+
+// HashFiles returns the sorted source files of unit in the index view, the
+// input of source_hash: in git mode only files in git's index (untracked
+// ones and local excludes do not count), when walking the same as Files.
+// It is nil when unit is no unit of the index view.
+func (t *Tree) HashFiles(unit string) []string {
+	if _, ok := t.hashUnits[unit]; !ok {
+		return nil
+	}
+	return append([]string{}, t.hashFiles[unit]...)
+}
+
+// HashUnits returns the paths of the index view's units, without _root,
+// sorted: a directory that is a unit only through untracked files is not one.
+func (t *Tree) HashUnits() []string {
+	out := make([]string, 0, len(t.hashUnits))
+	for p := range t.hashUnits {
+		if p != RootUnit {
+			out = append(out, p)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 // Tracked returns every file Discover tracked (sources, index files,
 // context docs), sorted.

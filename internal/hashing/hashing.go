@@ -50,9 +50,9 @@ type cacheFile struct {
 }
 
 // cacheVersion names the meaning of cached sums (content with CRLF as LF) and
-// entries (3: racy entries are marked): a cache file of another version is
-// discarded.
-const cacheVersion = 3
+// entries (3: racy entries are marked; 4: files over MaxHashSize are sampled):
+// a cache file of another version is discarded.
+const cacheVersion = 4
 
 func cachePath(root string) string {
 	return fsutil.StatePath(root, "cache.json")
@@ -85,8 +85,9 @@ func LoadCache(root string) (*Cache, error) {
 	c := &Cache{entries: f.Entries}
 	for rel, e := range c.entries {
 		if e.Racy {
+			// Not dirty: dropping a racy entry is not a change worth a
+			// rewrite; the entry is replaced once its file is hashed again.
 			delete(c.entries, rel)
-			c.dirty = true
 		}
 	}
 	return c, nil
@@ -103,8 +104,14 @@ func (c *Cache) UseStats(stat func(rel string) (mtimeNs, size int64, ok bool)) {
 // Len is the number of entries.
 func (c *Cache) Len() int { return len(c.entries) }
 
+// Dirty reports whether the cache changed since it was loaded or saved.
+func (c *Cache) Dirty() bool { return c.dirty }
+
 // Prune drops entries of files not in tracked, so deleted files do not pile up.
 func (c *Cache) Prune(tracked []string) {
+	if len(c.entries) == 0 {
+		return
+	}
 	keep := make(map[string]bool, len(tracked))
 	for _, f := range tracked {
 		keep[f] = true
@@ -141,7 +148,8 @@ func (c *Cache) Save(root string) error {
 }
 
 // SourceHash returns "sha256:" + hex(sha256(for each sorted file: relpath +
-// "\x00" + hex(sha256(content with CRLF as LF)) + "\n", then for each sorted
+// "\x00" + hex(sha256(content with CRLF as LF)) (for a file over MaxHashSize
+// the sampled sum of largeSum) + "\n", then for each sorted
 // extra: "\x00unit\x00" + extra + "\n")). Line endings are normalized so a
 // Windows checkout (autocrlf) hashes like any other. Files are re-read only
 // when mtime or size differ from the cache, which is updated.
@@ -191,6 +199,31 @@ func fileSum(root, rel string, c *Cache) (string, error) {
 	return e.Sum, nil
 }
 
+// MaxHashSize is the file size above which only a sample is hashed.
+const MaxHashSize = 32 << 20
+
+// sampleSize is the length of the head and of the tail hashed for a file
+// larger than MaxHashSize.
+const sampleSize = 1 << 20
+
+// largeSum is the sum of a file larger than MaxHashSize: sha256("large\x00" +
+// decimal size + "\x00" + LF(first 1 MiB) + LF(last 1 MiB)). A change in the
+// middle that keeps size and mtime goes unseen (documented limitation).
+func largeSum(r io.ReaderAt, size int64) (string, error) {
+	h := sha256.New()
+	fmt.Fprintf(h, "large\x00%d\x00", size)
+	for _, off := range []int64{0, size - sampleSize} {
+		lf := &lfWriter{w: h}
+		if _, err := io.Copy(lf, io.NewSectionReader(r, off, sampleSize)); err != nil {
+			return "", err
+		}
+		if err := lf.flush(); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // hashFile hashes one regular file (CRLF as LF) and returns its entry: the sum
 // with the mtime and size it had, racy if the mtime is not racyMargin older
 // than the read. buf, if set, is the copy buffer.
@@ -212,21 +245,29 @@ func hashFile(root, rel string, buf []byte) (Entry, error) {
 		return Entry{}, err
 	}
 	defer f.Close()
-	h := sha256.New()
-	lf := &lfWriter{w: h}
-	if buf == nil {
-		buf = make([]byte, 32<<10)
-	}
-	if _, err := io.CopyBuffer(lf, f, buf); err != nil {
-		return Entry{}, err
-	}
-	if err := lf.flush(); err != nil {
-		return Entry{}, err
+	var sum string
+	if fi.Size() > MaxHashSize {
+		if sum, err = largeSum(f, fi.Size()); err != nil {
+			return Entry{}, err
+		}
+	} else {
+		h := sha256.New()
+		lf := &lfWriter{w: h}
+		if buf == nil {
+			buf = make([]byte, 32<<10)
+		}
+		if _, err := io.CopyBuffer(lf, f, buf); err != nil {
+			return Entry{}, err
+		}
+		if err := lf.flush(); err != nil {
+			return Entry{}, err
+		}
+		sum = hex.EncodeToString(h.Sum(nil))
 	}
 	return Entry{
 		MtimeNs: fi.ModTime().UnixNano(),
 		Size:    fi.Size(),
-		Sum:     hex.EncodeToString(h.Sum(nil)),
+		Sum:     sum,
 		Racy:    fi.ModTime().After(start.Add(-racyMargin)),
 	}, nil
 }
@@ -260,19 +301,17 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 		ok  bool
 	}
 	jobs := make(chan string)
-	results := make(chan result)
+	results := make(chan result, 256)
 	workers := min(runtime.GOMAXPROCS(0), 8, len(todo))
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			buf := make([]byte, 32<<10)
 			for rel := range jobs {
 				e, err := hashFile(root, rel, buf)
 				results <- result{rel, e, err == nil}
 			}
-		}()
+		})
 	}
 	go func() {
 		for _, rel := range todo {
@@ -282,14 +321,49 @@ func (c *Cache) Prewarm(root string, rels []string, save func(), saveEvery time.
 		wg.Wait()
 		close(results)
 	}()
-	last := time.Now()
-	for r := range results {
+	apply := func(r result) {
 		if r.ok {
 			c.entries[r.rel] = r.e
 			c.dirty = true
 		}
-		if save != nil && time.Since(last) > saveEvery {
-			save()
+	}
+	// save runs in its own goroutine so a slow write does not hold up the
+	// workers. While it runs the cache is only read, so results wait in
+	// pending and are applied after it.
+	var pending []result
+	var saved chan struct{} // non-nil while save runs
+	endSave := func() {
+		<-saved
+		saved = nil
+		for _, r := range pending {
+			apply(r)
+		}
+		pending = nil
+	}
+	last := time.Now()
+	for {
+		select {
+		case r, open := <-results:
+			if !open {
+				if saved != nil {
+					endSave()
+				}
+				return
+			}
+			if saved != nil {
+				pending = append(pending, r)
+				continue
+			}
+			apply(r)
+			if save != nil && time.Since(last) > saveEvery {
+				saved = make(chan struct{})
+				go func() {
+					defer close(saved)
+					save()
+				}()
+			}
+		case <-saved:
+			endSave()
 			last = time.Now()
 		}
 	}

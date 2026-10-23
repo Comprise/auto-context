@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"auto-context/internal/fsutil"
@@ -38,14 +39,6 @@ const (
 // Render returns the index section including markers and a trailing newline.
 func Render(entries []Entry) string { return render(header, entries, "\n") }
 
-// eolOf returns "\r\n" if the first line of s ends with it, else "\n".
-func eolOf(s string) string {
-	if i := strings.IndexByte(s, '\n'); i > 0 && s[i-1] == '\r' {
-		return "\r\n"
-	}
-	return "\n"
-}
-
 func render(head string, entries []Entry, eol string) string {
 	var b strings.Builder
 	b.WriteString(openMarker + eol + head + eol)
@@ -67,15 +60,18 @@ func render(head string, entries []Entry, eol string) string {
 // control or format characters (ANSI escapes, bidi overrides), no HTML comment
 // delimiters (they would fake our markers), at most maxSummary runes.
 func sanitize(s string) string {
-	s = textx.Clean(s)
-	for strings.Contains(s, "<!--") || strings.Contains(s, "-->") {
-		s = strings.ReplaceAll(strings.ReplaceAll(s, "<!--", ""), "-->", "")
+	// Bound the work first: each pass of the loop may remove a single
+	// delimiter, so on an unbounded summary it would be quadratic.
+	s = textx.Cap(textx.Clean(s), 4*maxSummary)
+	for {
+		t := strings.ReplaceAll(strings.ReplaceAll(s, "<!--", ""), "-->", "")
+		if t == s {
+			break
+		}
+		s = t
 	}
 	return textx.Cap(strings.TrimSpace(s), maxSummary)
 }
-
-// bom is the UTF-8 byte order mark; a file may start with it, and it is kept.
-const bom = "\ufeff"
 
 // fence reports the fence character and run length if l opens or closes a
 // code fence: 3 or more backticks or tildes after any indent (a fence in a
@@ -97,45 +93,72 @@ func fence(l string) (c byte, n int, info string) {
 
 // fenced marks the lines inside closed code fences (fence lines included)
 // and returns the fence of the first opener that is never closed ("" if
-// none). An unclosed fence hides nothing: Update closes it before appending
-// a section, so the section is not swallowed by a fence closed later.
+// none). An opener is closed by the nearest later fence line of its
+// character, not shorter, with no info string. An unclosed fence hides
+// nothing and the scan goes on after it: Update closes it before appending a
+// section, so the section is not swallowed by a fence closed later.
+//
+// It runs in linear time (plus a log factor): a bottom-up pass finds each
+// opener's closer, a top-down pass then pairs openers with them.
 func fenced(lines []string) (in []bool, open string) {
 	in = make([]bool, len(lines))
-	for i := 0; i < len(lines); i++ {
+	type closer struct{ n, at int }
+	// stacks[c] holds the closers below the current line, nearest on top;
+	// a closer is dropped once a nearer one is at least as long, so lengths
+	// strictly decrease from bottom to top.
+	stacks := map[byte][]closer{}
+	closeAt := make([]int, len(lines)) // -1: not an opener or never closed
+	opener := make([]string, len(lines))
+	for i := len(lines) - 1; i >= 0; i-- {
+		closeAt[i] = -1
 		c, n, info := fence(lines[i])
-		if c == 0 || (c == '`' && strings.ContainsRune(info, '`')) {
+		if c == 0 {
 			continue
 		}
-		closed := false
-		for j := i + 1; j < len(lines); j++ {
-			if cc, nn, rest := fence(lines[j]); cc == c && nn >= n && rest == "" {
-				for k := i; k <= j; k++ {
-					in[k] = true
-				}
-				i, closed = j, true
-				break
+		st := stacks[c]
+		if c != '`' || !strings.ContainsRune(info, '`') {
+			opener[i] = strings.TrimLeft(lines[i], " \t")[:n]
+			// The nearest closer not shorter than n is the topmost one with
+			// length >= n.
+			if k := sort.Search(len(st), func(k int) bool { return st[k].n < n }); k > 0 {
+				closeAt[i] = st[k-1].at
 			}
 		}
-		if !closed && open == "" {
-			open = strings.Repeat(string(c), n)
+		if info == "" {
+			for len(st) > 0 && st[len(st)-1].n <= n {
+				st = st[:len(st)-1]
+			}
+			stacks[c] = append(st, closer{n, i})
+		}
+	}
+	for i := 0; i < len(lines); i++ {
+		switch j := closeAt[i]; {
+		case j >= 0:
+			for k := i; k <= j; k++ {
+				in[k] = true
+			}
+			i = j
+		case open == "":
+			open = opener[i]
 		}
 	}
 	return in, open
 }
 
 // markers returns the line of the open and of the close marker, -1 if both
-// are absent. Markers are whole lines outside code fences (a leading BOM is
-// ignored); a lone, misordered or repeated marker is ErrBrokenMarkers.
-func markers(lines []string) (oi, ci int, err error) {
+// are absent, and the fence of the first unclosed opener (see fenced).
+// Markers are whole lines outside code fences (a leading BOM is ignored); a
+// lone, misordered or repeated marker is ErrBrokenMarkers.
+func markers(lines []string) (oi, ci int, open string, err error) {
 	oi, ci = -1, -1
 	no, nc := 0, 0
-	in, _ := fenced(lines)
+	in, open := fenced(lines)
 	for i, l := range lines {
 		if in[i] {
 			continue
 		}
 		if i == 0 {
-			l = strings.TrimPrefix(l, bom)
+			l = strings.TrimPrefix(l, textx.BOM)
 		}
 		switch strings.TrimSpace(l) {
 		case openMarker:
@@ -145,9 +168,9 @@ func markers(lines []string) (oi, ci int, err error) {
 		}
 	}
 	if no != nc || no > 1 || ci < oi {
-		return -1, -1, ErrBrokenMarkers
+		return -1, -1, "", ErrBrokenMarkers
 	}
-	return oi, ci, nil
+	return oi, ci, open, nil
 }
 
 // Check reports, without writing, what Update would refuse: ErrBrokenMarkers,
@@ -164,7 +187,7 @@ func Check(root, name string) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = markers(strings.SplitAfter(strings.TrimPrefix(string(data), bom), "\n"))
+	_, _, _, err = markers(strings.SplitAfter(strings.TrimPrefix(string(data), textx.BOM), "\n"))
 	return err
 }
 
@@ -191,16 +214,21 @@ func Update(root, name string, entries []Entry) (bool, error) {
 		return false, err
 	}
 
-	eol := eolOf(cur)
-	lines := strings.SplitAfter(strings.TrimPrefix(cur, bom), "\n")
-	oi, ci, err := markers(lines)
+	eol := textx.EOL(cur)
+	if !strings.Contains(cur, "\n") && strings.HasSuffix(cur, "\r") {
+		// The first "\n" appended makes the first line end in "\r\n", and
+		// the next Update would rewrite the section in CRLF: write it so now.
+		eol = "\r\n"
+	}
+	lines := strings.SplitAfter(strings.TrimPrefix(cur, textx.BOM), "\n")
+	oi, ci, open, err := markers(lines)
 	if err != nil {
 		return false, err
 	}
 	var next string
 	if oi < 0 {
 		next = cur
-		if _, open := fenced(lines); open != "" {
+		if open != "" {
 			// Close the file's dangling fence (it ran to the end anyway), or a
 			// fence the user closes later would swallow the section.
 			if !strings.HasSuffix(next, "\n") {
@@ -222,8 +250,8 @@ func Update(root, name string, entries []Entry) (bool, error) {
 			head = strings.TrimRight(lines[oi+1], "\r\n")
 		}
 		next = strings.Join(lines[:oi], "") + render(head, entries, eol) + strings.Join(lines[ci+1:], "")
-		if strings.HasPrefix(cur, bom) {
-			next = bom + next
+		if strings.HasPrefix(cur, textx.BOM) {
+			next = textx.BOM + next
 		}
 	}
 	if next == cur {

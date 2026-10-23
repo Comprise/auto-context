@@ -51,15 +51,28 @@ func (a Agent) Command(name string) string {
 // quoting when put into a suggested command.
 var pluginRootSafe = regexp.MustCompile(`^/[A-Za-z0-9_./-]*$`)
 
-// CLI is how texts for this agent name the plugin binary. Codex's shell tool
-// has no plugin bin/ on PATH, so it gets the absolute path under
-// CLAUDE_PLUGIN_ROOT (see codexCLI); an unset or unusable root falls back to
-// the bare name.
+// CLI is how texts for this agent name the plugin binary, with the plugin
+// root taken from the environment (see Env.CLI).
 func (a Agent) CLI() string {
-	if a == Codex {
-		return codexCLI(os.Getenv("CLAUDE_PLUGIN_ROOT"))
+	return Env{Agent: a}.CLI()
+}
+
+// CLI is how texts for env's agent name the plugin binary. Codex's shell tool
+// has no plugin bin/ on PATH, so it gets the absolute path under the plugin
+// root (see codexCLI): env.PluginRoot, else PLUGIN_ROOT (set by Codex), else
+// CLAUDE_PLUGIN_ROOT. An unset or unusable root falls back to the bare name.
+func (e Env) CLI() string {
+	if e.Agent != Codex {
+		return "auto-context"
 	}
-	return "auto-context"
+	root := e.PluginRoot
+	if root == "" {
+		root = os.Getenv("PLUGIN_ROOT")
+	}
+	if root == "" {
+		root = os.Getenv("CLAUDE_PLUGIN_ROOT")
+	}
+	return codexCLI(root)
 }
 
 // codexCLI builds the shell text that runs the plugin binary under root. The

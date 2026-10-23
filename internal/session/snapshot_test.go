@@ -259,3 +259,29 @@ func TestSnapshotTime(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+// Snapshots go after 24h even with a longer maxAge; a journal waits for maxAge.
+func TestRemoveStaleSnapshots24h(t *testing.T) {
+	root := t.TempDir()
+	if err := (Snapshot{}).Save(root, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Journal{}).Save(root, "s"); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-48 * time.Hour)
+	for _, p := range []string{SnapshotPath(root, "s"), journalPath(root, "s")} {
+		if err := os.Chtimes(p, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RemoveStale(root, 7*24*time.Hour, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(SnapshotPath(root, "s")); !os.IsNotExist(err) {
+		t.Errorf("old snapshot kept: %v", err)
+	}
+	if _, err := os.Stat(journalPath(root, "s")); err != nil {
+		t.Errorf("journal removed before maxAge: %v", err)
+	}
+}

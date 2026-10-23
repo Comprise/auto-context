@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"auto-context/internal/textx"
 )
 
 var day = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -197,13 +199,13 @@ func TestSetHashKeepsCRLF(t *testing.T) {
 
 // A leading UTF-8 BOM does not hide our block.
 func TestReadAfterBOM(t *testing.T) {
-	p := write(t, bom+"---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n")
+	p := write(t, textx.BOM+"---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n")
 	m, body, err := Read(filepath.Dir(p), p)
 	if err != nil || m.Unit != "u" || m.SourceHash != "h" || body != "# T\n" {
 		t.Fatalf("m=%+v body=%q err=%v", m, body, err)
 	}
 	// Not acked yet: the body has no BOM either, so Summary finds the heading.
-	p = write(t, bom+"# T\n\nSummary line.\n")
+	p = write(t, textx.BOM+"# T\n\nSummary line.\n")
 	if _, body, err := Read(filepath.Dir(p), p); err != ErrNoFrontmatter || Summary(body) != "Summary line." {
 		t.Errorf("body=%q err=%v", body, err)
 	}
@@ -212,8 +214,8 @@ func TestReadAfterBOM(t *testing.T) {
 // SetHash replaces the block behind a BOM and keeps the BOM first in the file.
 func TestSetHashKeepsBOMFirst(t *testing.T) {
 	for in, want := range map[string]string{
-		bom + "---\nunit: old\nsource_hash: x\nupdated: \"2020-01-01\"\n---\n# T\n": bom + "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n",
-		bom + "# T\n": bom + "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n",
+		textx.BOM + "---\nunit: old\nsource_hash: x\nupdated: \"2020-01-01\"\n---\n# T\n": textx.BOM + "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n",
+		textx.BOM + "# T\n": textx.BOM + "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\n# T\n",
 	} {
 		p := write(t, in)
 		if err := SetHash(filepath.Dir(p), p, "u", "h", "", day); err != nil {
@@ -256,5 +258,65 @@ func TestSetHashCommit(t *testing.T) {
 	}
 	if m, _, err := Read(filepath.Dir(p), p); err != nil || m.Commit != sha {
 		t.Fatalf("m=%+v err=%v", m, err)
+	}
+}
+
+// Keys of our block that we do not write are kept, after our four keys and in
+// their original order.
+func TestSetHashKeepsUnknownKeys(t *testing.T) {
+	p := write(t, "---\nunit: old\nsource_hash: x\ntags: [a, b]\ntitle: Hello\n---\n# T\n")
+	if err := SetHash(filepath.Dir(p), p, "u", "h", "c1", day); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	want := "---\nunit: u\nsource_hash: h\ncommit: c1\nupdated: \"2026-10-19\"\ntags: [a, b]\ntitle: Hello\n---\n# T\n"
+	if string(data) != want {
+		t.Fatalf("got %q\nwant %q", data, want)
+	}
+	m, _, err := Read(filepath.Dir(p), p)
+	if err != nil || m != (Meta{Unit: "u", SourceHash: "h", Commit: "c1", Updated: "2026-10-19"}) {
+		t.Fatalf("m=%+v err=%v", m, err)
+	}
+}
+
+// An empty commit drops a stale commit key; unknown keys stay.
+func TestSetHashEmptyCommitDropsOld(t *testing.T) {
+	p := write(t, "---\ntitle: X\nupdated: \"2020-01-01\"\ncommit: old\nunit: old\nsource_hash: x\n---\n# T\n")
+	if err := SetHash(filepath.Dir(p), p, "u", "h", "", day); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	want := "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\ntitle: X\n---\n# T\n"
+	if string(data) != want {
+		t.Fatalf("got %q\nwant %q", data, want)
+	}
+}
+
+// A broken block of ours is replaced as a whole.
+func TestSetHashBrokenBlockReplaced(t *testing.T) {
+	for _, in := range []string{
+		"---\nunit: [oops\ntitle: X\n---\nbody\n",
+		"---\nunit: a\nunit: b\ntitle: X\n---\nbody\n",
+	} {
+		p := write(t, in)
+		if err := SetHash(filepath.Dir(p), p, "u", "h", "", day); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(p)
+		want := "---\nunit: u\nsource_hash: h\nupdated: \"2026-10-19\"\n---\nbody\n"
+		if string(data) != want {
+			t.Errorf("%q: got %q", in, data)
+		}
+	}
+}
+
+func TestSummaryCapped(t *testing.T) {
+	long := strings.Repeat("я", 2000)
+	got := Summary("# T\n" + long + "\n")
+	if n := len([]rune(got)); n != 800 {
+		t.Fatalf("runes = %d, want 800", n)
+	}
+	if got != strings.Repeat("я", 800) {
+		t.Fatal("not a prefix")
 	}
 }
