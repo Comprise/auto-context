@@ -159,3 +159,47 @@ func TestCodexCLI(t *testing.T) {
 		}
 	}
 }
+
+// Env.CLI takes the plugin root from Env.PluginRoot, else (Codex only) from
+// PLUGIN_ROOT, then CLAUDE_PLUGIN_ROOT; the text is quoted when needed and is
+// what both Codex hooks approve (Review Focus 5).
+func TestCodexCLIFromPluginRoot(t *testing.T) {
+	const want = `'/p a'\''b/bin/auto-context'`
+	t.Setenv("PLUGIN_ROOT", "/other")
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "/claude")
+	env := testEnv(t.TempDir())
+	env.Agent = Codex
+	env.PluginRoot = "/p a'b"
+	if got := env.CLI(); got != want {
+		t.Fatalf("CLI() = %q, want %q", got, want)
+	}
+	if out, err := PermissionRequest(env, preInput("Bash", want+" ack src/auth")); err != nil || out == nil {
+		t.Errorf("PermissionRequest: out=%q err=%v", out, err)
+	}
+	if out, err := PreToolUse(env, preInput("Bash", want+" status")); err != nil || out == nil {
+		t.Errorf("PreToolUse: out=%q err=%v", out, err)
+	}
+	for _, cmd := range []string{"/other/bin/auto-context status", "/claude/bin/auto-context status", "/p a'b/bin/auto-context status"} {
+		if out, err := PermissionRequest(env, preInput("Bash", cmd)); err != nil || out != nil {
+			t.Errorf("%q: out=%q err=%v, want nothing", cmd, out, err)
+		}
+	}
+
+	env.PluginRoot = ""
+	if got := env.CLI(); got != "/other/bin/auto-context" {
+		t.Errorf("PLUGIN_ROOT: CLI() = %q", got)
+	}
+	if got := Codex.CLI(); got != "/other/bin/auto-context" {
+		t.Errorf("Codex.CLI() = %q", got)
+	}
+	t.Setenv("PLUGIN_ROOT", "")
+	if got := env.CLI(); got != "/claude/bin/auto-context" {
+		t.Errorf("CLAUDE_PLUGIN_ROOT: CLI() = %q", got)
+	}
+
+	claude := testEnv(t.TempDir())
+	claude.PluginRoot = "/p a'b"
+	if got := claude.CLI(); got != "auto-context" {
+		t.Errorf("Claude: CLI() = %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -432,5 +433,170 @@ func TestOldEntryTrustedNextRun(t *testing.T) {
 	c2, _ := LoadCache(r)
 	if c2.Len() != 1 {
 		t.Fatalf("entries = %d", c2.Len())
+	}
+}
+
+// countingReaderAt counts the bytes read through it.
+type countingReaderAt struct {
+	r io.ReaderAt
+	n int64
+}
+
+func (c *countingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := c.r.ReadAt(p, off)
+	c.n += int64(n)
+	return n, err
+}
+
+// A file over MaxHashSize is hashed by its size, first and last MiB only,
+// each sample with CRLF as LF.
+func TestHashLargeFileSampled(t *testing.T) {
+	const mib = 1 << 20
+	root := t.TempDir()
+	size := int64(MaxHashSize + 1)
+	path := filepath.Join(root, "big.bin")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		t.Skipf("sparse file: %v", err)
+	}
+	for off, b := range map[int64]string{
+		0:              "A\r\nB", // CRLF inside the head
+		mib - 1:        "\r",     // CR ending the head sample
+		size - mib - 1: "M",      // just before the tail: unseen
+		size - mib:     "\r\nT",  // CRLF inside the tail
+		size - 1:       "Z",
+	} {
+		if _, err := f.WriteAt([]byte(b), off); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+	makeOld(t, root, "big.bin")
+
+	head := "A\nB" + strings.Repeat("\x00", mib-5) + "\r"
+	tail := "\nT" + strings.Repeat("\x00", mib-4) + "Z"
+	h := sha256.New()
+	fmt.Fprintf(h, "large\x00%d\x00%s%s", size, head, tail)
+	want := hex.EncodeToString(h.Sum(nil))
+
+	e, err := hashFile(root, "big.bin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Sum != want || e.Size != size {
+		t.Errorf("entry = %+v, want sum %s", e, want)
+	}
+
+	rf, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	cr := &countingReaderAt{r: rf}
+	if sum, err := largeSum(cr, size); err != nil || sum != want {
+		t.Fatalf("largeSum = %q, %v", sum, err)
+	}
+	if cr.n > 2*mib {
+		t.Errorf("read %d bytes, want at most 2 MiB", cr.n)
+	}
+}
+
+// A file of exactly MaxHashSize is hashed in full.
+func TestHashFileAtLimitIsFull(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "edge.bin")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(MaxHashSize); err != nil {
+		t.Skipf("sparse file: %v", err)
+	}
+	f.Close()
+	makeOld(t, root, "edge.bin")
+	h := sha256.New()
+	h.Write(make([]byte, MaxHashSize))
+	e, err := hashFile(root, "edge.bin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := hex.EncodeToString(h.Sum(nil)); e.Sum != want {
+		t.Errorf("sum = %s, want full-content %s", e.Sum, want)
+	}
+}
+
+// A cache of the previous version (full sums of big files) is discarded.
+func TestCacheV3Discarded(t *testing.T) {
+	r := t.TempDir()
+	testutil.WriteFile(t, r, ".auto-context/cache.json", `{"version":3,"entries":{"a.go":{"mtime_ns":1,"size":1,"sum":"x"}}}`)
+	c, err := LoadCache(r)
+	if err != nil || c.Len() != 0 {
+		t.Errorf("v3 kept: %v %v", c.entries, err)
+	}
+}
+
+// Dropping racy entries on load is not a change: nothing is rewritten for it.
+func TestLoadDropsRacyWithoutDirty(t *testing.T) {
+	root := t.TempDir()
+	c := &Cache{entries: map[string]Entry{
+		"a.go": {MtimeNs: 1, Size: 1, Sum: "x", Racy: true},
+		"b.go": {MtimeNs: 1, Size: 1, Sum: "y"},
+	}, dirty: true}
+	if err := c.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := LoadCache(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.Len() != 1 {
+		t.Errorf("entries = %v, want the racy one dropped", c2.entries)
+	}
+	if c2.Dirty() {
+		t.Error("cache dirty after dropping a racy entry")
+	}
+}
+
+func TestPruneEmptyNoop(t *testing.T) {
+	c := NewCache()
+	c.Prune([]string{"a.go"})
+	if c.Dirty() || c.Len() != 0 {
+		t.Errorf("dirty=%v len=%d", c.Dirty(), c.Len())
+	}
+}
+
+// A slow save must not hold up hashing: results are buffered meanwhile.
+func TestPrewarmSaveDoesNotStallWorkers(t *testing.T) {
+	root := t.TempDir()
+	var rels []string
+	for i := range 300 {
+		rel := fmt.Sprintf("f%03d.txt", i)
+		testutil.WriteFile(t, root, rel, fmt.Sprintf("content %d", i))
+		makeOld(t, root, rel)
+		rels = append(rels, rel)
+	}
+	run := func(save func()) time.Duration {
+		c := NewCache()
+		c.UseStats(func(rel string) (int64, int64, bool) {
+			fi, err := os.Lstat(filepath.Join(root, rel))
+			if err != nil {
+				return 0, 0, false
+			}
+			return fi.ModTime().UnixNano(), fi.Size(), true
+		})
+		start := time.Now()
+		c.Prewarm(root, rels, save, 0)
+		if c.Len() != len(rels) {
+			t.Errorf("hashed %d of %d", c.Len(), len(rels))
+		}
+		return time.Since(start)
+	}
+	base := run(nil)
+	slow := run(func() { time.Sleep(200 * time.Millisecond) })
+	if slow > base+300*time.Millisecond {
+		t.Errorf("with slow save %v, without %v", slow, base)
 	}
 }

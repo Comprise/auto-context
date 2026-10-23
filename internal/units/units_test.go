@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/testutil"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -714,6 +715,27 @@ func TestSpaceDirNoLongerUnit(t *testing.T) {
 		}
 		if k, u := tr.Classify("ok dir/CLAUDE.md"); k != KindIgnore {
 			t.Errorf("%s: index file classified %v %q", name, k, u)
+		}
+	}
+}
+
+// BenchmarkDiscover discovers a git repository of 20000 tracked files in 500
+// units.
+func BenchmarkDiscover(b *testing.B) {
+	testutil.RequireGit(b)
+	root := b.TempDir()
+	for u := range 500 {
+		for f := range 40 {
+			testutil.WriteFile(b, root, fmt.Sprintf("pkg%03d/f%02d.go", u, f), "package p\n")
+		}
+	}
+	testutil.Git(b, root, "init", "-q")
+	testutil.Git(b, root, "add", "-A")
+	cfg := config.Default()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := Discover(root, cfg); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

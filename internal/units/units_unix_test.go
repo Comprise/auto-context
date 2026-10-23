@@ -3,6 +3,7 @@
 package units
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/gitx"
 	"auto-context/internal/testutil"
 )
 
@@ -133,5 +135,27 @@ func TestDiscoverGitSkipsSymlinkedTrackedDir(t *testing.T) {
 	}
 	if w := tr.Warnings(); len(w) != 0 {
 		t.Errorf("warnings = %v", w)
+	}
+}
+
+// In git mode a FIFO .gitignore makes git block reading it: discovery stops
+// with ErrGitTimeout once gitx.Timeout has passed, not later.
+func TestDiscoverGitFIFOGitignore(t *testing.T) {
+	root := t.TempDir()
+	mkfiles(t, root, "a.go")
+	gitInit(t, root)
+	if err := syscall.Mkfifo(filepath.Join(root, ".gitignore"), 0o644); err != nil {
+		t.Skip("mkfifo unsupported:", err)
+	}
+	old := gitx.Timeout
+	gitx.Timeout = 500 * time.Millisecond
+	t.Cleanup(func() { gitx.Timeout = old })
+	start := time.Now()
+	_, err := Discover(root, config.Default())
+	if !errors.Is(err, ErrGitTimeout) {
+		t.Errorf("err = %v, want ErrGitTimeout", err)
+	}
+	if d := time.Since(start); d > gitx.Timeout+time.Second {
+		t.Errorf("took %v", d)
 	}
 }

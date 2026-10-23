@@ -13,12 +13,13 @@ PromptSubmit сохраняет снимок (mtime/size отслеживаем�
 - `Snapshot` — путь → `units.Stat`; `FromTree` берёт копию из `Tree.Stats()` без второго копирования; `Diff` — изменённые, удалённые, добавленные пути.
 - `SnapshotTime` — mtime файла снимка в ns, то есть начало хода; нет файла — ошибка с `os.ErrNotExist`.
 - `LoadSnapshot` / `Save`; снимок без заголовка или с битой записью — ошибка с путём файла.
-- `Journal`: `LoadJournal`, `Save`, `AddCode`/`AddDocs`/`Notify`, `Pause`/`Paused` (конфиг ломался в этой сессии; снимок до паузы, если он есть, сохраняется), `MarkConfigNotified`/`ConfigNotified` (Stop уже сказал об этом), `Resume` (снимает паузу и сбрасывает напоминания), `NotifyAckFailed`/`AckFailNotified` (о неудачном авто-ack сказано в этом ходе); `Clear` — удалить файлы сессии.
-- `RemoveStale(root, maxAge, now)` — все обычные файлы state-dir старше `maxAge`; каталоги и их содержимое не трогает.
+- `Journal`: `LoadJournal`, `Save`, `AddCode`/`AddDocs`/`Notify`, `Pause`/`Paused` (конфиг ломался в этой сессии; снимок до паузы, если он есть, сохраняется), `MarkConfigNotified`/`ConfigNotified` (Stop уже сказал об этом), `Resume` (снимает паузу и сбрасывает напоминания), `NotifyAckFailed`/`AckFailNotified` (о неудачном авто-ack сказано в этом ходе); `Clear` — удалить файлы сессии. Журнал хранит `Version` (сейчас 1): `Save` проставляет её, `LoadJournal` для другой версии (или файла без версии) возвращает пустой журнал без ошибки.
+- `ValidID(id)` — id сессии не пуст после `strings.TrimSpace`.
+- `RemoveStale(root, maxAge, now)` — все обычные файлы state-dir старше `maxAge`, а снимки (`.snapshot`) — старше меньшего из `maxAge` и 24 ч; каталоги и их содержимое не трогает.
 
 ## Инварианты и подводные камни
 - Формат снимка — заголовок `auto-context snapshot 1` и записи `<mtime> <size> <путь>\0`: пути могут содержать пробелы и переводы строк.
-- Списки журнала — отсортированные множества: `LoadJournal` и `Save` нормализуют их, как бы журнал ни был собран.
+- Списки журнала — отсортированные множества: `LoadJournal` и `Save` нормализуют их (включая `AckFailNotified`), как бы журнал ни был собран.
 - `Clear` удаляет только после `fsutil.Resolve`: state-dir, ведущий наружу, не даёт удалить чужой файл.
 - Файлы сессии удаляет SessionEnd; оставшиеся от сессий без SessionEnd (сбой, kill) — `RemoveStale` в SessionStart.
 - Запись без fsync (`fsutil.WriteState`): файлы восстановимы. Лимит чтения — `MaxSize` (256 МиБ).

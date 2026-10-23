@@ -2,14 +2,18 @@
 package frontmatter
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"auto-context/internal/fsutil"
+	"auto-context/internal/textx"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,13 +41,10 @@ const MaxSize = 1 << 20
 // with an `updated:` key) is left alone.
 var oursRe = regexp.MustCompile(`(?m)^(unit|source_hash)[ \t]*:`)
 
-// bom is the UTF-8 byte order mark some editors put first in a file.
-const bom = "\ufeff"
-
 // split returns the raw YAML text and the body, skipping a leading BOM. ok is
 // false if there is no closed block.
 func split(content string) (yml, body string, ok bool) {
-	content = strings.TrimPrefix(content, bom)
+	content = strings.TrimPrefix(content, textx.BOM)
 	var rest string
 	switch {
 	case strings.HasPrefix(content, "---\n"):
@@ -82,7 +83,7 @@ func Read(root, path string) (Meta, string, error) {
 	content := string(data)
 	yml, body, ok := split(content)
 	if !ok || !oursRe.MatchString(yml) {
-		return Meta{}, strings.TrimPrefix(content, bom), ErrNoFrontmatter
+		return Meta{}, strings.TrimPrefix(content, textx.BOM), ErrNoFrontmatter
 	}
 	var m Meta
 	if err := yaml.Unmarshal([]byte(yml), &m); err != nil {
@@ -91,19 +92,13 @@ func Read(root, path string) (Meta, string, error) {
 	return m, body, nil
 }
 
-// eolOf returns "\r\n" if the first line of s ends with it, else "\n".
-func eolOf(s string) string {
-	if i := strings.IndexByte(s, '\n'); i > 0 && s[i-1] == '\r' {
-		return "\r\n"
-	}
-	return "\n"
-}
-
-// SetHash rewrites our frontmatter block (even a broken one) or, if the file
-// has none, adds it above the content; the rest is kept byte-for-byte, and a
-// leading BOM stays first in the file. commit, if not empty, is recorded as
-// the acked commit. path is resolved with fsutil.ResolveDoc and must stay
-// inside root.
+// SetHash rewrites our frontmatter block or, if the file has none, adds it
+// above the content; the rest is kept byte-for-byte, and a leading BOM stays
+// first in the file. In a valid block of ours only the values of our keys
+// change: they come first (unit, source_hash, commit, updated), the other keys
+// follow unchanged in their order. A broken block is replaced as a whole.
+// commit, if not empty, is recorded as the acked commit. path is resolved with
+// fsutil.ResolveDoc and must stay inside root.
 func SetHash(root, path, unit, hash, commit string, today time.Time) error {
 	path, data, err := fsutil.ReadDoc(root, path, MaxSize)
 	if err != nil {
@@ -114,23 +109,108 @@ func SetHash(root, path, unit, hash, commit string, today time.Time) error {
 		perm = st.Mode().Perm()
 	}
 	body, lead := string(data), ""
-	if strings.HasPrefix(body, bom) {
-		body, lead = body[len(bom):], bom
+	if strings.HasPrefix(body, textx.BOM) {
+		body, lead = body[len(textx.BOM):], textx.BOM
 	}
+	m := Meta{Unit: unit, SourceHash: hash, Commit: commit, Updated: today.Format("2006-01-02")}
+	old := ""
 	if yml, rest, ok := split(body); ok && oursRe.MatchString(yml) {
-		body = rest
+		body, old = rest, yml
 	}
-	y, err := yaml.Marshal(Meta{Unit: unit, SourceHash: hash, Commit: commit, Updated: today.Format("2006-01-02")})
+	y, err := render(old, m)
 	if err != nil {
 		return err
 	}
-	eol := eolOf(string(data))
+	eol := textx.EOL(string(data))
 	out := lead + "---" + eol + strings.ReplaceAll(string(y), "\n", eol) + "---" + eol + body
 	return fsutil.WriteDoc(root, path, []byte(out), perm)
 }
 
-// Summary returns the first non-empty line after the first "# " heading,
-// or "" if absent or that line is itself a heading.
+// ourKeys are the keys of our block, in the order they are written.
+var ourKeys = []string{"unit", "source_hash", "commit", "updated"}
+
+// render returns the YAML of our block with m written into old, the YAML of
+// the current block of ours ("" if none). If old does not parse as a mapping,
+// or the merged block would not read back as exactly m (anchors, aliases or
+// merge keys that point into our replaced values), only m is written.
+func render(old string, m Meta) ([]byte, error) {
+	if old != "" {
+		var check Meta
+		var doc yaml.Node
+		if yaml.Unmarshal([]byte(old), &check) == nil && yaml.Unmarshal([]byte(old), &doc) == nil &&
+			doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
+			if y, err := merge(&doc, m); err == nil {
+				return y, nil
+			}
+		}
+	}
+	doc := yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
+	return merge(&doc, m)
+}
+
+// merge puts our keys with the values of m first in the mapping of doc, drops
+// their old pairs, keeps every other node as is and checks that the result
+// reads back as m.
+func merge(doc *yaml.Node, m Meta) ([]byte, error) {
+	vals := map[string]string{"unit": m.Unit, "source_hash": m.SourceHash, "commit": m.Commit, "updated": m.Updated}
+	mapping := doc.Content[0]
+	var content []*yaml.Node
+	for _, k := range ourKeys {
+		if k == "commit" && m.Commit == "" {
+			continue
+		}
+		content = append(content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k}, scalar(vals[k]))
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if k := mapping.Content[i]; k.Kind == yaml.ScalarNode {
+			if _, ours := vals[k.Value]; ours {
+				continue
+			}
+		}
+		content = append(content, mapping.Content[i], mapping.Content[i+1])
+	}
+	mapping.Content = content
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	var back Meta
+	if err := yaml.Unmarshal(buf.Bytes(), &back); err != nil {
+		return nil, err
+	}
+	if back != m {
+		return nil, errors.New("frontmatter does not read back")
+	}
+	return buf.Bytes(), nil
+}
+
+// scalar returns a string node for s. s with control, format or line-break
+// characters is double-quoted, so every such rune is escaped (the plain and
+// literal styles of yaml.v3 lose some of them, e.g. a lone "\n"); invalid
+// UTF-8 is written as !!binary, as yaml.Marshal does.
+func scalar(s string) *yaml.Node {
+	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s}
+	switch {
+	case !utf8.ValidString(s):
+		_ = n.Encode(s) // a string always encodes
+	case strings.IndexFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)
+	}) >= 0:
+		n.Style = yaml.DoubleQuotedStyle
+	}
+	return n
+}
+
+// MaxSummary caps the length of Summary in runes.
+const MaxSummary = 800
+
+// Summary returns the first non-empty line after the first "# " heading, cut
+// to MaxSummary runes, or "" if absent or that line is itself a heading.
 func Summary(body string) string {
 	seen := false
 	for line := range strings.SplitSeq(body, "\n") {
@@ -145,7 +225,18 @@ func Summary(body string) string {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			return ""
 		}
-		return strings.TrimSpace(line)
+		return capRunes(strings.TrimSpace(line), MaxSummary)
 	}
 	return ""
+}
+
+// capRunes returns the first n runes of s.
+func capRunes(s string, n int) string {
+	for i := range s {
+		if n == 0 {
+			return s[:i]
+		}
+		n--
+	}
+	return s
 }

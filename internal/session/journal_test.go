@@ -11,7 +11,7 @@ import (
 
 func TestJournalRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	j := Journal{CodeChanged: []string{"a.go"}, DocsTouched: []string{"x"}, AlreadyNotified: []string{"y"}}
+	j := Journal{Version: 1, CodeChanged: []string{"a.go"}, DocsTouched: []string{"x"}, AlreadyNotified: []string{"y"}}
 	if err := j.Save(root, "s"); err != nil {
 		t.Fatal(err)
 	}
@@ -165,5 +165,47 @@ func TestMarkConfigNotifiedOnce(t *testing.T) {
 	j.Resume()
 	if !j.MarkConfigNotified() {
 		t.Error("not reported again after Resume")
+	}
+}
+
+func TestLoadJournalNormalizesAckFail(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, ".auto-context", "state", "s.json")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	os.WriteFile(p, []byte(`{"version":1,"ack_fail_notified":["b","a","b"]}`), 0o644)
+	j, err := LoadJournal(root, "s")
+	if err != nil || !reflect.DeepEqual(j.AckFailNotified, []string{"a", "b"}) {
+		t.Fatalf("got %+v %v", j, err)
+	}
+}
+
+func TestJournalForeignVersion(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, ".auto-context", "state", "s.json")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	for _, body := range []string{`{"version":99,"code_changed":["a"]}`, `{"code_changed":["a"]}`} {
+		os.WriteFile(p, []byte(body), 0o644)
+		j, err := LoadJournal(root, "s")
+		if err != nil || len(j.CodeChanged) != 0 {
+			t.Fatalf("%s: got %+v %v", body, j, err)
+		}
+	}
+	if err := (Journal{CodeChanged: []string{"a"}}).Save(root, "s"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), `"version":1`) {
+		t.Fatalf("version not written: %s", data)
+	}
+	if j, _ := LoadJournal(root, "s"); !reflect.DeepEqual(j.CodeChanged, []string{"a"}) {
+		t.Fatalf("got %+v", j)
+	}
+}
+
+func TestValidID(t *testing.T) {
+	for id, want := range map[string]bool{"abc": true, "a b": true, "": false, "  \t\n": false} {
+		if ValidID(id) != want {
+			t.Errorf("ValidID(%q) != %v", id, want)
+		}
 	}
 }

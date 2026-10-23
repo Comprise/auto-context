@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"auto-context/internal/fsutil"
@@ -69,6 +70,9 @@ func SanitizeID(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	return string(b) + "-" + hex.EncodeToString(sum[:8])
 }
+
+// ValidID reports whether id can name a session: it is not blank.
+func ValidID(id string) bool { return strings.TrimSpace(id) != "" }
 
 // MaxSize caps the size of a state file we read.
 const MaxSize = 256 << 20
@@ -140,9 +144,14 @@ func LoadSnapshot(root, sessionID string) (Snapshot, error) {
 	return s, nil
 }
 
+// snapshotMaxAge caps the age of a snapshot: a turn does not outlive a day, and
+// snapshots are the largest state files.
+const snapshotMaxAge = 24 * time.Hour
+
 // RemoveStale deletes every regular file in the state dir not modified within
-// maxAge: files of sessions that ended without SessionEnd, the session mark of
-// an abandoned project, leftover temporary files.
+// maxAge (snapshots: within the lesser of maxAge and 24h): files of sessions
+// that ended without SessionEnd, the session mark of an abandoned project,
+// leftover temporary files.
 func RemoveStale(root string, maxAge time.Duration, now time.Time) error {
 	dir, err := fsutil.Resolve(root, fsutil.StatePath(root, "state"))
 	if err != nil {
@@ -156,6 +165,7 @@ func RemoveStale(root string, maxAge time.Duration, now time.Time) error {
 		return err
 	}
 	cutoff := now.Add(-maxAge)
+	snapCutoff := now.Add(-min(maxAge, snapshotMaxAge))
 	var errs []error
 	for _, e := range entries {
 		fi, err := e.Info()
@@ -165,7 +175,11 @@ func RemoveStale(root string, maxAge time.Duration, now time.Time) error {
 			}
 			continue
 		}
-		if !fi.Mode().IsRegular() || fi.ModTime().After(cutoff) {
+		c := cutoff
+		if strings.HasSuffix(e.Name(), ".snapshot") {
+			c = snapCutoff
+		}
+		if !fi.Mode().IsRegular() || fi.ModTime().After(c) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -193,6 +207,9 @@ func (s Snapshot) Save(root, sessionID string) error {
 // Journal records what happened during the current turn, across its Stop
 // calls; PromptSubmit resets it.
 type Journal struct {
+	// Version is the file format; Save stamps journalVersion and LoadJournal
+	// drops a journal of any other version.
+	Version         int      `json:"version"`
 	CodeChanged     []string `json:"code_changed"`
 	DocsTouched     []string `json:"docs_touched"`
 	AlreadyNotified []string `json:"already_notified"`
@@ -205,6 +222,9 @@ type Journal struct {
 	Paused         bool `json:"paused,omitempty"`
 	ConfigNotified bool `json:"config_notified,omitempty"`
 }
+
+// journalVersion is the current journal file format.
+const journalVersion = 1
 
 // Pause records that the config is broken.
 func (j *Journal) Pause() { j.Paused = true }
@@ -228,8 +248,8 @@ func (j *Journal) NotifyAckFailed(us ...string) {
 }
 
 // LoadJournal returns the session journal, its lists normalized to sorted sets. A
-// missing file gives an empty journal and no error; a broken one gives an
-// empty journal and the error.
+// missing file gives an empty journal and no error; so does one of another
+// version (or none); a broken one gives an empty journal and the error.
 func LoadJournal(root, sessionID string) (Journal, error) {
 	var j Journal
 	data, err := fsutil.ReadFile(root, journalPath(root, sessionID), MaxSize)
@@ -242,12 +262,17 @@ func LoadJournal(root, sessionID string) (Journal, error) {
 	if err != nil {
 		return Journal{}, err
 	}
+	if j.Version != journalVersion {
+		return Journal{}, nil
+	}
 	j.CodeChanged, j.DocsTouched, j.AlreadyNotified = AddUnique(j.CodeChanged), AddUnique(j.DocsTouched), AddUnique(j.AlreadyNotified)
+	j.AckFailNotified = AddUnique(j.AckFailNotified)
 	return j, nil
 }
 
-// AddCode, AddDocs and Notify add units to the journal's sets; use them
-// rather than appending, so the lists stay sorted and unique.
+// AddCode adds units to the journal's code set; AddDocs and Notify do the same
+// for the docs and notified sets. Use them rather than appending, so the lists
+// stay sorted and unique.
 func (j *Journal) AddCode(us ...string) { j.CodeChanged = AddUnique(j.CodeChanged, us...) }
 func (j *Journal) AddDocs(us ...string) { j.DocsTouched = AddUnique(j.DocsTouched, us...) }
 func (j *Journal) Notify(us ...string)  { j.AlreadyNotified = AddUnique(j.AlreadyNotified, us...) }
@@ -258,6 +283,7 @@ func (j Journal) Save(root, sessionID string) error {
 	set := func(l []string) []string { return append([]string{}, AddUnique(nil, l...)...) }
 	j.CodeChanged, j.DocsTouched, j.AlreadyNotified = set(j.CodeChanged), set(j.DocsTouched), set(j.AlreadyNotified)
 	j.AckFailNotified = AddUnique(nil, j.AckFailNotified...)
+	j.Version = journalVersion
 	data, err := json.Marshal(j)
 	if err != nil {
 		return err

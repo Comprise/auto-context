@@ -194,10 +194,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces поле `Input.HookEventName string` (`json:"hook_event_name"`); `func CheckEvent(event string, in Input) error` — ошибка, если `HookEventName` непуст и не равен имени события агента для `event` (`session-start` → `SessionStart`, `prompt-submit` → `UserPromptSubmit`, `stop` → `Stop`, `pre-tool-use` → `PreToolUse`, `session-end` → `SessionEnd`, `permission-request` → `PermissionRequest`); поле `Env.PluginRoot string`; `func (e Env) CLI() string` — как `Agent.CLI()`, но корень плагина из `e.PluginRoot`, а при пустом — из `PLUGIN_ROOT` (только Codex), затем `CLAUDE_PLUGIN_ROOT`. `Agent.CLI()` остаётся обёрткой до T17.
 
-- [ ] **Step 1: Tests.** `TestCommandCaseVariantKeys` (HS-5): `{"command":"rm -rf ~","Command":"auto-context status"}`, `{"COMMAND":"auto-context status"}` → `Command()` пусто, PreToolUse не одобряет. `TestCommandArrayStillEmpty`. `TestCheckEvent`. `TestCodexCLIFromPluginRoot` (Review Focus 5): `PluginRoot="/p a'b"` → текст команды закавычен и проходит одобрение Codex. `FuzzAllowedCommand` (`raw/3A-testing.md` M-7: одобренная команда не содержит `..`, `--exclude`, байтов вне `[A-Za-z0-9_./ -]`).
-- [ ] **Step 2: Run** `go test ./internal/hooks/ -run 'Command|CheckEvent|CodexCLI|Fuzz'` — FAIL.
-- [ ] **Step 3: Implement.** `Command()` разбирает `tool_input` в `map[string]json.RawMessage`; берёт ровно ключ `command`; если есть другой ключ, равный `command` без учёта регистра, — `""`. Комментарий про «array in Codex» уточнить (BP-I3).
-- [ ] **Step 4: Run** `go test ./internal/hooks/` — PASS.
+- [x] **Step 1: Tests.** `TestCommandCaseVariantKeys` (HS-5): `{"command":"rm -rf ~","Command":"auto-context status"}`, `{"COMMAND":"auto-context status"}` → `Command()` пусто, PreToolUse не одобряет. `TestCommandArrayStillEmpty`. `TestCheckEvent`. `TestCodexCLIFromPluginRoot` (Review Focus 5): `PluginRoot="/p a'b"` → текст команды закавычен и проходит одобрение Codex. `FuzzAllowedCommand` (`raw/3A-testing.md` M-7: одобренная команда не содержит `..`, `--exclude`, байтов вне `[A-Za-z0-9_./ -]`).
+- [x] **Step 2: Run** `go test ./internal/hooks/ -run 'Command|CheckEvent|CodexCLI|Fuzz'` — FAIL.
+- [x] **Step 3: Implement.** `Command()` разбирает `tool_input` в `map[string]json.RawMessage`; берёт ровно ключ `command`; если есть другой ключ, равный `command` без учёта регистра, — `""`. Комментарий про «array in Codex» уточнить (BP-I3).
+- [x] **Step 4: Run** `go test ./internal/hooks/` — PASS.
 
 ### Task T9: session — журнал с версией, ID сессии, срок снимков
 
@@ -205,8 +205,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `func ValidID(id string) bool` (непустой после `strings.TrimSpace`); поле `Journal.Version int` (`json:"version"`), текущее значение `1`; `LoadJournal` для другой версии возвращает пустой журнал без ошибки.
 
-- [ ] **Step 1: Tests.** `TestLoadJournalNormalizesAckFail` (Q-L4); `TestJournalForeignVersion`; `TestValidID`; `TestRemoveStaleSnapshots24h` (P-I1): снимок старше 24 ч удалён, журнал того же возраста остаётся до `maxAge`.
-- [ ] **Step 2–4:** FAIL → реализовать (`AckFailNotified = AddUnique(...)`; снимки удаляются при возрасте больше `min(maxAge, 24h)`; doc-комментарий `AddCode` начинается с имени — ST1020; `testmain_test.go` вызывает `testutil.Main`) → `go test ./internal/session/` PASS. **Step 5:** док.
+- [x] **Step 1: Tests.** `TestLoadJournalNormalizesAckFail` (Q-L4); `TestJournalForeignVersion`; `TestValidID`; `TestRemoveStaleSnapshots24h` (P-I1): снимок старше 24 ч удалён, журнал того же возраста остаётся до `maxAge`.
+- [x] **Step 2–4:** FAIL → реализовать (`AckFailNotified = AddUnique(...)`; снимки удаляются при возрасте больше `min(maxAge, 24h)`; doc-комментарий `AddCode` начинается с имени — ST1020; `testmain_test.go` вызывает `testutil.Main`) → `go test ./internal/session/` PASS. **Step 5:** док.
 
 ### Task T10: logx — гонка снятия lock, flock без Fd, state-dir
 
@@ -221,8 +221,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Produces `const MaxHashSize = 32 << 20`; `func (c *Cache) Dirty() bool`. Сигнатуры `SourceHash`, `Prewarm`, `Save`, `LoadCache` не меняются.
 
-- [ ] **Step 1: Tests.** `TestHashLargeFileSampled` (P-M6): разреженный файл `MaxHashSize+1` → сумма по формуле Global Constraints; читается не больше 2 MiB (обёртка-счётчик). `TestLoadDropsRacyWithoutDirty` (P-M4): кэш с racy-записью → после `LoadCache` `Dirty()==false`. `TestPruneEmptyNoop`. `TestPrewarmSaveDoesNotStallWorkers` (P-L5): `save`, спящий 200 мс, не увеличивает общее время прогрева больше чем на 300 мс. `FuzzLFWriter` (`raw/3A-testing.md` M-7).
-- [ ] **Step 2–4:** FAIL → реализовать (буферизованный канал результатов, `make(chan result, 256)`, и сохранение в отдельной горутине; `wg.Go`) → `go test ./internal/hashing/` PASS. **Step 5:** док + ограничение про выборку.
+- [x] **Step 1: Tests.** `TestHashLargeFileSampled` (P-M6): разреженный файл `MaxHashSize+1` → сумма по формуле Global Constraints; читается не больше 2 MiB (обёртка-счётчик). `TestLoadDropsRacyWithoutDirty` (P-M4): кэш с racy-записью → после `LoadCache` `Dirty()==false`. `TestPruneEmptyNoop`. `TestPrewarmSaveDoesNotStallWorkers` (P-L5): `save`, спящий 200 мс, не увеличивает общее время прогрева больше чем на 300 мс. `FuzzLFWriter` (`raw/3A-testing.md` M-7).
+- [x] **Step 2–4:** FAIL → реализовать (буферизованный канал результатов, `make(chan result, 256)`, и сохранение в отдельной горутине; `wg.Go`) → `go test ./internal/hashing/` PASS. **Step 5:** док + ограничение про выборку.
 
 ### Task T12: rootindex — линейный разбор fence, санитизация, `\r`
 
@@ -230,10 +230,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Consumes `textx.BOM`, `textx.EOL` (T2). Семантика fence прежняя: открывающая строка без последующей подходящей закрывающей ничего не скрывает.
 
-- [ ] **Step 1: Tests.** `TestUpdateManyUnclosedFencesFast` (Q-H1): 50 000 строк `~~~a` и ```` ```a ```` → `Update` и `Check` < 200 мс. `TestFencedSemanticsUnchanged` — таблица существующих случаев плюс «незакрытый fence перед маркерами — маркеры видны». `TestRenderLongSummary` (Q-H2): summary 1 MiB из `"<"*k + "!--"*k` → строка индекса ≤ 200 рун, < 50 мс. `FuzzUpdate` с seed `"\r"` (T-L1): после успешного `Update` повторный ничего не меняет и `Check()==nil`. `BenchmarkUpdateUnclosedFences`.
-- [ ] **Step 2: Run** `go test ./internal/rootindex/` — FAIL.
-- [ ] **Step 3: Implement.** Один проход снизу вверх: для каждого `(символ, длина ≥ n)` — индекс ближайшей следующей закрывающей; затем проход сверху вниз со стеком (алгоритм — `raw/1A-code-quality.md` H1, вариант «сохранить поведение»). `sanitize`: сначала `textx.Cap(textx.Clean(s), 4*maxSummary)`, потом цикл удаления. Файл без `\n`, но с `\r` — EOL по `textx.EOL` (`"\n"`); секция пишется так, чтобы второй `Update` её не переписывал.
-- [ ] **Step 4: Run** — PASS. **Step 5:** док.
+- [x] **Step 1: Tests.** `TestUpdateManyUnclosedFencesFast` (Q-H1): 50 000 строк `~~~a` и ```` ```a ```` → `Update` и `Check` < 200 мс. `TestFencedSemanticsUnchanged` — таблица существующих случаев плюс «незакрытый fence перед маркерами — маркеры видны». `TestRenderLongSummary` (Q-H2): summary 1 MiB из `"<"*k + "!--"*k` → строка индекса ≤ 200 рун, < 50 мс. `FuzzUpdate` с seed `"\r"` (T-L1): после успешного `Update` повторный ничего не меняет и `Check()==nil`. `BenchmarkUpdateUnclosedFences`.
+- [x] **Step 2: Run** `go test ./internal/rootindex/` — FAIL.
+- [x] **Step 3: Implement.** Один проход снизу вверх: для каждого `(символ, длина ≥ n)` — индекс ближайшей следующей закрывающей; затем проход сверху вниз со стеком (алгоритм — `raw/1A-code-quality.md` H1, вариант «сохранить поведение»). `sanitize`: сначала `textx.Cap(textx.Clean(s), 4*maxSummary)`, потом цикл удаления. Файл без `\n`, но с `\r` — EOL по `textx.EOL` (`"\n"`); секция пишется так, чтобы второй `Update` её не переписывал.
+- [x] **Step 4: Run** — PASS. **Step 5:** док.
 
 ### Task T13: frontmatter — сохранение чужих ключей, общий BOM/EOL, короткий summary
 
@@ -241,8 +241,8 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** Consumes `textx.BOM`, `textx.EOL`. Сигнатуры не меняются. `Summary` возвращает не больше 800 рун.
 
-- [ ] **Step 1: Tests.** `TestSetHashKeepsUnknownKeys` (CO-5/A-M4): блок `unit/source_hash/tags/title` → после `SetHash` `tags` и `title` на месте, порядок `unit, source_hash, commit, updated`, затем чужие ключи в исходном порядке. `TestSetHashBrokenBlockReplaced` (битый YAML нашего блока заменяется целиком, как сейчас). `TestSummaryCapped`. `FuzzSetHashRoundTrip` (`raw/3A-testing.md` M-7).
-- [ ] **Step 2–4:** FAIL → реализовать (разбор в `yaml.Node`, правка значений наших четырёх ключей, остальные узлы без изменений) → `go test ./internal/frontmatter/` PASS. **Step 5:** док: правило совместимости «неизвестные ключи сохраняются».
+- [x] **Step 1: Tests.** `TestSetHashKeepsUnknownKeys` (CO-5/A-M4): блок `unit/source_hash/tags/title` → после `SetHash` `tags` и `title` на месте, порядок `unit, source_hash, commit, updated`, затем чужие ключи в исходном порядке. `TestSetHashBrokenBlockReplaced` (битый YAML нашего блока заменяется целиком, как сейчас). `TestSummaryCapped`. `FuzzSetHashRoundTrip` (`raw/3A-testing.md` M-7).
+- [x] **Step 2–4:** FAIL → реализовать (разбор в `yaml.Node`, правка значений наших четырёх ключей, остальные узлы без изменений) → `go test ./internal/frontmatter/` PASS. **Step 5:** док: правило совместимости «неизвестные ключи сохраняются».
 
 ### Task T14: units (часть 2) — хэш по индексу, топология, лимит, таймаут
 
@@ -252,10 +252,10 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 - Consumes: `gitx.WorkTreeOK`, `gitx.NotRepo` (T1); `testutil.FakeGit` (T4).
 - Produces: `func (t *Tree) HashFiles(unit string) []string` — файлы юнита в индексном виде (nil, если `unit` не юнит индексного вида); `func (t *Tree) HashUnits() []string` — пути юнитов индексного вида без `_root`, отсортированы. `Files`, `Units`, `Tracked`, `Stats` — прежний «полный» вид (с неотслеживаемыми). В режиме обхода оба вида совпадают. `const maxFiles = 800_000` — больше → `ErrListTooLarge` (в обоих режимах).
 
-- [ ] **Step 1: Tests.** `TestHashViewExcludesUntracked` (A-H1): юнит с отслеживаемым `a.go` и неотслеживаемым `b.go` → `HashFiles` = `[a.go]`, `Files` = `[a.go b.go]`. `TestHashUnitsIgnoreUntrackedOnlyUnits`: каталог с `go.mod` только неотслеживаемым → в `Units`, нет в `HashUnits`. `TestHashViewIgnoresLocalExcludes`: `.git/info/exclude` не меняет `HashFiles` для отслеживаемых. `TestDiscoverForeignWorkTreeWalks` (S-4): `core.worktree` наружу → режим обхода, предупреждение «git's work tree or git dir lies outside the project». `TestDiscoverInLinkedWorktreeUsesGit` (Review Focus 2). `TestDiscoverLsFilesTimeout` (T-H2): `FakeGit` спит на `ls-files`, `gitx.Timeout=200ms` → `ErrGitTimeout` за < 2 с. `TestDiscoverGitFIFOGitignore` (unix): FIFO `.gitignore` → `ErrGitTimeout` за `Timeout`+1 с. `TestMaxFiles` (`maxFiles` понижен в тесте). `BenchmarkDiscover` (20k файлов, 500 юнитов, `b.ReportAllocs`).
-- [ ] **Step 2: Run** `go test ./internal/units/` — FAIL.
-- [ ] **Step 3: Implement.** `gitFiles`: сначала `WorkTreeOK` (false → обход с предупреждением), затем `gitx.Run(root, maxList, "-c", "core.untrackedCache=true", "ls-files", "-co", "--exclude-standard", "-t", "-z")`; тег `?` — неотслеживаемый, остальные — индекс. Квалификация юнитов и приписывание файлов к юнитам выполняются дважды: по полному списку и по индексному. `notRepo` — через `gitx.NotRepo`. Текст `ErrGitTimeout`: «git timed out listing the files: the repository is too large or slow, or a .gitignore/exclude file is not a regular file (…)».
-- [ ] **Step 4: Run** — PASS. **Step 5: Docs** — два вида, лимит, ограничения из таблицы «Документированные ограничения».
+- [x] **Step 1: Tests.** `TestHashViewExcludesUntracked` (A-H1): юнит с отслеживаемым `a.go` и неотслеживаемым `b.go` → `HashFiles` = `[a.go]`, `Files` = `[a.go b.go]`. `TestHashUnitsIgnoreUntrackedOnlyUnits`: каталог с `go.mod` только неотслеживаемым → в `Units`, нет в `HashUnits`. `TestHashViewIgnoresLocalExcludes`: `.git/info/exclude` не меняет `HashFiles` для отслеживаемых. `TestDiscoverForeignWorkTreeWalks` (S-4): `core.worktree` наружу → режим обхода, предупреждение «git's work tree or git dir lies outside the project». `TestDiscoverInLinkedWorktreeUsesGit` (Review Focus 2). `TestDiscoverLsFilesTimeout` (T-H2): `FakeGit` спит на `ls-files`, `gitx.Timeout=200ms` → `ErrGitTimeout` за < 2 с. `TestDiscoverGitFIFOGitignore` (unix): FIFO `.gitignore` → `ErrGitTimeout` за `Timeout`+1 с. `TestMaxFiles` (`maxFiles` понижен в тесте). `BenchmarkDiscover` (20k файлов, 500 юнитов, `b.ReportAllocs`).
+- [x] **Step 2: Run** `go test ./internal/units/` — FAIL.
+- [x] **Step 3: Implement.** `gitFiles`: сначала `WorkTreeOK` (false → обход с предупреждением), затем `gitx.Run(root, maxList, "-c", "core.untrackedCache=true", "ls-files", "-co", "--exclude-standard", "-t", "-z")`; тег `?` — неотслеживаемый, остальные — индекс. Квалификация юнитов и приписывание файлов к юнитам выполняются дважды: по полному списку и по индексному. `notRepo` — через `gitx.NotRepo`. Текст `ErrGitTimeout`: «git timed out listing the files: the repository is too large or slow, or a .gitignore/exclude file is not a regular file (…)».
+- [x] **Step 4: Run** — PASS. **Step 5: Docs** — два вида, лимит, ограничения из таблицы «Документированные ограничения».
 
 ### Task T15: docstate — схема хэша v2, категории вместо текста ошибок
 

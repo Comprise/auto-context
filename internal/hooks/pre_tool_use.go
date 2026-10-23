@@ -37,7 +37,7 @@ func PreToolUse(env Env, in Input) ([]byte, error) {
 
 // approvable reports whether the tool call is a Bash run of the plugin's own
 // CLI that both agents' hooks may approve. Codex's shell never has the plugin's
-// bin/ on PATH, so for Codex only the literal Codex.CLI() prefix (quoted as it
+// bin/ on PATH, so for Codex only the literal env.CLI() prefix (quoted as it
 // suggests, if needed) is accepted, never the bare name; that path points at
 // the plugin's binary itself, so PATH shadowing does not matter for it.
 func approvable(env Env, in Input) bool {
@@ -46,7 +46,7 @@ func approvable(env Env, in Input) bool {
 	}
 	cmd := in.Command()
 	if env.Agent == Codex {
-		abs := Codex.CLI()
+		abs := env.CLI()
 		if abs == "auto-context" {
 			return false // no usable plugin root: nothing to anchor the path to
 		}
@@ -58,13 +58,14 @@ func approvable(env Env, in Input) bool {
 
 // allowedCommand matches the raw command exactly: no trimming, since bash does
 // not split on the Unicode spaces strings.TrimSpace would strip. `ack --exclude`
-// edits the committed config, so it keeps the normal permission prompt.
+// edits the committed config, so it keeps the normal permission prompt; any
+// word containing "--exclude" is refused to keep that rule simple.
 func allowedCommand(cmd string) bool {
 	if !ownCLI.MatchString(cmd) {
 		return false
 	}
 	for arg := range strings.SplitSeq(cmd, " ") {
-		if strings.Contains(arg, "..") || arg == "--exclude" {
+		if strings.Contains(arg, "..") || strings.Contains(arg, "--exclude") {
 			return false
 		}
 	}
