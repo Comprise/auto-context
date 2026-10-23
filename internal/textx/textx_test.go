@@ -54,3 +54,26 @@ func TestStripControls(t *testing.T) {
 		t.Error("clean input was copied")
 	}
 }
+
+func TestStripControlsBidi(t *testing.T) {
+	in := "a\u202ab\u202bc\u202cd\u202de\u202ef\u2066g\u2067h\u2068i\u2069j\u200bk\ufeffl\n\tm"
+	want := "abcdefghijkl\n\tm"
+	if got := string(StripControls([]byte(in))); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	clean := []byte("plain\n\ttext")
+	if got := StripControls(clean); &got[0] != &clean[0] {
+		t.Error("clean text must be returned as the same slice")
+	}
+}
+
+func TestEOL(t *testing.T) {
+	for in, want := range map[string]string{"a\r\nb": "\r\n", "a\nb\r\n": "\n", "": "\n"} {
+		if got := EOL(in); got != want {
+			t.Errorf("EOL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if BOM != "\ufeff" {
+		t.Errorf("BOM = %q", BOM)
+	}
+}

@@ -2,6 +2,10 @@ package testutil
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +37,59 @@ func TestGitCommits(t *testing.T) {
 	Git(t, d, "commit", "-qm", "x")
 	if out := Git(t, d, "log", "--format=%an"); out != "t\n" {
 		t.Errorf("author = %q", out)
+	}
+}
+
+func TestScrubEnvCeiling(t *testing.T) {
+	RequireGit(t)
+	old, had := os.LookupEnv("GIT_CEILING_DIRECTORIES")
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("GIT_CEILING_DIRECTORIES", old)
+		} else {
+			os.Unsetenv("GIT_CEILING_DIRECTORIES")
+		}
+	})
+	outer := t.TempDir()
+	Git(t, outer, "init", "-q")
+	tmp := filepath.Join(outer, "tmp")
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	ScrubEnv()
+	d := t.TempDir()
+	out, err := exec.Command("git", "-C", d, "rev-parse", "--git-dir").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "not a git repository") {
+		t.Fatalf("git found the outer repo: err=%v out=%q", err, out)
+	}
+	// A repo created inside the temp dir is still found.
+	Git(t, d, "init", "-q")
+	WriteFile(t, d, "sub/f.txt", "x")
+	Git(t, filepath.Join(d, "sub"), "rev-parse", "--git-dir")
+}
+
+func TestSymlinkCreatesParent(t *testing.T) {
+	d := t.TempDir()
+	WriteFile(t, d, "target.txt", "hi")
+	link := filepath.Join(d, "a", "b", "link")
+	Symlink(t, filepath.Join(d, "target.txt"), link)
+	b, err := os.ReadFile(link)
+	if err != nil || string(b) != "hi" {
+		t.Fatalf("read through link: %q %v", b, err)
+	}
+}
+
+func TestFakeGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script git")
+	}
+	FakeGit(t, "echo fake \"$1\"; exit 3")
+	out, err := exec.Command("git", "x").Output()
+	if string(out) != "fake x\n" {
+		t.Errorf("out = %q", out)
+	}
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 3 {
+		t.Errorf("err = %v", err)
 	}
 }

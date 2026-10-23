@@ -365,14 +365,17 @@ func (t *Tree) track(rel string, fi fs.FileInfo) {
 	t.stats[rel] = Stat{MtimeNs: fi.ModTime().UnixNano(), Size: fi.Size()}
 }
 
-// walk lists files without git, applying the .gitignore files itself.
+// walk lists files without git, applying the .gitignore files itself. The
+// files that can matter are lstat'ed in parallel after the walk, as in git
+// mode.
 func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 	t.loadGitignore(root, ".")
 	prefix := root
 	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
 		prefix += string(filepath.Separator)
 	}
-	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	var cands []string // interesting files, neither excluded nor ignored
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		// WalkDir yields root and paths under it: cutting the prefix is Rel.
 		rel := "."
 		if p != root {
@@ -395,8 +398,8 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			// Symlinks are skipped, except a context doc, which may stand for a
 			// doc elsewhere in the repo (addFile checks where it leads).
-			if isContext(path.Dir(rel)) {
-				t.addFile(rel, dirs, false, d.Info)
+			if isContext(path.Dir(rel)) && t.interesting(rel) && !t.excluded(rel) && !t.gitIgnored(rel, false) {
+				cands = append(cands, rel)
 			}
 			return nil
 		}
@@ -404,7 +407,7 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 			if rel == "." {
 				return nil
 			}
-			if d.Name() == ".git" || rel == ".auto-context" || t.skipDir(rel) {
+			if d.Name() == ".git" || rel == ".auto-context" || t.skipDir(rel) || nestedRepo(p) {
 				return filepath.SkipDir
 			}
 			t.loadGitignore(root, rel)
@@ -416,14 +419,35 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 		// As in git mode, a directory exists only through a file of its own
 		// (or below) that is neither excluded nor ignored. A known directory
 		// has its ancestors already: .gitignore is checked once per directory.
-		if dir := path.Dir(rel); dirs[dir] == nil && !t.excluded(rel) && !t.gitIgnored(rel, false) {
-			for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
-				dirs[dir] = &dirInfo{}
-			}
+		dir := path.Dir(rel)
+		want := t.interesting(rel)
+		if (!want && dirs[dir] != nil) || t.excluded(rel) || t.gitIgnored(rel, false) {
+			return nil
 		}
-		t.addFile(rel, dirs, false, d.Info)
+		for ; dir != "." && !isContext(dir) && dirs[dir] == nil; dir = path.Dir(dir) {
+			dirs[dir] = &dirInfo{}
+		}
+		if want {
+			cands = append(cands, rel)
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	stats := parallelLstat(root, cands, func(string) bool { return true })
+	for i, rel := range cands {
+		st := stats[i]
+		t.addFile(rel, dirs, true, func() (fs.FileInfo, error) { return st.info, st.err })
+	}
+	return nil
+}
+
+// nestedRepo reports whether dir holds a .git (a directory, or the file of a
+// worktree or submodule): git does not list what is in such a directory.
+func nestedRepo(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 func matchesAny(patterns []string, p string) bool {

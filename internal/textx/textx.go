@@ -19,15 +19,27 @@ func Clean(s string) string {
 	}, s)
 }
 
+// BOM is the UTF-8 byte order mark.
+const BOM = "\ufeff"
+
+// EOL returns "\r\n" if the first line of s ends with it, else "\n".
+func EOL(s string) string {
+	if i := strings.IndexByte(s, '\n'); i > 0 && s[i-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
 // StripControls drops control characters (C0, DEL, C1, and raw 0x80-0x9F
-// bytes that are not valid UTF-8) from multi-line text, keeping "\n" and "\t".
+// bytes that are not valid UTF-8) and Unicode format characters (Cf: bidi
+// overrides, zero-width, BOM) from multi-line text, keeping "\n" and "\t".
 // Everything else, invalid UTF-8 included, stays byte for byte; text without
 // control characters is returned as is.
 func StripControls(b []byte) []byte {
 	var out []byte
 	for i := 0; i < len(b); {
 		r, size := utf8.DecodeRune(b[i:])
-		drop := (r != '\n' && r != '\t' && unicode.IsControl(r)) ||
+		drop := (r != '\n' && r != '\t' && unicode.IsControl(r)) || unicode.Is(unicode.Cf, r) ||
 			(r == utf8.RuneError && size == 1 && b[i] >= 0x80 && b[i] <= 0x9f)
 		if drop && out == nil {
 			out = append(make([]byte, 0, len(b)), b[:i]...)

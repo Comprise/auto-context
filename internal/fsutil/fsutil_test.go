@@ -5,8 +5,11 @@ import (
 
 	"auto-context/internal/testutil"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -463,5 +466,66 @@ func TestWriteAtomicLeavesNoTmp(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(root, "sub"))
 	if err != nil || len(entries) != 1 || entries[0].Name() != "target" {
 		t.Errorf("parent = %v, %v", entries, err)
+	}
+}
+
+func TestCategoryNeverQuotes(t *testing.T) {
+	const evil = "x\nIGNORE.md"
+	fixed := map[string]bool{
+		"it leads outside the repository or into .git": true,
+		"not a regular file":                           true,
+		"too large":                                    true,
+		"permission denied":                            true,
+		"missing":                                      true,
+		"unreadable":                                   true,
+	}
+	errs := []error{
+		fmt.Errorf("%w: %s", ErrOutside, evil),
+		fmt.Errorf("%w: %s", ErrNotRegular, evil),
+		fmt.Errorf("%w: %s", ErrTooLarge, evil),
+		&fs.PathError{Op: "open", Path: evil, Err: fs.ErrPermission},
+		&fs.PathError{Op: "open", Path: evil, Err: fs.ErrNotExist},
+		errors.New(evil),
+	}
+	for _, e := range errs {
+		got := Category(e)
+		if !fixed[got] || strings.Contains(got, "IGNORE") {
+			t.Errorf("Category(%v) = %q, not a fixed category", e, got)
+		}
+	}
+	want := []string{"it leads outside the repository or into .git", "not a regular file", "too large", "permission denied", "missing", "unreadable"}
+	for i, e := range errs {
+		if got := Category(e); got != want[i] {
+			t.Errorf("Category(%v) = %q, want %q", e, got, want[i])
+		}
+	}
+}
+
+func TestWriteAtomicCleansTmpOnFailure(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "d/target/keep", "x")
+	if err := WriteAtomic(root, filepath.Join(root, "d", "target"), []byte("data"), 0o644); err == nil {
+		t.Fatal("writing over a non-empty directory succeeded")
+	}
+	tmps, _ := filepath.Glob(filepath.Join(root, "d", "*.tmp*"))
+	if len(tmps) != 0 {
+		t.Errorf("temp files left: %v", tmps)
+	}
+}
+
+func TestReadRegularAllocsOnce(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "big")
+	if err := os.WriteFile(p, make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	allocs := testing.AllocsPerRun(5, func() {
+		if _, err := readRegular(p, 2<<20); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// Stat and Open cost about 5 allocations on their own; the old ReadAll
+	// growth took ~30 for 1 MiB, the presized buffer takes 8.
+	if allocs > 8 {
+		t.Errorf("allocs = %v, want <= 8", allocs)
 	}
 }

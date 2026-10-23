@@ -3,6 +3,7 @@
 package fsutil
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +34,26 @@ var (
 )
 
 func escapes(rel string) bool {
-	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel)
+	return !filepath.IsLocal(rel)
+}
+
+// Category maps a path or read error to a fixed phrase. Error texts embed
+// repository-controlled paths, so output meant for the terminal or for Claude
+// uses this; the full error goes to the log. The result never contains err's text.
+func Category(err error) string {
+	switch {
+	case errors.Is(err, ErrOutside):
+		return "it leads outside the repository or into .git"
+	case errors.Is(err, ErrNotRegular):
+		return "not a regular file"
+	case errors.Is(err, ErrTooLarge):
+		return "too large"
+	case errors.Is(err, os.ErrPermission):
+		return "permission denied"
+	case errors.Is(err, os.ErrNotExist):
+		return "missing"
+	}
+	return "unreadable"
 }
 
 // within returns path relative to base, if it is inside base.
@@ -223,10 +243,13 @@ func readRegular(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
+	// Size the buffer from the stat so the read does not grow it by doubling;
+	// the slack lets ReadFrom see EOF without a reallocation.
+	buf := bytes.NewBuffer(make([]byte, 0, fi.Size()+512))
+	if _, err := buf.ReadFrom(io.LimitReader(f, limit+1)); err != nil {
 		return nil, err
 	}
+	data := buf.Bytes()
 	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("%w: %s", ErrTooLarge, path)
 	}
@@ -317,9 +340,9 @@ func hasLines(data []byte, want ...string) bool {
 }
 
 // EnsureStateDir creates <root>/.auto-context/state and the
-// .auto-context/.gitignore above (rewritten unless it still has "/*" and
-// "!/config.yaml", e.g. a bare "*"), so local
-// state stays out of git without editing the user's .gitignore. A state dir
+// .auto-context/.gitignore above, so local state stays out of git without
+// editing the user's .gitignore. A file that lacks either line "/*" or
+// "!/config.yaml" (e.g. a bare "*") is rewritten. A state dir
 // leading outside the repo is an error.
 func EnsureStateDir(root string) error {
 	state, err := Resolve(root, StatePath(root, "state"))
