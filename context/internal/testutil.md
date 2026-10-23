@@ -1,8 +1,8 @@
 ---
 unit: internal/testutil
-source_hash: v2:sha256:93be45e2dacf6cec817277593d003417e65285f4d56553ddeba773d3564e9b1c
-commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
-updated: "2026-10-23"
+source_hash: v2:sha256:b3b4786f1aae44d9ba7c5ed791ed2216d99c11b60beac3d97b176bc06d6cb158
+commit: 3fb9b3fc6523bdc0b72747d317d2141f3e0403e1
+updated: "2026-10-24"
 ---
 # internal/testutil
 Общие хелперы тестов: чистое окружение, запись файлов, запуск git.
