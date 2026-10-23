@@ -1,7 +1,7 @@
 ---
 unit: internal/testutil
-source_hash: sha256:93be45e2dacf6cec817277593d003417e65285f4d56553ddeba773d3564e9b1c
-commit: b986c6a7235d656f67c8bd59c79ab4f8bd420c14
+source_hash: v2:sha256:93be45e2dacf6cec817277593d003417e65285f4d56553ddeba773d3564e9b1c
+commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
 updated: "2026-10-23"
 ---
 # internal/testutil

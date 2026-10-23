@@ -1,7 +1,7 @@
 ---
 unit: internal/session
-source_hash: sha256:dd1a4ce57261b5a01ce26bda5c816621ce624eb39dbce9cc0e354f8c8094715b
-commit: 594af1786829b54f7b5248c191bbed194bdfe7e2
+source_hash: v2:sha256:dd1a4ce57261b5a01ce26bda5c816621ce624eb39dbce9cc0e354f8c8094715b
+commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
 updated: "2026-10-23"
 ---
 # internal/session
