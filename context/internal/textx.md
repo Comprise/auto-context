@@ -1,7 +1,8 @@
 ---
 unit: internal/textx
-source_hash: sha256:cab3c1f3def169918f8027aeece9d332df3dde8ee6ff72c1c85fc4de1f1a9257
-updated: "2026-10-20"
+source_hash: sha256:7b670891d9b35576e6daa6f5e2dbaad956cd16abd1b3d199b9bd83c8190d11b3
+commit: 305b9e712b2022d92dfbce747b7c3ad54db498d3
+updated: "2026-10-23"
 ---
 # internal/textx
 Очистка текста из репозитория перед выводом в лог, терминал или контекст Claude.
