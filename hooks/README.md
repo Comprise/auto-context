@@ -25,7 +25,6 @@ Codex (`codex.json`):
 | `SessionEnd` | `session-end` | 3 s | deletes the snapshot and log (git budget 2 s); Codex does not call it when you quit the TUI |
 
 - A hook never blocks the session: the shim always exits 0, errors go to `.auto-context/log`.
-- The event list is checked against `hookHandlers` in `cmd/auto-context` by `TestHooksJSONContract`: add a new event in both places.
+- `TestHooksJSONContract` (`hooks.json`) and `TestCodexHooksManifest` (`codex.json`) check events, subcommands, timeouts and the git budget against `hookTable`/`budgetFor` in `cmd/auto-context`: add a new event to both files and to the code.
 - `if` on `PreToolUse` is a Claude Code filter so the binary does not start on every Bash call; the binary itself makes the decision.
 - Codex has no `if`: the filter is `matcher: ^Bash$`, and the binary makes the decision.
-- `TestHooksJSONContract` checks `hooks.json` against `hookHandlers`, `TestCodexHooksManifest` checks `codex.json`.
