@@ -1,7 +1,7 @@
 ---
 unit: internal/units
-source_hash: v2:sha256:193c81fd8ab25846f46d2ae6a020313f83fc594d6f5e7eee918df42a4105021b
-commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
+source_hash: v2:sha256:bb1fbbbed2970dbad84384bf87cc857a49a30fa40716cc8d4c388115dc117297
+commit: 6c7751524316012c95259dc13b3b61559f256cf3
 updated: "2026-10-23"
 ---
 # internal/units

@@ -1,7 +1,7 @@
 ---
 unit: internal/docstate
-source_hash: v2:sha256:108c4c5c22947a913be5ad06a4c9c7b907921ed835ba86e35aae4b9f46daa6b3
-commit: 5f376668531441d1e371d3591c3a533fbc709cac
+source_hash: v2:sha256:08511c9b0938d8493dab4106d53ae5ee14f352552c23dc95a986eecff57db51e
+commit: 6c7751524316012c95259dc13b3b61559f256cf3
 updated: "2026-10-23"
 ---
 # internal/docstate
