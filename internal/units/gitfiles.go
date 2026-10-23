@@ -2,6 +2,7 @@ package units
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -19,6 +20,10 @@ var maxFiles = 800_000
 // ErrGitTimeout stops discovery when git times out listing the files.
 var ErrGitTimeout = errors.New("git timed out listing the files: the repository is too large or slow, or a .gitignore/exclude file is not a regular file (add big generated directories to .gitignore; replace a FIFO or device .gitignore with a regular file)")
 
+// ErrTimeUp stops discovery when the caller's context ends (a hook's
+// budget, an interrupted CLI) before the git listing or during the walk.
+var ErrTimeUp = errors.New("listing the files stopped: the hook's time is up or the command was interrupted (add big generated directories to .gitignore)")
+
 // ErrListTooLarge stops discovery when the listing holds more than maxFiles
 // files or maxList bytes: walking such a tree instead would take longer than
 // the hook timeouts.
@@ -28,10 +33,10 @@ var ErrListTooLarge = errors.New("the repository lists more than 800000 files (o
 // paths relative to root) when root is inside a git work tree of its own
 // (gitx.WorkTreeOK). other[i] tells that files[i] is untracked (not in the
 // index). ok is false outside git; a warning explains why git was not used
-// where it was expected (a crash included). err is ErrGitTimeout or
-// ErrListTooLarge.
-func gitFiles(root string) (files []string, other []bool, ok bool, warning string, err error) {
-	wtOK, gerr := gitx.WorkTreeOK(root)
+// where it was expected (a crash included). err is ErrGitTimeout (also when
+// ctx ends while git runs) or ErrListTooLarge.
+func gitFiles(ctx context.Context, root string) (files []string, other []bool, ok bool, warning string, err error) {
+	wtOK, gerr := gitx.WorkTreeOK(ctx, root)
 	if gerr != nil {
 		w, err := gitFailed(root, gerr, "git rev-parse")
 		return nil, nil, false, w, err
@@ -40,7 +45,7 @@ func gitFiles(root string) (files []string, other []bool, ok bool, warning strin
 		return nil, nil, false, "git's work tree or git dir lies outside the project (core.worktree or a .git file); walked the tree instead", nil
 	}
 	// core.untrackedCache only lets git use the index extension if present.
-	res, gerr := gitx.Run(root, maxList, "-c", "core.untrackedCache=true", "ls-files", "-co", "--exclude-standard", "-t", "-z")
+	res, gerr := gitx.Run(ctx, root, maxList, "-c", "core.untrackedCache=true", "ls-files", "-co", "--exclude-standard", "-t", "-z")
 	if gerr != nil {
 		w, err := gitFailed(root, gerr, "git ls-files")
 		return nil, nil, false, w, err
@@ -69,7 +74,7 @@ func gitFiles(root string) (files []string, other []bool, ok bool, warning strin
 	if len(files) == 0 {
 		// An empty listing can mean the root itself is ignored by the
 		// enclosing repository: git then lists nothing under it.
-		_, cerr := gitx.Run(root, 0, "check-ignore", "-q", ".")
+		_, cerr := gitx.Run(ctx, root, 0, "check-ignore", "-q", ".")
 		switch {
 		case cerr == nil:
 			return nil, nil, false, "the root is ignored by the enclosing git repository; walked the tree instead", nil

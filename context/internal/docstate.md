@@ -13,13 +13,13 @@ updated: "2026-10-23"
 Схема v2 (`HashPrefix = "v2:"`, запись `v2:sha256:<hex>`) считается по индексному виду дерева: `Tree.HashFiles` юнита, для `_root` ещё `Tree.HashUnits`. Неотслеживаемые файлы и юниты только из них в отпечаток не входят, поэтому в чистом клоне он тот же. Хэш без префикса — старая схема (v1.0.0): полный вид, все файлы и все юниты. Если он совпадает с посчитанным по старым правилам, юнит `ok` с нотой `NoteOldScheme`, иначе `stale`. Юнит только полного вида (одни неотслеживаемые файлы) хэширует пустой список.
 
 ## Публичный API / точки входа
-- `StatusOf(root, t, c, unit)` — статус одного юнита (все юниты обходит `Project.Statuses`).
+- `StatusOf(ctx, root, t, c, unit)` — статус одного юнита (все юниты обходит `Project.Statuses`). `StatusOfDoc(ctx, root, t, c, unit, d)` — то же по уже прочитанному доку (`ReadDoc(root, unit)` → `DocText{Meta, Body, Err}`): `Statuses` читает каждый док один раз. Если хеширование прервано концом `ctx` по дедлайну (`context.DeadlineExceeded`), статус — `Stale`, `NoteHashError` с `Detail` = `TimeUp` («the hook's time is up»); при отмене (`context.Canceled`, Ctrl-C в CLI) — `Detail` = `Interrupted` («interrupted»); обе проверки идут до `fsutil.Category`.
 - `UnitStatus{Unit, State, ContextPath, Summary, Note, Detail}`, `NoteText()`; `Note` — `NoteNotAcked`, `NoteOutside` (текст `unusable symlink`), `NoteBroken`, `NoteUnreadable`, `NoteHashError`, `NoteOldScheme` (текст `old hash scheme`, только при `OK`).
 - `OldScheme(st)` — юнит актуален, но записан в старой схеме: ack только обновит схему.
 - `SummaryOf(root, unit)` — summary дока без хэширования; `""`, если док не прочитать или он отклонён.
 - `OutsideText` — описание отклонённого дока для сообщений хуков и CLI.
 - `Doc(root, unit)` — чем является context-док: `DocAbsent`, `DocPresent`, `DocRefused` (ссылка наружу, в `.git`, на не-`.md`, висячая, не обычный файл), `DocUnreadable`.
-- `AckIfNeeded(root, t, c, unit, now, head)` — записывает текущий отпечаток v2 во frontmatter и коммит, который вернёт `head` (nil или пусто — без `commit`); `written` — был ли файл переписан. `Ack` — обёртка без `written`.
+- `AckIfNeeded(ctx, root, t, c, unit, now, head)` — записывает текущий отпечаток v2 во frontmatter и коммит, который вернёт `head` (nil или пусто — без `commit`); `written` — был ли файл переписан.
 - Ошибка неизвестного юнита оборачивает `units.ErrUnknownUnit` (текст `unknown unit <u>`); без `context/_root.md` ack `_root` советует создать его (исключить `_root` нельзя).
 
 ## Инварианты и подводные камни

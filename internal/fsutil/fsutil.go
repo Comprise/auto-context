@@ -4,6 +4,7 @@ package fsutil
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -207,14 +208,49 @@ func realPath(root string) (string, error) {
 	return r, nil
 }
 
+// openRoot opens the resolved root for one operation (the caller closes it)
+// and returns it with that root's path and full (a Resolve result) relative to
+// it. Reads and writes go through it with root-relative names, so a directory
+// or symlink swapped in after Resolve cannot lead them outside the repository.
+// The handle is not cached: a cached one would go stale if the root directory
+// were recreated and would keep it busy on Windows.
+func openRoot(root, full string) (r *os.Root, realRoot, rel string, err error) {
+	if realRoot, err = realPath(root); err != nil {
+		return nil, "", "", err
+	}
+	rel, ok := within(realRoot, full)
+	if !ok {
+		return nil, "", "", fmt.Errorf("%w: %s", ErrOutside, full)
+	}
+	if r, err = os.OpenRoot(realRoot); err != nil {
+		return nil, "", "", err
+	}
+	return r, realRoot, rel, nil
+}
+
+// absErr joins base to the root-relative names in an error from an os.Root
+// operation, so the log names files by their full path as before.
+func absErr(err error, base string) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) && !filepath.IsAbs(pe.Path) {
+		pe.Path = filepath.Join(base, pe.Path)
+	}
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		le.Old, le.New = filepath.Join(base, le.Old), filepath.Join(base, le.New)
+	}
+	return err
+}
+
 // ReadFile reads path, which must be inside root (see Resolve) and a regular
-// file of at most limit bytes. A FIFO or device is refused before it is opened.
+// file of at most limit bytes. A FIFO or device is refused before it is
+// opened, and one swapped in after that check does not block (see readOpened).
 func ReadFile(root, path string, limit int64) ([]byte, error) {
 	full, err := Resolve(root, path)
 	if err != nil {
 		return nil, err
 	}
-	return readRegular(full, limit)
+	return readResolved(root, full, limit)
 }
 
 // ReadDoc is ReadFile with ResolveDoc; it also returns the resolved path.
@@ -223,26 +259,57 @@ func ReadDoc(root, path string, limit int64) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	data, err := readRegular(full, limit)
+	data, err := readResolved(root, full, limit)
 	return full, data, err
 }
 
-func readRegular(path string, limit int64) ([]byte, error) {
-	fi, err := os.Stat(path)
+func readResolved(root, full string, limit int64) ([]byte, error) {
+	r, base, rel, err := openRoot(root, full)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	// A FIFO, device or oversized file already there is refused without
+	// opening it; readOpened checks both again on the opened file.
+	fi, err := r.Stat(rel)
+	if err != nil {
+		return nil, absErr(err, base)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s", ErrNotRegular, full)
+	}
+	if fi.Size() > limit {
+		return nil, fmt.Errorf("%w: %s (%d bytes, limit %d)", ErrTooLarge, full, fi.Size(), limit)
+	}
+	if beforeOpen != nil {
+		beforeOpen()
+	}
+	f, err := r.OpenFile(rel, readFlags, 0)
+	if err != nil {
+		return nil, absErr(err, base)
+	}
+	defer f.Close()
+	return readOpened(f, full, limit)
+}
+
+// beforeOpen, if set by a test, runs between the pre-open check and the open.
+var beforeOpen func()
+
+// readOpened reads f, opened with readFlags; full names it in errors. The
+// open did not block on a FIFO, and the mode of the opened file is checked
+// again, so a FIFO or device swapped in after the pre-open check is refused
+// without a race.
+func readOpened(f *os.File, full string, limit int64) ([]byte, error) {
+	fi, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %s", ErrNotRegular, path)
+		return nil, fmt.Errorf("%w: %s", ErrNotRegular, full)
 	}
 	if fi.Size() > limit {
-		return nil, fmt.Errorf("%w: %s (%d bytes, limit %d)", ErrTooLarge, path, fi.Size(), limit)
+		return nil, fmt.Errorf("%w: %s (%d bytes, limit %d)", ErrTooLarge, full, fi.Size(), limit)
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 	// Size the buffer from the stat so the read does not grow it by doubling;
 	// the slack lets ReadFrom see EOF without a reallocation.
 	buf := bytes.NewBuffer(make([]byte, 0, fi.Size()+512))
@@ -251,20 +318,20 @@ func readRegular(path string, limit int64) ([]byte, error) {
 	}
 	data := buf.Bytes()
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("%w: %s", ErrTooLarge, path)
+		return nil, fmt.Errorf("%w: %s", ErrTooLarge, full)
 	}
 	return data, nil
 }
 
 // WriteAtomic writes data via a temp file in the same dir and renames it into
 // place, with fsync. path must be inside root; symlinks are resolved first
-// (see Resolve).
+// (see Resolve), so a link inside the repo keeps pointing at the new content.
 func WriteAtomic(root, path string, data []byte, perm os.FileMode) error {
 	full, err := Resolve(root, path)
 	if err != nil {
 		return err
 	}
-	return writeAtomic(full, data, perm, true)
+	return writeResolved(root, full, data, perm, true)
 }
 
 // WriteDoc is WriteAtomic under the document rule of ResolveDoc: a symlinked
@@ -274,7 +341,7 @@ func WriteDoc(root, path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(full, data, perm, true)
+	return writeResolved(root, full, data, perm, true)
 }
 
 // WriteState is WriteAtomic without fsync, for state that can be rebuilt
@@ -285,23 +352,46 @@ func WriteState(root, path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(full, data, 0o644, false)
+	return writeResolved(root, full, data, 0o644, false)
 }
 
-func writeAtomic(path string, data []byte, perm os.FileMode, doSync bool) (err error) {
-	dir := filepath.Dir(path)
-	if err = os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, filepath.Base(path)+".tmp*")
+// writeResolved writes full, a Resolve result, through the open root. The
+// rename replaces the resolved name, never a symlink in front of it.
+func writeResolved(root, full string, data []byte, perm os.FileMode, doSync bool) error {
+	r, base, rel, err := openRoot(root, full)
 	if err != nil {
 		return err
 	}
-	tmp := f.Name()
+	defer r.Close()
+	return absErr(writeAtomic(r, rel, data, perm, doSync), base)
+}
+
+// createTemp is os.CreateTemp for an os.Root, which has none: an exclusive
+// create under a random name next to name.
+func createTemp(r *os.Root, name string) (*os.File, string, error) {
+	for range 10 {
+		tmp := name + ".tmp" + rand.Text()[:12] // 60 random bits, short like CreateTemp
+		f, err := r.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return f, tmp, err
+	}
+	return nil, "", fmt.Errorf("fsutil: no free temp name for %s", name)
+}
+
+func writeAtomic(r *os.Root, name string, data []byte, perm os.FileMode, doSync bool) (err error) {
+	if err = r.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		return err
+	}
+	f, tmp, err := createTemp(r, name)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		if err != nil {
 			f.Close()
-			os.Remove(tmp)
+			r.Remove(tmp)
 		}
 	}()
 	if _, err = f.Write(data); err != nil {
@@ -312,13 +402,13 @@ func writeAtomic(path string, data []byte, perm os.FileMode, doSync bool) (err e
 			return err
 		}
 	}
+	if err = f.Chmod(perm); err != nil {
+		return err
+	}
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Chmod(tmp, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return r.Rename(tmp, name)
 }
 
 // stateGitignore keeps everything in StateDir out of git except the committed
@@ -349,8 +439,14 @@ func EnsureStateDir(root string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(state, 0o755); err != nil {
+	r, base, rel, err := openRoot(root, state)
+	if err != nil {
 		return err
+	}
+	err = r.MkdirAll(rel, 0o755)
+	r.Close()
+	if err != nil {
+		return absErr(err, base)
 	}
 	gi := StatePath(root, ".gitignore")
 	if data, err := ReadFile(root, gi, 64<<10); err == nil && hasLines(data, "/*", "!/config.yaml") {

@@ -1,6 +1,7 @@
 package docstate
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestComputeStates(t *testing.T) {
 	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for _, u := range []string{"ok", "stale"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nSummary of "+u+".\n")
-		if _, err := AckIfNeeded(root, tr, c, u, now, nil); err != nil {
+		if _, err := AckIfNeeded(context.Background(), root, tr, c, u, now, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,7 +81,7 @@ func TestComputeNoFrontmatterIsStale(t *testing.T) {
 
 func TestAckMissingDoc(t *testing.T) {
 	root, tr := setup(t)
-	_, err := AckIfNeeded(root, tr, cache(root), "svc", time.Now(), nil)
+	_, err := AckIfNeeded(context.Background(), root, tr, cache(root), "svc", time.Now(), nil)
 	if err == nil || !strings.Contains(err.Error(), "ack --exclude svc") {
 		t.Fatalf("err = %v", err)
 	}
@@ -88,7 +89,7 @@ func TestAckMissingDoc(t *testing.T) {
 
 func TestAckUnknownUnit(t *testing.T) {
 	root, tr := setup(t)
-	_, err := AckIfNeeded(root, tr, cache(root), "nope", time.Now(), nil)
+	_, err := AckIfNeeded(context.Background(), root, tr, cache(root), "nope", time.Now(), nil)
 	if err == nil || err.Error() != "unknown unit nope" || !errors.Is(err, units.ErrUnknownUnit) {
 		t.Fatalf("err = %v", err)
 	}
@@ -138,7 +139,7 @@ func TestComputeUnreadableFileIsPerUnit(t *testing.T) {
 	c := cache(root)
 	for _, u := range []string{"ok", "svc"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
-		if _, err := AckIfNeeded(root, tr, c, u, time.Now(), nil); err != nil {
+		if _, err := AckIfNeeded(context.Background(), root, tr, c, u, time.Now(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -164,10 +165,10 @@ func TestRootHashCoversUnitList(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/_root.md", "# r\n\nR.\n")
 	c := cache(root)
-	if _, err := AckIfNeeded(root, tr, c, units.RootUnit, time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, units.RootUnit, time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if s := StatusOf(root, tr, c, units.RootUnit); s.State != OK {
+	if s := StatusOf(context.Background(), root, tr, c, units.RootUnit); s.State != OK {
 		t.Fatalf("after ack: %+v", s)
 	}
 	// Drop the "bad" unit with exclude "bad/**": its files leave the tree
@@ -179,7 +180,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := StatusOf(root, tr2, c, units.RootUnit); s.State != Stale {
+	if s := StatusOf(context.Background(), root, tr2, c, units.RootUnit); s.State != Stale {
 		t.Errorf("unit removed, _root still %s", s.State)
 	}
 }
@@ -187,7 +188,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 func TestNotAckedNote(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
-	if s := StatusOf(root, tr, cache(root), "svc"); s.State != Stale || s.Note != NoteNotAcked {
+	if s := StatusOf(context.Background(), root, tr, cache(root), "svc"); s.State != Stale || s.Note != NoteNotAcked {
 		t.Errorf("%+v", s)
 	}
 }
@@ -198,12 +199,12 @@ func TestAckIsIdempotent(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
 	before, _ := os.ReadFile(p)
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := os.ReadFile(p); string(after) != string(before) {
@@ -250,7 +251,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
@@ -258,7 +259,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	if err := os.WriteFile(p, []byte(strings.Replace(string(data), "unit: ok", "unit: other", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(p); !strings.Contains(string(data), "unit: ok") {
@@ -270,7 +271,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 func computeAll(root string, t *units.Tree, c *hashing.Cache) []UnitStatus {
 	var out []UnitStatus
 	for _, u := range t.Units() {
-		out = append(out, StatusOf(root, t, c, u.Path))
+		out = append(out, StatusOf(context.Background(), root, t, c, u.Path))
 	}
 	return out
 }
@@ -284,10 +285,10 @@ func TestAckRecordsCommit(t *testing.T) {
 	sha := strings.Repeat("1f", 20)
 	calls := 0
 	head := func() string { calls++; return sha }
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), head); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), head); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), head); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), head); err != nil {
 		t.Fatal(err)
 	}
 	m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "ok.md"))
@@ -299,24 +300,12 @@ func TestAckRecordsCommit(t *testing.T) {
 	}
 }
 
-// Ack keeps working as a wrapper until its callers move to AckIfNeeded.
-func TestAckWrapper(t *testing.T) {
-	root, tr := setup(t)
-	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
-	if err := Ack(root, tr, cache(root), "ok", time.Now(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if s := StatusOf(root, tr, cache(root), "ok"); s.State != OK || s.Note != "" {
-		t.Errorf("%+v", s)
-	}
-}
-
 // AckIfNeeded tells whether it wrote the doc, and always writes scheme v2.
 func TestAckIfNeededWritten(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil)
+	w, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil)
 	if err != nil || !w {
 		t.Fatalf("first: written=%v err=%v", w, err)
 	}
@@ -324,11 +313,11 @@ func TestAckIfNeededWritten(t *testing.T) {
 	if err != nil || !strings.HasPrefix(m.SourceHash, HashPrefix+"sha256:") {
 		t.Fatalf("hash %q err %v, want the v2 prefix", m.SourceHash, err)
 	}
-	if w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil || w {
+	if w, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil || w {
 		t.Errorf("second: written=%v err=%v", w, err)
 	}
 	testutil.WriteFile(t, root, "ok/a.go", "package x\n// changed\n")
-	if w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil || !w {
+	if w, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil || !w {
 		t.Errorf("after a change: written=%v err=%v", w, err)
 	}
 }
@@ -345,7 +334,7 @@ func writeLegacy(t *testing.T, root string, tr *units.Tree, unit string) {
 			}
 		}
 	}
-	h, err := hashing.SourceHash(root, tr.Files(unit), extra, cache(root))
+	h, err := hashing.SourceHash(context.Background(), root, tr.Files(unit), extra, cache(root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,15 +350,15 @@ func TestLegacyHashIsOKWithNote(t *testing.T) {
 	for _, u := range []string{"ok", units.RootUnit} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
 		writeLegacy(t, root, tr, u)
-		s := StatusOf(root, tr, cache(root), u)
+		s := StatusOf(context.Background(), root, tr, cache(root), u)
 		if s.State != OK || s.Note != NoteOldScheme || !OldScheme(s) || s.Summary != "S." {
 			t.Errorf("%s: %+v, want ok with %q", u, s, NoteOldScheme)
 		}
 	}
-	if w, err := AckIfNeeded(root, tr, cache(root), "ok", time.Now(), nil); err != nil || !w {
+	if w, err := AckIfNeeded(context.Background(), root, tr, cache(root), "ok", time.Now(), nil); err != nil || !w {
 		t.Fatalf("upgrade: written=%v err=%v", w, err)
 	}
-	if s := StatusOf(root, tr, cache(root), "ok"); s.State != OK || s.Note != "" || OldScheme(s) {
+	if s := StatusOf(context.Background(), root, tr, cache(root), "ok"); s.State != OK || s.Note != "" || OldScheme(s) {
 		t.Errorf("after ack: %+v", s)
 	}
 }
@@ -379,7 +368,7 @@ func TestLegacyMismatchIsStale(t *testing.T) {
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nS.\n")
 	writeLegacy(t, root, tr, "ok")
 	testutil.WriteFile(t, root, "ok/a.go", "package x\n// changed\n")
-	if s := StatusOf(root, tr, cache(root), "ok"); s.State != Stale || s.Note != "" || OldScheme(s) {
+	if s := StatusOf(context.Background(), root, tr, cache(root), "ok"); s.State != Stale || s.Note != "" || OldScheme(s) {
 		t.Errorf("%+v, want plain stale", s)
 	}
 }
@@ -387,7 +376,7 @@ func TestLegacyMismatchIsStale(t *testing.T) {
 // Q-L8: _root cannot be excluded, so the hint does not suggest it.
 func TestAckRootMissingMessage(t *testing.T) {
 	root, tr := setup(t)
-	_, err := AckIfNeeded(root, tr, cache(root), units.RootUnit, time.Now(), nil)
+	_, err := AckIfNeeded(context.Background(), root, tr, cache(root), units.RootUnit, time.Now(), nil)
 	if err == nil || err.Error() != "no context/_root.md: create it (the root unit cannot be excluded)" {
 		t.Errorf("err = %v", err)
 	}
@@ -399,7 +388,7 @@ func TestSummaryOf(t *testing.T) {
 	if s := SummaryOf(root, "ok"); s != "Summary of ok." {
 		t.Errorf("not acked: %q", s)
 	}
-	if _, err := AckIfNeeded(root, tr, cache(root), "ok", time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(context.Background(), root, tr, cache(root), "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if s := SummaryOf(root, "ok"); s != "Summary of ok." {
@@ -440,7 +429,7 @@ func TestSourceHashIgnoresUntracked(t *testing.T) {
 	}
 	tr := discover(src)
 	for _, u := range []string{"svc", units.RootUnit} {
-		if _, err := AckIfNeeded(src, tr, cache(src), u, time.Now(), nil); err != nil {
+		if _, err := AckIfNeeded(context.Background(), src, tr, cache(src), u, time.Now(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -450,10 +439,10 @@ func TestSourceHashIgnoresUntracked(t *testing.T) {
 	testutil.Git(t, src, "clone", "-q", src, dst)
 	ctr := discover(dst)
 	for _, u := range []string{"svc", units.RootUnit} {
-		if s := StatusOf(dst, ctr, cache(dst), u); s.State != OK || s.Note != "" {
+		if s := StatusOf(context.Background(), dst, ctr, cache(dst), u); s.State != OK || s.Note != "" {
 			t.Errorf("clone %s: %+v, want ok", u, s)
 		}
-		if s := StatusOf(src, tr, cache(src), u); s.State != OK || s.Note != "" {
+		if s := StatusOf(context.Background(), src, tr, cache(src), u); s.State != OK || s.Note != "" {
 			t.Errorf("work tree %s: %+v, want ok", u, s)
 		}
 	}
@@ -493,9 +482,65 @@ func TestLegacyGoldenGitMode(t *testing.T) {
 		t.Fatalf("fixture is not in git mode: units %v hash units %v", tr.Units(), tr.HashUnits())
 	}
 	for _, u := range []string{"svc", units.RootUnit} {
-		if s := StatusOf(root, tr, cache(root), u); !OldScheme(s) {
-			l, _ := legacyHash(root, tr, cache(root), u)
+		if s := StatusOf(context.Background(), root, tr, cache(root), u); !OldScheme(s) {
+			l, _ := legacyHash(context.Background(), root, tr, cache(root), u)
 			t.Errorf("%s: %+v, want ok with %q (legacyHash now %s)", u, s, NoteOldScheme, l)
 		}
+	}
+}
+
+// A unit whose sources are hashed after the hook's time is up is stale with
+// a fixed detail saying so.
+func TestStatusOfTimeUp(t *testing.T) {
+	root, tr := setup(t)
+	c := cache(root)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	s := StatusOf(ctx, root, tr, cache(root), "ok")
+	if s.State != Stale || s.Note != NoteHashError || s.Detail != TimeUp {
+		t.Errorf("%+v, want stale with %q", s, TimeUp)
+	}
+	if TimeUp != "the hook's time is up" {
+		t.Errorf("TimeUp = %q", TimeUp)
+	}
+}
+
+// StatusOfDoc decides by the doc it is given, not by the file: a doc read
+// before an edit gives the status of that read.
+func TestStatusOfDocUsesGivenDoc(t *testing.T) {
+	root, tr := setup(t)
+	c := cache(root)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	if _, err := AckIfNeeded(context.Background(), root, tr, c, "ok", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	acked := ReadDoc(root, "ok")
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nRewritten.\n") // no frontmatter now
+	if s := StatusOfDoc(context.Background(), root, tr, c, "ok", acked); s.State != OK || s.Summary != "Ok." {
+		t.Errorf("with the acked doc: %+v", s)
+	}
+	if s := StatusOf(context.Background(), root, tr, c, "ok"); s.State != Stale || s.Note != NoteNotAcked {
+		t.Errorf("from the file: %+v", s)
+	}
+}
+
+// An interrupted command (a cancelled context) says so in Detail.
+func TestStatusOfInterrupted(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	if _, err := AckIfNeeded(context.Background(), root, tr, cache(root), "ok", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if s := StatusOf(ctx, root, tr, cache(root), "ok"); s.State != Stale || s.Note != NoteHashError || s.Detail != Interrupted {
+		t.Errorf("%+v, want stale with %q", s, Interrupted)
+	}
+	if Interrupted != "interrupted" {
+		t.Errorf("Interrupted = %q", Interrupted)
 	}
 }

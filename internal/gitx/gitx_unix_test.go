@@ -3,6 +3,7 @@
 package gitx
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func TestRunTimeoutWithGrandchild(t *testing.T) {
 	Timeout = 200 * time.Millisecond
 	defer func() { Timeout = old }()
 	start := time.Now()
-	_, err := Run(t.TempDir(), 0, "version")
+	_, err := Run(context.Background(), t.TempDir(), 0, "version")
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("Run took %v", d)
 	}

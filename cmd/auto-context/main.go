@@ -2,12 +2,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -98,14 +100,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string) i
 			return 0
 		}
 		return runHook(event, agent, stdin, stdout, cwd)
-	case "ack":
-		return runAck(rest, stdout, stderr, cwd)
-	case "status":
-		return runStatus(rest, stdout, stderr, cwd)
-	case "units":
-		return runUnits(rest, stdout, stderr, cwd)
-	case "changes":
-		return runChanges(rest, stdout, stderr, cwd)
+	case "ack", "status", "units", "changes":
+		// An interrupt ends the command's git calls and hashing; a second
+		// one, after stop, kills the process as usual.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		cmd := map[string]func(context.Context, []string, io.Writer, io.Writer, string) int{
+			"ack": runAck, "status": runStatus, "units": runUnits, "changes": runChanges,
+		}[args[0]]
+		return cmd(ctx, rest, stdout, stderr, cwd)
 	case "hook-exit":
 		// Internal, called by the shim only (not in the usage): the binary
 		// died without recovering (a Go fatal error, a kill). Record it so it
@@ -162,8 +165,9 @@ func versionVerbose() string {
 }
 
 // hookSpec is one `auto-context hook <event>`: its handler and how long it
-// may run git in total, a few seconds less than its timeout in
-// hooks/hooks.json and hooks/codex.json, so it still answers in time.
+// may run git and hash in total (Env.Ctx), a few seconds less than its
+// timeout in hooks/hooks.json and hooks/codex.json, so it still answers in
+// time.
 type hookSpec struct {
 	handler     func(hooks.Env, hooks.Input) ([]byte, error)
 	budget      time.Duration
@@ -180,7 +184,7 @@ var hookTable = map[string]hookSpec{
 	"permission-request": {handler: hooks.PermissionRequest, budget: 8 * time.Second, codexOnly: true},
 }
 
-// budgetFor is the git budget of an event for an agent.
+// budgetFor is the budget (git and hashing) of an event for an agent.
 func budgetFor(event string, a hooks.Agent) (time.Duration, bool) {
 	s, ok := hookTable[event]
 	if !ok {
@@ -259,9 +263,11 @@ func runHook(event string, agent hooks.Agent, stdin io.Reader, stdout io.Writer,
 	// bound for very large repositories.
 	debug.SetGCPercent(400)
 	debug.SetMemoryLimit(512 << 20)
+	ctx := context.Background()
 	if b, ok := budgetFor(event, agent); ok {
-		gitx.SetDeadline(time.Now().Add(b))
-		defer gitx.SetDeadline(time.Time{}) // in-process callers (tests) go on without it
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, b)
+		defer cancel()
 	}
 	var in hooks.Input
 	data, readErr := io.ReadAll(io.LimitReader(stdin, maxHookInput+1))
@@ -293,7 +299,7 @@ func runHook(event string, agent hooks.Agent, stdin io.Reader, stdout io.Writer,
 			mismatch = true
 			return err
 		}
-		env := hooks.Env{Root: root, Now: time.Now, Agent: agent, PluginRoot: pluginRoot(agent)}
+		env := hooks.Env{Root: root, Now: time.Now, Agent: agent, PluginRoot: pluginRoot(agent), Ctx: ctx}
 		out, err = spec.handler(env, in)
 		return err
 	}()
@@ -401,8 +407,8 @@ func ackErrText(root, unit string, err error) string {
 // loadRepo finds the root and opens the project for CLI commands, returning
 // the warnings about it; none quotes repository text. The hash cache is not
 // loaded: only status and ack need it (see cacheWarning).
-func loadRepo(cwd string) (*project.Project, []string, error) {
-	p, err := project.Open(cliRoot(cwd))
+func loadRepo(ctx context.Context, cwd string) (*project.Project, []string, error) {
+	p, err := project.Open(ctx, cliRoot(cwd))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -470,7 +476,7 @@ func normUnit(arg string) string {
 	return u
 }
 
-func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
+func runAck(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string) int {
 	mode := ""
 	if len(args) > 0 && (args[0] == "--exclude" || args[0] == "--upgrade") {
 		mode, args = args[0], args[1:]
@@ -483,7 +489,7 @@ func runAck(args []string, stdout, stderr io.Writer, cwd string) int {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
-	p, warns, err := loadRepo(cwd)
+	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
 		return openErr(stderr, cwd, err)
 	}
@@ -579,7 +585,7 @@ type orphansJSON struct {
 	Hidden int      `json:"hidden"`
 }
 
-func runStatus(args []string, stdout, stderr io.Writer, cwd string) int {
+func runStatus(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string) int {
 	stale, exitCode, asJSON := false, false, false
 	for _, a := range args {
 		switch a {
@@ -597,7 +603,7 @@ func runStatus(args []string, stdout, stderr io.Writer, cwd string) int {
 	// Text goes to stdout, warnings included: status is a report, and the
 	// sync skill's `!` injection may not show stderr. JSON output is only
 	// the document, so an open error goes to stderr then.
-	p, warns, err := loadRepo(cwd)
+	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
 		if asJSON {
 			return openErr(stderr, cwd, err)
@@ -729,13 +735,13 @@ type unitJSONItem struct {
 	Files  int    `json:"files"`
 }
 
-func runUnits(args []string, stdout, stderr io.Writer, cwd string) int {
+func runUnits(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string) int {
 	asJSON := len(args) == 1 && args[0] == "--json"
 	if len(args) > 0 && !asJSON {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
-	p, warns, err := loadRepo(cwd)
+	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
 		return openErr(stderr, cwd, err)
 	}

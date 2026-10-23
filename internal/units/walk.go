@@ -1,6 +1,7 @@
 package units
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -74,7 +75,19 @@ type dirInfo struct {
 // The tree has two views: the full one (Units, Files, Tracked, Stats) of
 // tracked and untracked files, and the index view (HashUnits, HashFiles) of
 // files in git's index only. Without git they are the same.
+//
+// Discover is DiscoverContext without a deadline.
 func Discover(root string, cfg config.Config) (*Tree, error) {
+	return DiscoverContext(context.Background(), root, cfg)
+}
+
+// DiscoverContext is Discover bounded by ctx (a hook's budget, an
+// interrupted CLI): an already ended ctx or one ending during the walk gives
+// ErrTimeUp, one ending while git runs ErrGitTimeout.
+func DiscoverContext(ctx context.Context, root string, cfg config.Config) (*Tree, error) {
+	if ctx.Err() != nil {
+		return nil, ErrTimeUp
+	}
 	cfg.Validate() // a Config not from config.Load is checked too
 
 	t := &Tree{cfg: cfg, units: map[string]Unit{}, files: map[string][]string{}, ignores: map[string]ignoreFile{},
@@ -89,7 +102,7 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 
 	dirs := map[string]*dirInfo{".": {}}
 	var idxDirs map[string]*dirInfo // index view, when it differs from dirs
-	files, other, ok, warning, err := gitFiles(root)
+	files, other, ok, warning, err := gitFiles(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +147,7 @@ func Discover(root string, cfg config.Config) (*Tree, error) {
 			}
 			t.addFile(rel, dirs, idx, true, func() (fs.FileInfo, error) { return st.info, st.err })
 		}
-	} else if err := t.walk(root, dirs); err != nil {
+	} else if err := t.walk(ctx, root, dirs); err != nil {
 		return nil, err
 	}
 	slices.Sort(t.tracked)
@@ -408,10 +421,14 @@ func (t *Tree) track(rel string, fi fs.FileInfo) {
 	t.stats[rel] = Stat{MtimeNs: fi.ModTime().UnixNano(), Size: fi.Size()}
 }
 
+// walkCheckEvery is how many entries the walk visits between checks of its
+// context.
+const walkCheckEvery = 256
+
 // walk lists files without git, applying the .gitignore files itself. The
 // files that can matter are lstat'ed in parallel after the walk, as in git
 // mode.
-func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
+func (t *Tree) walk(ctx context.Context, root string, dirs map[string]*dirInfo) error {
 	t.loadGitignore(root, ".")
 	prefix := root
 	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
@@ -419,7 +436,11 @@ func (t *Tree) walk(root string, dirs map[string]*dirInfo) error {
 	}
 	var cands []string // interesting files, neither excluded nor ignored
 	n := 0             // regular files seen, against maxFiles
+	seen := 0          // entries seen, for the ctx check
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if seen++; seen%walkCheckEvery == 0 && ctx.Err() != nil {
+			return ErrTimeUp
+		}
 		// WalkDir yields root and paths under it: cutting the prefix is Rel.
 		rel := "."
 		if p != root {

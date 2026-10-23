@@ -514,18 +514,20 @@ func TestWriteAtomicCleansTmpOnFailure(t *testing.T) {
 }
 
 func TestReadRegularAllocsOnce(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "big")
+	root := t.TempDir()
+	p := filepath.Join(root, "big")
 	if err := os.WriteFile(p, make([]byte, 1<<20), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	allocs := testing.AllocsPerRun(5, func() {
-		if _, err := readRegular(p, 2<<20); err != nil {
+		if _, err := ReadFile(root, p, 2<<20); err != nil {
 			t.Fatal(err)
 		}
 	})
-	// Stat and Open cost about 5 allocations on their own; the old ReadAll
-	// growth took ~30 for 1 MiB, the presized buffer takes 8.
-	if allocs > 8 {
-		t.Errorf("allocs = %v, want <= 8", allocs)
+	// The real path (Resolve, OpenRoot, Stat, Open, Stat) measured 22
+	// allocations with the presized buffer; growing the buffer by doubling, as
+	// the old ReadAll did, adds ~30 more for 1 MiB.
+	if allocs > 24 {
+		t.Errorf("allocs = %v, want <= 24", allocs)
 	}
 }

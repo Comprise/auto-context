@@ -3,6 +3,7 @@
 package docstate
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func TestAckRefusesDocLinkedOutside(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "o.md"), filepath.Join(root, "context", "ok.md")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := AckIfNeeded(root, tr, cache(root), "ok", time.Now(), nil)
+	_, err := AckIfNeeded(context.Background(), root, tr, cache(root), "ok", time.Now(), nil)
 	if !errors.Is(err, fsutil.ErrOutside) {
 		t.Errorf("err = %v, want ErrOutside", err)
 	}
@@ -75,12 +76,12 @@ func TestStatusDetailNeverQuotesPath(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(root, "context", u+".md")); err != nil {
 			t.Fatal(err)
 		}
-		s := StatusOf(root, tr, cache(root), u)
+		s := StatusOf(context.Background(), root, tr, cache(root), u)
 		if s.State != Stale || strings.Contains(s.NoteText(), "SYSTEM") || (s.Detail != "" && !categories[s.Detail]) {
 			t.Errorf("%s: %+v", u, s)
 		}
 	}
-	if s := StatusOf(root, tr, cache(root), "svc"); s.Note != NoteUnreadable || s.Detail != "too large" {
+	if s := StatusOf(context.Background(), root, tr, cache(root), "svc"); s.Note != NoteUnreadable || s.Detail != "too large" {
 		t.Errorf("large doc: %+v", s)
 	}
 }
@@ -97,7 +98,7 @@ func TestStatusOfDirSymlinkIsOutside(t *testing.T) {
 	if err := os.Symlink("../docs/d.md", filepath.Join(root, "context", "ok.md")); err != nil {
 		t.Fatal(err)
 	}
-	if s := StatusOf(root, tr, cache(root), "ok"); s.State != Stale || s.Note != NoteOutside || s.Detail != "" {
+	if s := StatusOf(context.Background(), root, tr, cache(root), "ok"); s.State != Stale || s.Note != NoteOutside || s.Detail != "" {
 		t.Errorf("%+v, want %q", s, NoteOutside)
 	}
 	if k, _, _ := Doc(root, "ok"); k != DocRefused {

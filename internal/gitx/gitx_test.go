@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,13 +25,13 @@ func needGit(t *testing.T) {
 func TestRunAndErrors(t *testing.T) {
 	needGit(t)
 	dir := t.TempDir()
-	if _, err := Run(dir, 0, "init", "-q"); err != nil {
+	if _, err := Run(context.Background(), dir, 0, "init", "-q"); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := Run(dir, 0, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(string(res.Out)) != "true" {
+	if res, err := Run(context.Background(), dir, 0, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(string(res.Out)) != "true" {
 		t.Fatalf("out=%q err=%v", res.Out, err)
 	}
-	_, err := Run(dir, 0, "log")
+	_, err := Run(context.Background(), dir, 0, "log")
 	if Code(err) != 128 || !strings.Contains(err.Error(), "does not have any commits") {
 		t.Errorf("log in empty repo: code=%d err=%v", Code(err), err)
 	}
@@ -42,10 +43,10 @@ func TestRunAndErrors(t *testing.T) {
 func TestRunLimit(t *testing.T) {
 	needGit(t)
 	dir := t.TempDir()
-	if _, err := Run(dir, 0, "init", "-q"); err != nil {
+	if _, err := Run(context.Background(), dir, 0, "init", "-q"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Run(dir, 5, "rev-parse", "--git-dir", "--is-inside-work-tree")
+	res, err := Run(context.Background(), dir, 5, "rev-parse", "--git-dir", "--is-inside-work-tree")
 	if err != nil || len(res.Out) != 5 || !res.Truncated {
 		t.Errorf("out=%q truncated=%v err=%v", res.Out, res.Truncated, err)
 	}
@@ -55,15 +56,15 @@ func TestRunLimit(t *testing.T) {
 func TestRunIgnoresFSMonitor(t *testing.T) {
 	needGit(t)
 	dir := t.TempDir()
-	if _, err := Run(dir, 0, "init", "-q"); err != nil {
+	if _, err := Run(context.Background(), dir, 0, "init", "-q"); err != nil {
 		t.Fatal(err)
 	}
 	marker := dir + "/pwned"
 	if out, err := exec.Command("git", "-C", dir, "config", "core.fsmonitor", "touch "+marker).CombinedOutput(); err != nil {
 		t.Fatalf("%v %s", err, out)
 	}
-	Run(dir, 0, "status", "--short")
-	Run(dir, 0, "ls-files", "-co", "--exclude-standard")
+	Run(context.Background(), dir, 0, "status", "--short")
+	Run(context.Background(), dir, 0, "ls-files", "-co", "--exclude-standard")
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("fsmonitor command was executed")
 	}
@@ -71,7 +72,7 @@ func TestRunIgnoresFSMonitor(t *testing.T) {
 
 func TestNotRun(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := Run(t.TempDir(), 0, "version")
+	_, err := Run(context.Background(), t.TempDir(), 0, "version")
 	if !NotRun(err) || Code(err) != -1 {
 		t.Errorf("err = %v", err)
 	}
@@ -86,7 +87,7 @@ func TestRunForcesEnglish(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	t.Setenv("LC_ALL", "ru_RU.UTF-8")
-	_, err := Run(t.TempDir(), 0, "rev-parse", "HEAD")
+	_, err := Run(context.Background(), t.TempDir(), 0, "rev-parse", "HEAD")
 	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("err = %v", err)
 	}
@@ -103,7 +104,7 @@ func TestRunIgnoresCallerRepoVars(t *testing.T) {
 	}
 	t.Setenv("GIT_DIR", "/nonexistent")
 	t.Setenv("GIT_WORK_TREE", "/nonexistent")
-	if _, err := Run(dir, 0, "rev-parse", "--is-inside-work-tree"); err != nil {
+	if _, err := Run(context.Background(), dir, 0, "rev-parse", "--is-inside-work-tree"); err != nil {
 		t.Errorf("caller's GIT_DIR applied: %v", err)
 	}
 }
@@ -113,20 +114,39 @@ func TestRunTimeout(t *testing.T) {
 	old := Timeout
 	Timeout = time.Nanosecond
 	defer func() { Timeout = old }()
-	_, err := Run(t.TempDir(), 0, "version")
+	_, err := Run(context.Background(), t.TempDir(), 0, "version")
 	var e *Error
 	if !errors.As(err, &e) || !e.TimedOut || Code(err) != -1 {
 		t.Errorf("err = %v", err)
 	}
 }
 
-// Past the process deadline git is not started at all.
+// Past the context's deadline git is not started at all.
 func TestRunPastDeadline(t *testing.T) {
-	SetDeadline(time.Now().Add(-time.Second))
-	defer SetDeadline(time.Time{})
-	_, err := Run(t.TempDir(), 0, "version")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := Run(ctx, t.TempDir(), 0, "version")
 	var e *Error
 	if !errors.As(err, &e) || !e.TimedOut || e.NotRun {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// A parent deadline shorter than Timeout ends a running git.
+func TestRunHonorsParentDeadline(t *testing.T) {
+	needGit(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("no sleep")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := Run(ctx, t.TempDir(), 0, "-c", "alias.zz=!sleep 10", "zz")
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("Run took %v past a 200ms deadline", d)
+	}
+	var e *Error
+	if !errors.As(err, &e) || !e.TimedOut || Code(err) != -1 {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -237,7 +257,7 @@ func TestRunNoLazyFetch(t *testing.T) {
 			}
 			for _, args := range triggers {
 				os.Remove(marker)
-				Run(root, 0, args...)
+				Run(context.Background(), root, 0, args...)
 				if exists(marker) {
 					t.Errorf("the transport command ran under Run %v", args)
 				}
@@ -280,7 +300,7 @@ func TestRunIgnoresShowSignature(t *testing.T) {
 		t.Skip("this git does not verify signatures in log; the PoC does not apply")
 	}
 	os.Remove(marker)
-	if _, err := Run(root, 0, "log", "-n1"); err != nil {
+	if _, err := Run(context.Background(), root, 0, "log", "-n1"); err != nil {
 		t.Fatal(err)
 	}
 	if exists(marker) {
@@ -290,7 +310,7 @@ func TestRunIgnoresShowSignature(t *testing.T) {
 
 func TestNotRepo(t *testing.T) {
 	needGit(t)
-	_, err := Run(t.TempDir(), 0, "rev-parse", "--show-toplevel")
+	_, err := Run(context.Background(), t.TempDir(), 0, "rev-parse", "--show-toplevel")
 	if !NotRepo(err) {
 		t.Errorf("NotRepo(%v) = false", err)
 	}

@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -71,7 +72,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 
 	// Git errors are written by gitx.Brief only: git's stderr may quote
 	// values from the repo's config.
-	switch ok, err := gitx.WorkTreeOK(root); {
+	switch ok, err := gitx.WorkTreeOK(p.ctx, root); {
 	case gitx.NotRun(err):
 		fmt.Fprintf(w, "(git unavailable: git could not be run; read the code against %s)\n", ctx)
 		return nil
@@ -89,7 +90,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	}
 	// `rev-parse --verify -q` exits 1 for a missing HEAD; anything else is a
 	// git failure, not an empty repository.
-	_, headErr := gitx.Run(root, 0, "rev-parse", "--verify", "-q", "HEAD")
+	_, headErr := gitx.Run(p.ctx, root, 0, "rev-parse", "--verify", "-q", "HEAD")
 	hasCommits := headErr == nil
 	if headErr != nil && gitx.Code(headErr) != 1 {
 		fmt.Fprintf(w, "(git failed: %s; read the code against %s)\n", gitx.Brief(headErr), ctx)
@@ -103,14 +104,14 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 			// The id is checked hex, so it cannot be read as an option. Exit 1
 			// is "not an ancestor"; anything else (an unknown commit, a
 			// shallow clone without it, a timeout) means it could not be checked.
-			_, err := gitx.Run(root, 0, "merge-base", "--is-ancestor", ack.commit, "HEAD")
+			_, err := gitx.Run(p.ctx, root, 0, "merge-base", "--is-ancestor", ack.commit, "HEAD")
 			return err == nil, err == nil || gitx.Code(err) == 1
 		}))
 	}
 	// Comparing with the work tree runs clean filters, so do it only when every
 	// filter git would use comes from a trusted scope (see trustedFilters).
 	// Submodules are not entered: their configs are not checked.
-	ok, reason := trustedFilters(root)
+	ok, reason := trustedFilters(p.ctx, root)
 	if !ok {
 		fmt.Fprintf(w, "(%s, so uncommitted changes are not listed; read the code against %s)\n", reason, ctx)
 	} else {
@@ -121,7 +122,7 @@ func (p *Project) writeChanges(w io.Writer, unit string) error {
 	}
 	for _, sec := range sections {
 		fmt.Fprintln(w, sec.title)
-		res, err := gitx.Run(root, maxChangesOutput, append(sec.args, "--", spec)...)
+		res, err := gitx.Run(p.ctx, root, maxChangesOutput, append(sec.args, "--", spec)...)
 		switch {
 		case err != nil:
 			fmt.Fprintf(w, "(git failed: %s)\n", gitx.Brief(err))
@@ -230,8 +231,8 @@ func isCommitID(s string) bool {
 // are trusted (e.g. Git LFS), while the repo's local or worktree config (and
 // what it includes) may have come in an archive. It fails closed: any other
 // scope, an error or a git without --show-scope means false, with the reason.
-func trustedFilters(root string) (bool, string) {
-	res, err := gitx.Run(root, 0, "config", "--show-scope", "--includes", "--get-regexp", `^filter\.`)
+func trustedFilters(ctx context.Context, root string) (bool, string) {
+	res, err := gitx.Run(ctx, root, 0, "config", "--show-scope", "--includes", "--get-regexp", `^filter\.`)
 	switch gitx.Code(err) {
 	case 1:
 		return true, "" // no filter anywhere

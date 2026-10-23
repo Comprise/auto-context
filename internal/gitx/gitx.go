@@ -12,26 +12,11 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 // Timeout bounds one git command. A variable so tests can lower it.
 var Timeout = 20 * time.Second
-
-// deadline (Unix nanoseconds, 0 = none) bounds all commands of the process.
-var deadline atomic.Int64
-
-// SetDeadline makes every later Run end by t: a hook's git calls together
-// must fit in the hook's timeout, or Claude Code kills the hook first. The
-// zero time removes the deadline.
-func SetDeadline(t time.Time) {
-	if t.IsZero() {
-		deadline.Store(0)
-		return
-	}
-	deadline.Store(t.UnixNano())
-}
 
 const maxStderr = 4 << 10
 
@@ -43,8 +28,8 @@ type Result struct {
 
 // Error is a git command that failed. Code is its exit status, or -1 when it
 // did not exit normally: git could not start (NotRun), was killed after
-// Timeout or at the deadline, or not run past it (TimedOut), or killed by a
-// signal.
+// Timeout or when the caller's context ended, or not run after it ended
+// (TimedOut), or killed by a signal.
 type Error struct {
 	Args     []string
 	Code     int
@@ -107,17 +92,18 @@ const waitDelay = time.Second
 // the system config is not read, no transport may run (so a promisor remote
 // never lazy-fetches through a repo-chosen command), git never prompts,
 // speaks English (callers match its messages) and is killed with its whole
-// process group after Timeout or at the deadline (see SetDeadline), whichever
-// comes first. stderr (bounded) is part of the returned error.
-func Run(dir string, limit int, args ...string) (Result, error) {
+// process group after Timeout or when ctx ends (a hook's budget, an
+// interrupted CLI), whichever comes first; once ctx has ended git is not
+// started. stderr (bounded) is part of the returned error.
+func Run(ctx context.Context, dir string, limit int, args ...string) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, &Error{Args: args, Code: -1, TimedOut: true, Stderr: "not run: " + ended(err)}
+	}
 	wait := Timeout
-	if d := deadline.Load(); d != 0 {
-		wait = min(wait, time.Until(time.Unix(0, d)))
+	if d, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(d))
 	}
-	if wait <= 0 {
-		return Result{}, &Error{Args: args, Code: -1, TimedOut: true, Stderr: "not run: the hook's time is up"}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 	full := append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "core.pager=cat",
 		"-c", "log.showSignature=false", "--no-pager"}, args...)
@@ -144,6 +130,9 @@ func Run(dir string, limit int, args ...string) (Result, error) {
 	case ctx.Err() != nil:
 		e.TimedOut = true
 		e.Stderr = "timed out after " + wait.Round(time.Millisecond).String()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			e.Stderr = "canceled"
+		}
 	case errors.As(err, &ee):
 		e.Code = ee.ExitCode()
 	case errors.Is(err, exec.ErrWaitDelay):
@@ -154,6 +143,14 @@ func Run(dir string, limit int, args ...string) (Result, error) {
 		e.Stderr = err.Error()
 	}
 	return res, e
+}
+
+// ended names why a context ended, for Error.Stderr.
+func ended(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "the hook's time is up"
+	}
+	return "canceled"
 }
 
 // repoVars point git at another repository than the one around dir; the

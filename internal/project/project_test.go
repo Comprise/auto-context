@@ -1,8 +1,7 @@
 package project
 
 import (
-	"auto-context/internal/frontmatter"
-	"auto-context/internal/fsutil"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"time"
 
 	"auto-context/internal/config"
+	"auto-context/internal/frontmatter"
+	"auto-context/internal/fsutil"
 	"auto-context/internal/testutil"
 )
 
@@ -23,7 +24,7 @@ func TestOpenAckRefreshSave(t *testing.T) {
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\nexlude: [x]\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +48,7 @@ func TestOpenAckRefreshSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.WriteFile(t, root, "svc/b.go", "package svc\n")
-	p, err = Open(root)
+	p, err = Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestCacheIsLazy(t *testing.T) {
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.WriteFile(t, root, ".auto-context/cache.json", "garbage")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestTrustedFiltersScopes(t *testing.T) {
 		t.Setenv("GIT_CONFIG_COUNT", "1")
 		t.Setenv("GIT_CONFIG_KEY_0", "filter.lfs.clean")
 		t.Setenv("GIT_CONFIG_VALUE_0", "cat")
-		if ok, why := trustedFilters(root); !ok {
+		if ok, why := trustedFilters(context.Background(), root); !ok {
 			t.Errorf("command-line filter not trusted: %s", why)
 		}
 	})
@@ -110,7 +111,7 @@ func TestTrustedFiltersScopes(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		if ok, why := trustedFilters(root); ok || !strings.Contains(why, "could not be checked") {
+		if ok, why := trustedFilters(context.Background(), root); ok || !strings.Contains(why, "could not be checked") {
 			t.Errorf("ok=%v why=%q", ok, why)
 		}
 	})
@@ -122,7 +123,7 @@ func TestWriteChanges(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "include: [svc]\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestConfigCommittable(t *testing.T) {
 		t.Errorf("config ignored=%v gitignore ignored=%v cache ignored=%v",
 			ignored(config.FileName), ignored(".auto-context/.gitignore"), ignored(".auto-context/cache.json"))
 	}
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestWriteChangesSinceAckDate(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/a.go", "package svc // new\n")
 	git(nil, "commit", "-qam", "recent change")
 	testutil.WriteFile(t, root, "context/svc.md", "---\nunit: svc\nsource_hash: x\nupdated: \"2021-06-01\"\n---\n# svc\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +245,7 @@ func TestWriteChangesStripsControls(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.Git(t, root, "add", "-A")
 	testutil.Git(t, root, "commit", "-qm", "evil \x1b]0;pwned\x07\x1b[2Jsubject")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +293,7 @@ func committedRepo(t *testing.T) string {
 // A git failure other than "not ignored" or "no repo" is returned as an
 // error, not taken for "not ignored".
 func TestConfigIgnoredGitFailure(t *testing.T) {
-	p, err := Open(committedRepo(t))
+	p, err := Open(context.Background(), committedRepo(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestConfigIgnoredWithoutGit(t *testing.T) {
 	testutil.WriteFile(t, root, ".auto-context/config.yaml", "min_files: 5\n")
 	testutil.WriteFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
 	t.Setenv("PATH", t.TempDir())
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +324,7 @@ func TestUpdateIndexUsesIndexFile(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
 	testutil.WriteFile(t, root, "svc/a.go", "package svc\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +348,7 @@ func TestUpdateIndexInactiveWritesNothing(t *testing.T) {
 	for _, f := range []string{"f1", "f2", "f3", "f4", "f5"} {
 		testutil.WriteFile(t, root, "pkg/"+f+".go", "package pkg\n")
 	}
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +367,7 @@ func TestOrphans(t *testing.T) {
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n")
 	testutil.WriteFile(t, root, "context/gone.md", "# gone\n")
 	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +386,7 @@ func TestAckTouchedMixed(t *testing.T) {
 	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
 	testutil.WriteFile(t, root, "context/big.md", strings.Repeat("x", frontmatter.MaxSize+1))
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestAckTouchedEmptyKeepsIndex(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
 	testutil.WriteFile(t, root, "context/_root.md", "# root\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +438,7 @@ func TestUpToDateAfterSourceEdit(t *testing.T) {
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
 	testutil.WriteFile(t, root, "svc/main.go", "package svc\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nThe service.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +449,7 @@ func TestUpToDateAfterSourceEdit(t *testing.T) {
 		t.Fatal("not up to date after Ack")
 	}
 	testutil.WriteFile(t, root, "svc/main.go", "package svc\n\nvar changed = 1\n")
-	p, err = Open(root)
+	p, err = Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +461,7 @@ func TestUpToDateAfterSourceEdit(t *testing.T) {
 func TestWarnings(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +469,7 @@ func TestWarnings(t *testing.T) {
 		t.Errorf("clean repo: %v", w)
 	}
 	testutil.WriteFile(t, root, ".gitignore", "*"+strings.Repeat("a", 599)+"\n")
-	p, err = Open(root)
+	p, err = Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +485,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write fa
 func TestWriteChangesReportsWriteError(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteFile(t, root, "svc/go.mod", "module svc\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +504,7 @@ func TestAckRecordsHead(t *testing.T) {
 	testutil.WriteFile(t, root, "other/a.go", "package other\n")
 	testutil.WriteFile(t, root, "context/svc.md", "# svc\n\nS.\n")
 	testutil.WriteFile(t, root, "context/other.md", "# other\n\nO.\n")
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +517,7 @@ func TestAckRecordsHead(t *testing.T) {
 	testutil.Git(t, root, "add", "-A")
 	testutil.Git(t, root, "commit", "-qm", "first")
 	head := strings.TrimSpace(testutil.Git(t, root, "rev-parse", "HEAD"))
-	p, err = Open(root)
+	p, err = Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +565,7 @@ func changesRepo(t *testing.T) (root, acked string, doc func(commit string)) {
 
 func changesOf(t *testing.T, root string) string {
 	t.Helper()
-	p, err := Open(root)
+	p, err := Open(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

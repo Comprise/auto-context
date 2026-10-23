@@ -1,7 +1,9 @@
 package units
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -907,4 +909,55 @@ func TestMaxFiles(t *testing.T) {
 	ok := t.TempDir()
 	mkfiles(t, ok, "a.go", "b.go")
 	discover(t, ok, config.Default())
+}
+
+// An ended context stops discovery in a git repository too, before git runs.
+func TestDiscoverContextEnded(t *testing.T) {
+	root := fixture(t)
+	gitInit(t, root)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := DiscoverContext(ctx, root, config.Default()); !errors.Is(err, ErrTimeUp) {
+		t.Errorf("err = %v, want ErrTimeUp", err)
+	}
+}
+
+// Without git, an ended context stops discovery before the walk.
+func TestDiscoverContextEndedNoGit(t *testing.T) {
+	root := fixture(t)
+	t.Setenv("PATH", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := DiscoverContext(ctx, root, config.Default()); !errors.Is(err, ErrTimeUp) {
+		t.Errorf("err = %v, want ErrTimeUp", err)
+	}
+}
+
+// endsAfter is a context whose Err turns non-nil after n calls.
+type endsAfter struct {
+	context.Context
+	n int
+}
+
+func (e *endsAfter) Err() error {
+	if e.n--; e.n < 0 {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// The walk checks the context as it goes: a context ending mid-walk stops it.
+func TestWalkStopsWhenCtxEnds(t *testing.T) {
+	root := t.TempDir()
+	for i := range 3 * walkCheckEvery {
+		testutil.WriteFile(t, root, fmt.Sprintf("d/f%04d.go", i), "x")
+	}
+	t.Setenv("PATH", t.TempDir()) // no git: Discover walks
+	ctx := &endsAfter{Context: context.Background(), n: 3}
+	if _, err := DiscoverContext(ctx, root, config.Default()); !errors.Is(err, ErrTimeUp) {
+		t.Errorf("err = %v, want ErrTimeUp", err)
+	}
+	if ctx.n > -1 {
+		t.Errorf("context checked %d times too few", ctx.n+1)
+	}
 }

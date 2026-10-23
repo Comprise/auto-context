@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -8,12 +9,12 @@ import (
 )
 
 // runChanges prints Project.WriteChanges for one unit. It needs no hash cache.
-func runChanges(args []string, stdout, stderr io.Writer, cwd string) int {
+func runChanges(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string) int {
 	if len(args) != 1 {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
 	}
-	p, warns, err := loadRepo(cwd)
+	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
 		return openErr(stderr, cwd, err)
 	}

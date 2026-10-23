@@ -4,6 +4,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,7 +15,6 @@ import (
 
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
-	"auto-context/internal/frontmatter"
 	"auto-context/internal/fsutil"
 	"auto-context/internal/gitx"
 	"auto-context/internal/hashing"
@@ -71,6 +71,10 @@ func markerState(root string) (active, refused bool) {
 // tree, cache and config belong together.
 type Project struct {
 	root string
+	// ctx bounds the project's git calls and hashing (a hook's budget, an
+	// interrupted CLI): Open's context, kept because a Project lives for one
+	// hook or command.
+	ctx  context.Context
 	cfg  config.Config
 	tree *units.Tree
 	// cache is loaded on first use: PromptSubmit and most Stops never hash.
@@ -103,14 +107,16 @@ func (p *Project) ConfigProblems() config.Problems { return p.cfgProblems }
 func (p *Project) ConfigErr() error { return p.cfgErr }
 
 // Open loads the config and discovers units; the hash cache loads on first
-// use. Only a failed discovery is an error; config problems are kept.
-func Open(root string) (*Project, error) {
+// use. Only a failed discovery is an error; config problems are kept. ctx
+// bounds every git call and hashing of the project: once it ends, git is not
+// run and hashing stops (statuses then say docstate.TimeUp on a deadline).
+func Open(ctx context.Context, root string) (*Project, error) {
 	cfg, problems, cfgErr := config.Load(root)
-	tree, err := units.Discover(root, cfg)
+	tree, err := units.DiscoverContext(ctx, root, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &Project{root: root, cfg: cfg, tree: tree, cfgProblems: problems, cfgErr: cfgErr}, nil
+	return &Project{root: root, ctx: ctx, cfg: cfg, tree: tree, cfgProblems: problems, cfgErr: cfgErr}, nil
 }
 
 // ErrConfigBroken refuses an operation that would act on the default units
@@ -136,7 +142,7 @@ func (p *Project) ConfigIgnored() (bool, error) {
 	if _, err := os.Lstat(fsutil.Abs(p.root, config.FileName)); err != nil {
 		return false, nil
 	}
-	_, err := gitx.Run(p.root, 0, "check-ignore", "-q", "--", config.FileName)
+	_, err := gitx.Run(p.ctx, p.root, 0, "check-ignore", "-q", "--", config.FileName)
 	switch {
 	case err == nil:
 		return true, nil
@@ -214,7 +220,7 @@ func (p *Project) Prewarm(files []string) {
 	if len(files) == 0 {
 		return // nothing to hash: do not load the cache
 	}
-	p.Cache().Prewarm(p.root, files, func() { _ = p.SaveCache() }, cacheSaveEvery)
+	p.Cache().Prewarm(p.ctx, p.root, files, func() { _ = p.SaveCache() }, cacheSaveEvery)
 }
 
 // cacheSaveEvery is how often Statuses and Prewarm save the hash cache while hashing, so
@@ -227,12 +233,16 @@ func (p *Project) Statuses() []docstate.UnitStatus {
 	// Hash what changed in parallel first (the caller's final SaveCache
 	// reports save errors), only for the units whose docs record a hash: the
 	// others are missing or not acked and need none.
+	// Each doc is read once: the statuses reuse what was read here.
+	us := p.tree.Units()
+	docs := make([]docstate.DocText, len(us))
 	var files []string
-	for _, u := range p.tree.Units() {
-		meta, _, err := frontmatter.Read(p.root, fsutil.Abs(p.root, units.ContextPath(u.Path)))
+	for i, u := range us {
+		d := docstate.ReadDoc(p.root, u.Path)
+		docs[i] = d
 		switch {
-		case err != nil || meta.SourceHash == "":
-		case strings.HasPrefix(meta.SourceHash, docstate.HashPrefix):
+		case d.Err != nil || d.Meta.SourceHash == "":
+		case strings.HasPrefix(d.Meta.SourceHash, docstate.HashPrefix):
 			files = append(files, p.tree.HashFiles(u.Path)...)
 		default:
 			files = append(files, p.tree.Files(u.Path)...) // the old scheme
@@ -240,16 +250,16 @@ func (p *Project) Statuses() []docstate.UnitStatus {
 	}
 	p.Prewarm(files)
 	c := p.Cache()
-	var out []docstate.UnitStatus
-	for _, u := range p.tree.Units() {
-		out = append(out, docstate.StatusOf(p.root, p.tree, c, u.Path))
+	out := make([]docstate.UnitStatus, 0, len(us))
+	for i, u := range us {
+		out = append(out, docstate.StatusOfDoc(p.ctx, p.root, p.tree, c, u.Path, docs[i]))
 	}
 	return out
 }
 
 // UpToDate reports whether unit's docs match its current sources.
 func (p *Project) UpToDate(unit string) bool {
-	return docstate.StatusOf(p.root, p.tree, p.Cache(), unit).State == docstate.OK
+	return docstate.StatusOf(p.ctx, p.root, p.tree, p.Cache(), unit).State == docstate.OK
 }
 
 // Ack records the current source hash of unit in its context doc.
@@ -267,7 +277,7 @@ func (p *Project) ackIfNeeded(unit string, now time.Time) (bool, error) {
 	case p.cfg.DiscoveryReset:
 		return false, ErrConfigDegraded
 	}
-	return docstate.AckIfNeeded(p.root, p.tree, p.Cache(), unit, now, p.headCommit)
+	return docstate.AckIfNeeded(p.ctx, p.root, p.tree, p.Cache(), unit, now, p.headCommit)
 }
 
 // Upgrade acks the units whose docs are up to date by the old hash scheme
@@ -290,11 +300,11 @@ func (p *Project) Upgrade(now time.Time) (acked []string, failed map[string]erro
 
 // headCommit returns HEAD's full commit id, or "" when git fails or there are
 // no commits: an ack never fails because of git. One git call per Project,
-// within the hook's deadline (gitx.SetDeadline).
+// within the project's context (a hook's budget).
 func (p *Project) headCommit() string {
 	if !p.headDone {
 		p.headDone = true
-		if res, err := gitx.Run(p.root, 0, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
+		if res, err := gitx.Run(p.ctx, p.root, 0, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
 			if id := strings.TrimSpace(string(res.Out)); isCommitID(id) {
 				p.head = id
 			}
@@ -428,7 +438,7 @@ func (p *Project) exactName(dir string) error {
 // reload rereads the config and the unit tree after Exclude changed the
 // config; a loaded cache is kept and reads the new tree's stats.
 func (p *Project) reload() error {
-	q, err := Open(p.root)
+	q, err := Open(p.ctx, p.root)
 	if err != nil {
 		return err
 	}
