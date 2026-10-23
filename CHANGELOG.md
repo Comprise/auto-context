@@ -50,6 +50,11 @@ Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are 
   2026-10-23.
 - A hook that runs out of time stops git, file discovery and hashing and answers with what it has (units not hashed, or a time-up notice) instead of being killed.
 - Parallel sessions in one tree keep each other's hashes in the cache.
+- Linked worktrees created with relative paths (`worktree.useRelativePaths`, git 2.48+) use git
+  instead of falling back to walking the tree.
+- On Linux git dies with a hook the agent kills on its timeout instead of being left running.
+- `ack` keeps the comments of unknown frontmatter keys in files with CRLF line ends.
+- `/auto-context:sync` also reports docs acked in the old hash scheme and suggests `auto-context ack --upgrade`.
 
 ### Added
 

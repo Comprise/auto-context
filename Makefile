@@ -13,11 +13,20 @@ build:
 	$(BUILD) -o libexec/auto-context-$$GOOS-$$GOARCH$$EXT ./cmd/auto-context
 
 # test: with the race detector, which needs cgo and a C compiler; without one,
-# `make test RACE=`.
+# `make test RACE=`. On Linux it is the CI test step: shuffled, and the -json
+# stream goes through check-skips.sh (needs jq), which fails on a failed test
+# and on a skip not in .github/scripts/allowed-skips.txt.
 RACE ?= -race
 test:
 	go vet ./...
-	go test $(RACE) ./...
+	@if [ "$$(go env GOOS)" = linux ]; then \
+		tmp=$$(mktemp) || exit 1; \
+		go test $(RACE) -shuffle=on -json ./... > "$$tmp"; st=$$?; \
+		sh .github/scripts/check-skips.sh < "$$tmp"; ck=$$?; rm -f "$$tmp"; \
+		[ $$ck -eq 0 ] && exit $$st; exit $$ck; \
+	else \
+		go test $(RACE) ./...; \
+	fi
 
 # lint: what the CI lint job checks. shellcheck is skipped when not installed
 # (CI installs a pinned one); govulncheck needs the network.

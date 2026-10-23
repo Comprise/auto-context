@@ -3,6 +3,7 @@ package gitx
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -174,4 +175,96 @@ func TestWorkTreeOKCoreWorktreeAbove(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantWorkTree(t, sub, true)
+}
+
+// relWorktreeAdd runs `git worktree add` with worktree.useRelativePaths=true
+// (git 2.48+): the admin dir's `gitdir` file then holds a path relative to
+// that admin dir. An older git ignores the setting and writes an absolute
+// path, which the tests accept as well; only a git that rejects the option
+// skips.
+func relWorktreeAdd(t *testing.T, main, wt string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", main, "-c", "worktree.useRelativePaths=true", "worktree", "add", "-q", wt)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if strings.Contains(string(out), "useRelativePaths") {
+			t.Skipf("git rejects worktree.useRelativePaths: %s", out)
+		}
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+}
+
+// adminGitdir returns the content of the `gitdir` file of linked worktree n.
+func adminGitdir(t *testing.T, main, n string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(main, ".git", "worktrees", n, "gitdir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// A linked worktree made with relative paths: the back-pointer is resolved
+// against the admin dir, not the process cwd.
+func TestWorkTreeOKLinkedWorktreeRelative(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	main := filepath.Join(base, "main")
+	if err := os.Mkdir(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initRepo(t, main)
+	for _, wt := range []string{filepath.Join(base, "wt"), filepath.Join(main, ".wt", "in")} {
+		relWorktreeAdd(t, main, wt)
+		t.Logf("gitdir of %s: %s", filepath.Base(wt), adminGitdir(t, main, filepath.Base(wt)))
+		wantWorkTree(t, wt, true)
+	}
+	wantWorkTree(t, main, true)
+}
+
+// A submodule in a linked worktree beside its main repository, the worktree
+// made with relative paths: the sibling check reads the same relative
+// back-pointer.
+func TestWorkTreeOKSubmoduleInRelativeWorktree(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	lib := filepath.Join(base, "lib")
+	main := filepath.Join(base, "main")
+	for _, d := range []string{lib, main} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		initRepo(t, d)
+	}
+	testutil.Git(t, main, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib")
+	testutil.Git(t, main, "commit", "-qm", "submodule")
+	wt := filepath.Join(base, "wt")
+	relWorktreeAdd(t, main, wt)
+	testutil.Git(t, wt, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
+	wantWorkTree(t, filepath.Join(wt, "lib"), true)
+}
+
+// The relative back-pointer is still checked: a .git file pointing at an
+// ancestor's relative linked-worktree dir, or at a worktree dir whose
+// relative `gitdir` names another tree, is refused.
+func TestWorkTreeOKRelativeGitdirHostile(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	main := filepath.Join(base, "main")
+	if err := os.Mkdir(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initRepo(t, main)
+	relWorktreeAdd(t, main, filepath.Join(base, "wt"))
+	admin := filepath.Join(main, ".git", "worktrees", "wt")
+
+	root := filepath.Join(main, "evil")
+	testutil.WriteFile(t, root, ".git", "gitdir: "+admin+"\n")
+	wantWorkTree(t, root, false)
+
+	// The real worktree with its back-pointer bent to a sibling directory:
+	// git still uses the admin dir, the check must not accept it.
+	other := filepath.Join(base, "other")
+	testutil.WriteFile(t, other, ".git", "gitdir: "+admin+"\n")
+	testutil.WriteFile(t, admin, "gitdir", "../../../../wt/.git\n")
+	wantWorkTree(t, other, false)
 }

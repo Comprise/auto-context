@@ -78,23 +78,25 @@ const (
 // Severity is the severity of the problems of code c (from the code table).
 func (c ProblemCode) Severity() Severity { return problemTable[c].severity }
 
-// newProblem builds a problem of code with its severity from the code table.
+// newProblem builds a problem of code.
 func newProblem(code ProblemCode, err error, n int) Problem {
-	return Problem{Code: code, Severity: code.Severity(), Err: err, N: n}
+	return Problem{Code: code, Err: err, N: n}
 }
 
 // Problem is one finding of Diagnose (or of an operation, such as saving
-// the cache or writing the index). Severity is the code's (Diagnose and
-// IndexProblem fill it from the code table); Err is the cause, for the log
-// only; Unit is the unit concerned, for per-unit problems (none of
-// Diagnose's checks is per unit); N is a count the text shows.
+// the cache or writing the index). Err is the cause, for the log only; Unit
+// is the unit concerned, for per-unit problems (none of Diagnose's checks is
+// per unit); N is a count the text shows. Its severity is its code's, so a
+// literal Problem cannot carry a wrong one.
 type Problem struct {
-	Code     ProblemCode
-	Severity Severity
-	Unit     string
-	Err      error
-	N        int
+	Code ProblemCode
+	Unit string
+	Err  error
+	N    int
 }
+
+// Severity is the severity of p's code (from the code table).
+func (p Problem) Severity() Severity { return p.Code.Severity() }
 
 // Diagnose runs every health check of the project: activation, the state
 // dir, the config (unreadable, invalid or unit-deciding settings dropped,

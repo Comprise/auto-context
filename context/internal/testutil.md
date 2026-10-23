@@ -11,8 +11,8 @@ updated: "2026-10-23"
 Тесты не должны зависеть от сессии и git-настроек разработчика (`CLAUDE_PROJECT_DIR`, `GIT_DIR`, глобальный `commit.gpgsign`). Пакет даёт один `TestMain` и общие хелперы вместо локальных копий.
 
 ## Публичный API / точки входа
-- `ScrubEnv()` — снимает все `GIT_*`, `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `PLUGIN_ROOT`, `PLUGIN_DATA`, `CODEX_HOME`; ставит `GIT_CONFIG_GLOBAL=os.DevNull`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CEILING_DIRECTORIES=filepath.Dir(os.TempDir())` (git не ищет репозиторий выше корня временных каталогов) и автора/коммитера `t`/`t@t`.
-- `Main(m)` — тело `TestMain`: `ScrubEnv()`, затем `os.Exit(m.Run())`.
+- `ScrubEnv()` — снимает все `GIT_*`, `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `PLUGIN_ROOT`, `PLUGIN_DATA`, `CODEX_HOME`; ставит `GIT_CONFIG_GLOBAL=os.DevNull`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CEILING_DIRECTORIES=filepath.Dir(os.TempDir())` (git не ищет репозиторий выше корня временных каталогов) и автора/коммитера `t`/`t@t`; `XDG_CONFIG_HOME` — пустой временный каталог (один на процесс, `Main` удаляет его): глобальные excludes и attributes по умолчанию (`$XDG_CONFIG_HOME/git/ignore`) git читает и при `GIT_CONFIG_GLOBAL`.
+- `Main(m)` — тело `TestMain`: `ScrubEnv()`, `m.Run()`, удаление пустого `XDG_CONFIG_HOME`, `os.Exit`.
 - `WriteFile(t, root, rel, content)` — пишет файл, создаёт каталоги; `rel` через `/`.
 - `RequireGit(t)` — `t.Skip`, если git не установлен.
 - `Symlink(t, target, link)` — создаёт родительский каталог и симлинк; `t.Skip` только на Windows при `os.ErrPermission`, иначе `t.Fatal`.

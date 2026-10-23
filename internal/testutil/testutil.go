@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,9 +16,22 @@ var scrubbed = []string{
 	"PLUGIN_ROOT", "PLUGIN_DATA", "CODEX_HOME",
 }
 
+// emptyConfig is the XDG_CONFIG_HOME of the tests: an empty directory made
+// once per process (removed by Main).
+var emptyConfig = sync.OnceValue(func() string {
+	d, err := os.MkdirTemp("", "testutil-xdg-")
+	if err != nil {
+		panic(err)
+	}
+	return d
+})
+
 // ScrubEnv removes the agent and GIT_* variables of the developer's session
 // and pins a git identity, so tests behave the same everywhere. HOME is left
 // alone: the root lookup and the shim depend on it, and tests set it themselves.
+// XDG_CONFIG_HOME points at an empty directory: git reads its default global
+// excludes and attributes ($XDG_CONFIG_HOME/git/ignore, git/attributes) even
+// with GIT_CONFIG_GLOBAL set.
 func ScrubEnv() {
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "GIT_") {
@@ -37,6 +51,7 @@ func ScrubEnv() {
 		"GIT_AUTHOR_EMAIL":        "t@t",
 		"GIT_COMMITTER_NAME":      "t",
 		"GIT_COMMITTER_EMAIL":     "t@t",
+		"XDG_CONFIG_HOME":         emptyConfig(),
 	} {
 		os.Setenv(k, v)
 	}
@@ -45,7 +60,9 @@ func ScrubEnv() {
 // Main is the body of TestMain: scrub the environment, then run the tests.
 func Main(m *testing.M) {
 	ScrubEnv()
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(emptyConfig())
+	os.Exit(code)
 }
 
 // WriteFile writes content to root/rel (rel uses "/"), creating directories.

@@ -600,10 +600,22 @@ func TestPrewarmSaveDoesNotStallWorkers(t *testing.T) {
 		return time.Since(start)
 	}
 	base := run(nil)
-	slow := run(func() { time.Sleep(200 * time.Millisecond) })
-	if slow > base+300*time.Millisecond {
-		t.Errorf("with slow save %v, without %v", slow, base)
+	const pause = 200 * time.Millisecond
+	slow := run(func() { time.Sleep(pause) })
+	// Prewarm waits for the save it started, so slow is at least pause; a
+	// save that stalled the workers would add the hashing time on top.
+	if bound := max(base, pause) + slack(300*time.Millisecond); slow > bound {
+		t.Errorf("with slow save %v, without %v (bound %v)", slow, base, bound)
 	}
+}
+
+// slack is a wall-clock margin, ten times wider under the race detector (it
+// slows the hashing several times and CI runs it shuffled with -race).
+func slack(d time.Duration) time.Duration {
+	if raceOn {
+		return 10 * d
+	}
+	return d
 }
 
 // An ended context stops SourceHash with the context's error.

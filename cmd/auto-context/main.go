@@ -414,7 +414,7 @@ func loadRepo(ctx context.Context, cwd string) (*project.Project, []string, erro
 	r := cliRender(p)
 	var warns []string
 	for _, pr := range p.DiagnoseOpen() {
-		if pr.Severity == project.SeverityWarning {
+		if pr.Severity() == project.SeverityWarning {
 			warns = append(warns, pr.Text(project.CLI, r))
 		}
 	}
@@ -662,7 +662,7 @@ func renderStatusProblems(p *project.Project, diag []project.Problem, saved []st
 		case project.ProblemIndexMarkers, project.ProblemIndexUnusable:
 			index = append(index, pr.Text(project.CLI, r))
 		default:
-			if pr.Severity == project.SeverityNote {
+			if pr.Severity() == project.SeverityNote {
 				notes = append(notes, pr.Text(project.CLI, r))
 			} else {
 				warns = append(warns, pr.Text(project.CLI, r))
@@ -681,7 +681,7 @@ func renderStatusProblems(p *project.Project, diag []project.Problem, saved []st
 		logs = slices.DeleteFunc(logs, func(pr project.Problem) bool { return pr.Code != project.ProblemLogUnreadable })
 	}
 	for _, pr := range logs {
-		if pr.Severity == project.SeverityNote {
+		if pr.Severity() == project.SeverityNote {
 			notes = append(notes, pr.Text(project.CLI, r))
 		} else {
 			warns = append(warns, pr.Text(project.CLI, r))

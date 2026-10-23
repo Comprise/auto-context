@@ -793,8 +793,17 @@ func TestHashViewIgnoresLocalExcludes(t *testing.T) {
 	mkfiles(t, root, "svc/go.mod", "svc/a.go", "lib/a.go", "lib/b.go", "lib/c.go", "lib/d.go", "lib/e.go")
 	gitInit(t, root)
 	commitAll(t, root)
+	// Untracked, not excluded yet: the full view differs from the hash view
+	// in the "before" run too, so both runs take the dual-view path.
+	mkfiles(t, root, "svc/scratch.go", "extra/go.mod", "extra/x.go")
 	before := discover(t, root, config.Default())
-	if err := os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte("*.go\nlib/\n"), 0o644); err != nil {
+	if !slices.Contains(before.Files("svc"), "svc/scratch.go") || slices.Contains(before.HashFiles("svc"), "svc/scratch.go") {
+		t.Fatalf("before: Files %v HashFiles %v", before.Files("svc"), before.HashFiles("svc"))
+	}
+	if !before.IsUnit("extra") || slices.Contains(before.HashUnits(), "extra") {
+		t.Fatalf("before: untracked unit extra: IsUnit %v HashUnits %v", before.IsUnit("extra"), before.HashUnits())
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte("*.go\nlib/\nextra/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mkfiles(t, root, "svc/new.go")

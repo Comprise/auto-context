@@ -62,8 +62,26 @@ func WorkTreeOK(ctx context.Context, root string) (bool, error) {
 
 // pointsAt reports whether the `gitdir` file in dir names want.
 func pointsAt(dir, want string) bool {
+	back, ok := backPointer(dir)
+	return ok && back == want
+}
+
+// backPointer reads the `gitdir` file of a linked worktree's admin dir: the
+// path of the worktree's `.git` file. With worktree.useRelativePaths (git
+// 2.48+) it is relative to dir itself, not to the process cwd.
+func backPointer(dir string) (string, bool) {
 	b, err := os.ReadFile(filepath.Join(dir, "gitdir"))
-	return err == nil && resolve(strings.TrimSpace(string(b))) == want
+	if err != nil {
+		return "", false
+	}
+	p := filepath.FromSlash(strings.TrimSpace(string(b)))
+	if p == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	return resolve(p), true
 }
 
 // submoduleDir reports whether gitDir is a submodule's git dir of a
@@ -94,11 +112,11 @@ func submoduleDir(gitDir, root string) bool {
 			continue
 		}
 		wt := strings.Join(parts[:i+2], string(filepath.Separator))
-		b, err := os.ReadFile(filepath.Join(wt, "gitdir"))
-		if err != nil {
+		back, ok := backPointer(wt)
+		if !ok {
 			continue
 		}
-		if back := resolve(strings.TrimSpace(string(b))); filepath.Base(back) == ".git" {
+		if filepath.Base(back) == ".git" {
 			if w := filepath.Dir(back); w != root && within(root, w) {
 				return true
 			}

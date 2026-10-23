@@ -65,7 +65,7 @@ func TestProblemTableComplete(t *testing.T) {
 		if !ok || (spec.severity != SeverityWarning && spec.severity != SeverityNote) {
 			t.Errorf("code %d: %+v", c, spec)
 		}
-		if newProblem(c, nil, 0).Severity != spec.severity {
+		if newProblem(c, nil, 0).Severity() != spec.severity || (Problem{Code: c}).Severity() != spec.severity {
 			t.Errorf("code %d: severity not from the table", c)
 		}
 	}

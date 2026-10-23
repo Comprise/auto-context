@@ -77,7 +77,12 @@ To update, see [Updating](#updating) (auto-update for third-party marketplaces i
 - A project at one version works with one binary at a time, so do not mix versions in one repository: the doc
   format on disk changes between releases (see `CHANGELOG.md`). A project written by v1.0.0 needs a one-time
   `auto-context ack --upgrade` after the update (see [CI](#ci)).
-- **Pinning a version.** Every release is also tagged `dist/vX.Y.Z` on the `release` branch. For Codex:
+- **Upgrade every machine together.** Plugin v1.0.0 does not understand `v2:` hashes and rewrites them back to
+  `sha256:` on its own auto-ack, so one teammate still on v1.0.0 undoes the upgrade for everyone.
+- **Pinning a version.** Every release is also tagged `dist/vX.Y.Z` on a commit of the release history. For a stable
+  version the `release` branch moved to, that commit is on `release`; a pre-release's tag is on the `release-next`
+  line, and a stable version released below the branch's current one (a fix for an older line) gets a commit off
+  the branch. For Codex:
   `codex plugin marketplace add Comprise/auto-context --ref dist/vX.Y.Z`. Whether Claude Code's
   `/plugin marketplace add` accepts a ref for a GitHub source depends on your Claude Code version; check `/plugin`
   help, this has not been verified here. The `dist/` tags appear with the first release that publishes them. Pre-release tags move the `release-next`
@@ -309,7 +314,7 @@ What it does not guarantee, and what you should treat as untrusted data:
 ## Development
 
 ```sh
-make test                                   # go vet + go test (needs Go 1.27 and git)
+make test                                   # go vet + go test -race (needs Go 1.27, git, a C compiler; on Linux also jq)
 make dist                                   # binaries for 6 platforms into libexec/
 claude --plugin-dir /path/to/auto-context   # run Claude Code with the local version (after make dist)
 ```

@@ -93,3 +93,19 @@ func TestFakeGit(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// The developer's default global excludes ($XDG_CONFIG_HOME/git/ignore,
+// read even with GIT_CONFIG_GLOBAL set) do not reach the tests.
+func TestScrubEnvHidesGlobalExcludes(t *testing.T) {
+	RequireGit(t)
+	xdg := t.TempDir()
+	WriteFile(t, xdg, "git/ignore", "*.zz\n")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	ScrubEnv()
+	repo := t.TempDir()
+	Git(t, repo, "init", "-q")
+	WriteFile(t, repo, "a.zz", "x")
+	if out := Git(t, repo, "status", "--porcelain", "--untracked-files=all"); !strings.Contains(out, "a.zz") {
+		t.Errorf("a.zz hidden by the developer's global excludes: %q", out)
+	}
+}

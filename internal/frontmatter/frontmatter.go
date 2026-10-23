@@ -115,7 +115,10 @@ func SetHash(root, path, unit, hash, commit string, today time.Time) error {
 	m := Meta{Unit: unit, SourceHash: hash, Commit: commit, Updated: today.Format("2006-01-02")}
 	old := ""
 	if yml, rest, ok := split(body); ok && oursRe.MatchString(yml) {
-		body, old = rest, yml
+		// Parsed with LF line ends: yaml.v3 drops the comments of a CRLF
+		// block. YAML folds line breaks in values to LF anyway, and the
+		// block is written back with the file's line end below.
+		body, old = rest, strings.ReplaceAll(yml, "\r\n", "\n")
 	}
 	y, err := render(old, m)
 	if err != nil {
