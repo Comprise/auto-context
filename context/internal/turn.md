@@ -1,3 +1,9 @@
+---
+unit: internal/turn
+source_hash: v2:sha256:cf2d73d38de5ec6d79760314c0f299ad55eb2b218e23cb4ea8adcb7ac8cfea1d
+commit: 0e4d636f85b1363e33f670aeb1fc039758bf541a
+updated: "2026-10-24"
+---
 # internal/turn
 Правила хода: что Stop считает обновлением доков, когда допустим auto-ack, какие юниты требуют напоминания.
 
