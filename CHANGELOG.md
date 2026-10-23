@@ -2,7 +2,7 @@
 
 Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are the section `## vX.Y.Z` of this file.
 
-## v2.0.0
+## v1.1.0
 
 ### Breaking
 

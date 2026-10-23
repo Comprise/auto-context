@@ -2,7 +2,7 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md). Заметки релиза тега — раздел `## vX.Y.Z` файла CHANGELOG.md.
 
-## v2.0.0
+## v1.1.0
 
 ### Breaking
 
