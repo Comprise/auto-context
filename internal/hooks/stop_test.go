@@ -15,6 +15,7 @@ import (
 	"auto-context/internal/config"
 	"auto-context/internal/docstate"
 	"auto-context/internal/fsutil"
+	"auto-context/internal/project"
 	"auto-context/internal/session"
 	"auto-context/internal/testutil"
 	"auto-context/internal/units"
@@ -326,7 +327,7 @@ func TestStopNewUnitAndExclude(t *testing.T) {
 		t.Fatalf("reason lacks exclude hint: %q", r)
 	}
 	// A new unit changes _root's unit list: _root is reported with it.
-	if !strings.Contains(r, "code changed in _root ") {
+	if !strings.Contains(r, "Unit list changed under _root: check context/_root.md.") {
 		t.Errorf("reason lacks _root: %q", r)
 	}
 	if err := config.AddExclude(env.Root, "pkg/new"); err != nil {
@@ -338,20 +339,183 @@ func TestStopNewUnitAndExclude(t *testing.T) {
 	}
 }
 
+// A documented unit removed this turn raises its parent and _root, and its
+// doc is named as left behind in the same turn, once (HS-3).
 func TestStopUnitDirDeleted(t *testing.T) {
 	env := newRepo(t, false)
 	testutil.WriteFile(t, env.Root, "svc/auth/go.mod", "module auth\n")
 	testutil.WriteFile(t, env.Root, "svc/auth/auth.go", "package auth\n")
+	testutil.WriteFile(t, env.Root, "context/svc/auth.md", "# auth\n\nAuth.\n")
+	ack(t, env, "svc", "svc/auth", "_root")
 	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(env.Root, "svc", "auth")); err != nil {
+	remove(t, env.Root, "svc/auth")
+	r := feedback(t, stop(t, env))
+	for _, want := range []string{
+		"Unit list changed under svc: check context/svc.md.",
+		"Unit list changed under _root: check context/_root.md.",
+		"docs of units removed this turn: context/svc/auth.md; ask the user",
+	} {
+		if !strings.Contains(r, want) {
+			t.Errorf("reason lacks %q: %q", want, r)
+		}
+	}
+	if strings.Contains(r, "code changed in") {
+		t.Errorf("parents reported as code changes: %q", r)
+	}
+	if out := stop(t, env); out != nil {
+		t.Errorf("second Stop: %s", out)
+	}
+}
+
+// A unit without docs that existed before the turn is not new: editing it
+// does not raise _root (HS-4).
+func TestStopOldMissingUnitNoFalseCodeChanged(t *testing.T) {
+	env := newRepo(t, true) // lib has no docs
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
 		t.Fatal(err)
 	}
-	// svc's own sources did not change, so Stop has nothing to say about svc;
-	// the removed unit's docs are reported as orphans at the next SessionStart.
+	testutil.WriteFile(t, env.Root, "lib/lib.go", "package lib\n// changed\n")
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "New unit lib") {
+		t.Errorf("reason lacks lib: %q", r)
+	}
+	if strings.Contains(r, "_root") || strings.Contains(r, "Unit list changed") {
+		t.Errorf("old unit raised _root: %q", r)
+	}
+}
+
+// countAckTouched counts the AckTouched calls with units to ack (each
+// rebuilds the root index).
+func countAckTouched(t *testing.T) *int {
+	t.Helper()
+	n := new(int)
+	orig := ackTouched
+	ackTouched = func(p *project.Project, touched []string, now time.Time) ([]string, map[string]error, error) {
+		if len(touched) > 0 {
+			*n++
+		}
+		return orig(p, touched, now)
+	}
+	t.Cleanup(func() { ackTouched = orig })
+	return n
+}
+
+// A docs edit is auto-acked by the Stop that first sees it; later Stops of the
+// turn with no new change do not ack again or rebuild the index (P-M2).
+func TestStopRecordsOnlyThisStopDocs(t *testing.T) {
+	calls := countAckTouched(t)
+	env := turn(t)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	feedback(t, stop(t, env))
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, updated.\n")
 	if out := stop(t, env); out != nil {
-		t.Errorf("stop out = %s", out)
+		t.Fatalf("out = %s", out)
+	}
+	if *calls != 1 {
+		t.Fatalf("AckTouched calls = %d, want 1", *calls)
+	}
+	for range 2 {
+		if out := stop(t, env); out != nil {
+			t.Fatalf("out = %s", out)
+		}
+	}
+	if *calls != 1 {
+		t.Errorf("AckTouched calls after quiet Stops = %d, want 1", *calls)
+	}
+	if got := unitState(t, env, "svc"); got != docstate.OK {
+		t.Errorf("svc = %s", got)
+	}
+	// A new docs edit later in the turn is acked again.
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, updated twice.\n")
+	if out := stop(t, env); out != nil || *calls != 2 {
+		t.Errorf("out = %s, calls = %d, want 2", out, *calls)
+	}
+	// The next turn starts without the seen docs.
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	if stateFileExists(t, seenDocsPath(env.Root, stopSID)) {
+		t.Error("seen docs kept across turns")
+	}
+}
+
+// A journal that is garbage is logged and replaced: the feedback comes once,
+// not on every Stop. A journal that cannot be written gives none (T-L4).
+func TestStopCorruptJournalOnce(t *testing.T) {
+	env := turn(t)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/state/"+stopSID+".json", "{garbage")
+	feedback(t, stop(t, env))
+	if out := stop(t, env); out != nil {
+		t.Errorf("second Stop: %s", out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(env.Root, ".auto-context", "log")); !strings.Contains(string(data), "journal unreadable") {
+		t.Errorf("log = %q", data)
+	}
+
+	env = turn(t)
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	testutil.WriteFile(t, env.Root, ".auto-context/state/"+stopSID+".json/x", "")
+	for i := range 2 {
+		if out := stop(t, env); out != nil {
+			t.Errorf("journal is a directory, Stop %d: %s", i, out)
+		}
+	}
+}
+
+// A hash cache that cannot be saved is logged; Stop answers as usual (T-L6).
+func TestStopCacheSaveErrorLogged(t *testing.T) {
+	env := turn(t)
+	cache := filepath.Join(env.Root, ".auto-context", "cache.json")
+	if err := os.Remove(cache); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, env.Root, ".auto-context/cache.json/x", "")
+	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
+	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
+		t.Errorf("reason = %q", r)
+	}
+	if data, _ := os.ReadFile(filepath.Join(env.Root, ".auto-context", "log")); !strings.Contains(string(data), "hash cache:") {
+		t.Errorf("log = %q", data)
+	}
+}
+
+// Each list in the feedback names at most maxFeedbackUnits units and counts
+// the rest (T-L3).
+func TestStopCapsLists(t *testing.T) {
+	env := turn(t)
+	for i := range 30 {
+		for _, n := range []string{"a", "b", "c", "d", "e"} {
+			testutil.WriteFile(t, env.Root, fmt.Sprintf("pkg/u%02d/%s.go", i, n), "package u\n")
+		}
+	}
+	r := feedback(t, stop(t, env))
+	if n := strings.Count(r, "New unit pkg/"); n != maxFeedbackUnits {
+		t.Errorf("%d new units named, want %d: %q", n, maxFeedbackUnits, r)
+	}
+	if !strings.Contains(r, "More new units (+10 more)") {
+		t.Errorf("no tail: %q", r)
+	}
+
+	f := Feedback{Failed: map[string]string{}}
+	var many []string
+	for i := range 30 {
+		u := fmt.Sprintf("u%02d", i)
+		f.Failed[u] = "permission denied"
+		many = append(many, u)
+	}
+	f.ListChanged, f.Removed, f.Refused, f.Unreadable = many, many, many, many
+	r = StopReason(f)
+	if n := strings.Count(r, "auto-ack of "); n != maxFeedbackUnits || !strings.Contains(r, "More failed auto-acks (+10 more)") {
+		t.Errorf("failed acks not capped (%d): %q", n, r)
+	}
+	if n := strings.Count(r, "Unit list changed under "); n != maxFeedbackUnits || !strings.Contains(r, "(+10 more)") {
+		t.Errorf("list changes not capped (%d): %q", n, r)
+	}
+	if strings.Contains(r, "u25") {
+		t.Errorf("u25 named in a capped list: %q", r)
 	}
 }
 
@@ -687,7 +851,7 @@ func TestRecordTurn(t *testing.T) {
 		"svc/CLAUDE.md":  {MtimeNs: 30, Size: 2},
 	}
 	var j session.Journal
-	fresh := recordTurn(p.Tree(), before, cur, 0, noDirs, &j)
+	fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil}, nil, &j).fresh
 	if !slices.Equal(fresh, []string{"svc"}) || !slices.Equal(j.CodeChanged, []string{"lib", "svc"}) || !slices.Equal(j.DocsTouched, []string{"lib", "svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
 	}
@@ -705,19 +869,19 @@ func TestRecordTurnOldMtime(t *testing.T) {
 		"context/svc.md": {MtimeNs: 20, Size: 2},
 	}
 	var j session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 10, noDirs, &j); len(fresh) != 0 ||
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil}, nil, &j).fresh; len(fresh) != 0 ||
 		!slices.Equal(j.CodeChanged, []string{"svc"}) || !slices.Equal(j.DocsTouched, []string{"svc"}) {
 		t.Errorf("fresh=%v journal=%+v", fresh, j)
 	}
 	var j0 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 0, noDirs, &j0); !slices.Equal(fresh, []string{"svc"}) {
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{0, noDirs, nil}, nil, &j0).fresh; !slices.Equal(fresh, []string{"svc"}) {
 		t.Errorf("rule off: fresh=%v", fresh)
 	}
 	// A modified (not new) file with an old mtime bars the ack too.
 	delete(cur, "svc/moved.go")
 	cur["svc/main.go"] = units.Stat{MtimeNs: 5, Size: 2}
 	var j1 session.Journal
-	if fresh := recordTurn(p.Tree(), before, cur, 10, noDirs, &j1); len(fresh) != 0 {
+	if fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, noDirs, nil}, nil, &j1).fresh; len(fresh) != 0 {
 		t.Errorf("modified old file: fresh=%v", fresh)
 	}
 }
@@ -764,7 +928,7 @@ func TestRecordTurnDeletedFile(t *testing.T) {
 			return m, ok, nil
 		}
 		var j session.Journal
-		fresh := recordTurn(p.Tree(), before, cur, 10, stat, &j)
+		fresh := recordTurn(p.Tree(), before, cur, turnEnv{10, stat, nil}, nil, &j).fresh
 		if got := len(fresh) == 1; got != c.fresh || !slices.Equal(j.CodeChanged, []string{"svc"}) {
 			t.Errorf("%s: fresh=%v journal=%+v", c.name, fresh, j)
 		}
@@ -984,6 +1148,11 @@ func TestStopReasonQuotesAndCaps(t *testing.T) {
 	if r := StopReason(Feedback{Changed: []string{"my dir"}}); !strings.Contains(r, "`auto-context ack 'my dir'`") {
 		t.Errorf("not quoted: %q", r)
 	}
+	// A name read as an option gets "./" (should units.SafeName ever allow it).
+	if r := StopReason(Feedback{Changed: []string{"--exclude"}, New: []string{"-x"}}); !strings.Contains(r, "`auto-context ack ./--exclude`") ||
+		!strings.Contains(r, "`auto-context ack --exclude ./-x`") {
+		t.Errorf("option-like names: %q", r)
+	}
 	var many []string
 	for i := range 30 {
 		many = append(many, fmt.Sprintf("u%02d", i))
@@ -1199,24 +1368,166 @@ func TestPromptSubmitPausedCorruptSnapshot(t *testing.T) {
 	}
 }
 
-func TestTurnNewUnits(t *testing.T) {
-	before := session.Snapshot{"context/svc.md": {}}
-	present := func(string) docstate.DocKind { return docstate.DocPresent }
-	if got := turnNewUnits([]string{"_root", "pkg", "svc"}, before, present); !slices.Equal(got, []string{"pkg"}) {
-		t.Errorf("present docs = %v, want [pkg]", got)
+// A unit is new only if no rule could have made it one by the turn-start
+// snapshot, whatever rule makes it one now: no marker then, fewer than
+// min_files source files directly in it then (deleted ones count), and, for
+// an include unit, no file then. A context doc in the snapshot means it is
+// not new (HS-4).
+func TestTurnNew(t *testing.T) {
+	cfg := config.Default()
+	cfg.MinFiles = 3
+	files := map[string][]string{
+		"mod/old":   {"mod/old/go.mod", "mod/old/a.go"},
+		"mod/new":   {"mod/new/go.mod", "mod/new/a.go"},
+		"mod/fresh": {"mod/fresh/go.mod"},
+		"cnt/old":   {"cnt/old/a.go", "cnt/old/b.go", "cnt/old/c.go", "cnt/old/d.go"},
+		"cnt/grown": {"cnt/grown/a.go", "cnt/grown/b.go", "cnt/grown/c.go"},
+		"cnt/sub":   {"cnt/sub/a.go", "cnt/sub/b.go", "cnt/sub/x/c.go"},
+		"inc/old":   {"inc/old/a.go", "inc/old/new.go"},
+		"inc/new":   {"inc/new/a.go"},
+		"docced":    {"docced/go.mod"},
+		// A marker added to a unit that already had min_files files.
+		"cnt/marked": {"cnt/marked/go.mod", "cnt/marked/a.go", "cnt/marked/b.go", "cnt/marked/c.go"},
+		// A marker removed from a unit that still has enough files.
+		"mod/unmarked": {"mod/unmarked/a.go", "mod/unmarked/b.go", "mod/unmarked/c.go"},
+		// Files deleted this turn count for then: it had 3 files.
+		"cnt/shuffled": {"cnt/shuffled/a.go", "cnt/shuffled/new1.go", "cnt/shuffled/new2.go"},
 	}
-	absentSvc := func(u string) docstate.DocKind {
-		if u == "svc" {
-			return docstate.DocAbsent
+	before := session.Snapshot{
+		"mod/old/go.mod": {}, "mod/new/a.go": {},
+		"cnt/old/a.go": {}, "cnt/old/b.go": {}, "cnt/old/c.go": {}, // d.go added: was a unit already
+		"cnt/grown/a.go": {}, "cnt/grown/b.go": {}, // c.go added: becomes a unit
+		"cnt/sub/a.go": {}, "cnt/sub/b.go": {}, "cnt/sub/x/c.go": {}, // only 2 of its own files
+		"inc/old/a.go":      {},
+		"context/docced.md": {},
+		"cnt/marked/a.go":   {}, "cnt/marked/b.go": {}, "cnt/marked/c.go": {},
+		"mod/unmarked/go.mod": {}, "mod/unmarked/a.go": {},
+		"cnt/shuffled/a.go": {}, "cnt/shuffled/gone1.go": {}, "cnt/shuffled/gone2.go": {},
+		"cnt/shuffled/CLAUDE.md": {}, // the index file is no source
+	}
+	of := func(u string) []string { return files[u] }
+	for _, c := range []struct {
+		u      string
+		reason units.Reason
+		want   bool
+	}{
+		{"mod/old", units.ReasonModule, false},
+		{"mod/new", units.ReasonModule, true},
+		{"mod/fresh", units.ReasonModule, true},
+		{"cnt/old", units.ReasonFiles, false},
+		{"cnt/grown", units.ReasonFiles, true},
+		{"cnt/sub", units.ReasonFiles, true},
+		{"inc/old", units.ReasonInclude, false},
+		{"inc/new", units.ReasonInclude, true},
+		{"docced", units.ReasonModule, false},
+		{"_root", units.ReasonRoot, false},
+		{"cnt/marked", units.ReasonModule, false},
+		{"mod/unmarked", units.ReasonFiles, false},
+		{"cnt/shuffled", units.ReasonFiles, false},
+	} {
+		if got := turnNew(c.u, c.reason, before, directSources(before, "CLAUDE.md"), of, cfg); got != c.want {
+			t.Errorf("turnNew(%s) = %v, want %v", c.u, got, c.want)
 		}
-		return docstate.DocPresent
 	}
-	if got := turnNewUnits([]string{"svc", "_root", "pkg", "pkg"}, before, absentSvc); !slices.Equal(got, []string{"pkg", "svc"}) {
-		t.Errorf("absent svc = %v, want [pkg svc]", got)
+}
+
+// Adding a file to a docless unit that existed before the turn changes no
+// unit list (HS-4).
+func TestStopFileAddedToOldDoclessUnit(t *testing.T) {
+	env := newRepo(t, true) // lib has no docs
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
 	}
-	absent := func(string) docstate.DocKind { return docstate.DocAbsent }
-	if got := turnNewUnits([]string{"_root"}, before, absent); len(got) != 0 {
-		t.Errorf("_root = %v, want none", got)
+	testutil.WriteFile(t, env.Root, "lib/extra.go", "package lib\n")
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "New unit lib") || strings.Contains(r, "Unit list changed") || strings.Contains(r, "_root") {
+		t.Errorf("reason = %q", r)
+	}
+}
+
+// A directory that gets its module marker this turn becomes a unit: its
+// parent and _root are told.
+func TestStopMarkerMakesUnitFlagsParent(t *testing.T) {
+	env := newRepo(t, false)
+	testutil.WriteFile(t, env.Root, "svc/mod/x.go", "package mod\n")
+	ack(t, env, "svc", "_root")
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, env.Root, "svc/mod/go.mod", "module mod\n")
+	r := feedback(t, stop(t, env))
+	for _, want := range []string{"New unit svc/mod", "Unit list changed under svc: check context/svc.md.", "Unit list changed under _root: check context/_root.md."} {
+		if !strings.Contains(r, want) {
+			t.Errorf("reason lacks %q: %q", want, r)
+		}
+	}
+}
+
+// A marker added to an undocumented unit that already had min_files files
+// does not make it new: no unit list changed.
+func TestStopMarkerAddedToOldUnitNotNew(t *testing.T) {
+	env := newRepo(t, false)
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		testutil.WriteFile(t, env.Root, "pkg/"+n+".go", "package pkg\n")
+	}
+	ack(t, env, "_root") // pkg is an undocumented unit already
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.WriteFile(t, env.Root, "pkg/go.mod", "module pkg\n")
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "New unit pkg") || strings.Contains(r, "Unit list changed") {
+		t.Errorf("reason = %q", r)
+	}
+}
+
+// A unit removed with its doc still raises a parent whose docs are stale:
+// _root's unit list changed. Parents whose docs are up to date are not
+// named; with the parent docs updated too, Stop is silent.
+func TestStopRemovedWithDocRaisesStaleParents(t *testing.T) {
+	env := newRepo(t, false)
+	testutil.WriteFile(t, env.Root, "svc/auth/go.mod", "module auth\n")
+	testutil.WriteFile(t, env.Root, "svc/auth/auth.go", "package auth\n")
+	testutil.WriteFile(t, env.Root, "context/svc/auth.md", "# auth\n\nAuth.\n")
+	ack(t, env, "svc", "svc/auth", "_root")
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	remove(t, env.Root, "svc/auth")
+	remove(t, env.Root, "context/svc/auth.md")
+	r := feedback(t, stop(t, env))
+	if !strings.Contains(r, "Unit list changed under _root: check context/_root.md.") || strings.Contains(r, "removed this turn") {
+		t.Errorf("reason = %q", r)
+	}
+	// svc's own sources did not change: its docs are up to date.
+	if strings.Contains(r, "under svc") {
+		t.Errorf("up-to-date parent named: %q", r)
+	}
+	if out := stop(t, env); out != nil {
+		t.Errorf("second Stop: %s", out)
+	}
+}
+
+// A removal Claude already handled (unit and its doc deleted, parent docs
+// updated) gets no feedback.
+func TestStopRemovalHandledIsQuiet(t *testing.T) {
+	env := newRepo(t, false)
+	testutil.WriteFile(t, env.Root, "svc/auth/go.mod", "module auth\n")
+	testutil.WriteFile(t, env.Root, "svc/auth/auth.go", "package auth\n")
+	testutil.WriteFile(t, env.Root, "context/svc/auth.md", "# auth\n\nAuth.\n")
+	ack(t, env, "svc", "svc/auth", "_root")
+	if _, err := PromptSubmit(env, Input{SessionID: stopSID}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(time.Hour)
+	remove(t, env.Root, "svc/auth")
+	remove(t, env.Root, "context/svc/auth.md")
+	testutil.WriteFile(t, env.Root, "context/svc.md", "# svc\n\nService summary, no auth.\n")
+	testutil.WriteFile(t, env.Root, "context/_root.md", "# root\n\nRoot summary, no auth.\n")
+	setMtime(t, env.Root, "context/svc.md", base, 0)
+	setMtime(t, env.Root, "context/_root.md", base, 0)
+	if out := stop(t, env); out != nil {
+		t.Errorf("handled removal reported: %s", out)
 	}
 }
 
@@ -1230,7 +1541,7 @@ func TestStopNewUnitWithDocsFlagsRoot(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "context/pkg.md", "# pkg\n\nPkg summary.\n")
 	setMtime(t, env.Root, "context/pkg.md", base, time.Second)
 	r := feedback(t, stop(t, env))
-	if !strings.Contains(r, "code changed in _root ") {
+	if !strings.Contains(r, "Unit list changed under _root: check context/_root.md.") {
 		t.Errorf("reason lacks _root: %q", r)
 	}
 	if strings.Contains(r, "New unit pkg") {
@@ -1256,8 +1567,10 @@ func TestStopSubdirBecomesUnitFlagsParent(t *testing.T) {
 	testutil.WriteFile(t, env.Root, "context/svc/sub.md", "# sub\n\nSub summary.\n")
 	setMtime(t, env.Root, "context/svc/sub.md", base, time.Second)
 	r := feedback(t, stop(t, env))
-	if !strings.Contains(r, "code changed in _root, svc ") {
-		t.Errorf("reason lacks _root, svc: %q", r)
+	for _, want := range []string{"Unit list changed under _root: check context/_root.md.", "Unit list changed under svc: check context/svc.md."} {
+		if !strings.Contains(r, want) {
+			t.Errorf("reason lacks %q: %q", want, r)
+		}
 	}
 	if got := unitState(t, env, "svc/sub"); got != docstate.OK {
 		t.Errorf("svc/sub state = %v, want OK", got)

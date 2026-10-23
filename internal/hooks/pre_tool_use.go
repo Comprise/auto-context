@@ -13,14 +13,6 @@ import (
 // metacharacters, quotes, variables or extra whitespace can appear.
 var ownCLI = regexp.MustCompile(`^auto-context (ack|status|units|version|changes)( [A-Za-z0-9_./-]+)*$`)
 
-type preToolUseOutput struct {
-	Hook struct {
-		EventName string `json:"hookEventName"`
-		Decision  string `json:"permissionDecision"`
-		Reason    string `json:"permissionDecisionReason"`
-	} `json:"hookSpecificOutput"`
-}
-
 // PreToolUse auto-approves Bash calls of the auto-context CLI.
 // Anything else yields no output, leaving the normal permission flow. It never
 // writes (it only resolves PATH) and is not gated by activation.
@@ -28,11 +20,7 @@ func PreToolUse(env Env, in Input) ([]byte, error) {
 	if !approvable(env, in) {
 		return nil, nil
 	}
-	var out preToolUseOutput
-	out.Hook.EventName = "PreToolUse"
-	out.Hook.Decision = "allow"
-	out.Hook.Reason = "auto-context CLI"
-	return encodeJSON(out)
+	return encodeJSON(hookOutput{Hook: &hookSpecific{EventName: "PreToolUse", PermissionDecision: "allow", PermissionDecisionReason: "auto-context CLI"}})
 }
 
 // approvable reports whether the tool call is a Bash run of the plugin's own
@@ -53,7 +41,7 @@ func approvable(env Env, in Input) bool {
 		rest, ok := strings.CutPrefix(cmd, abs+" ")
 		return ok && allowedCommand("auto-context "+rest)
 	}
-	return allowedCommand(cmd) && !shadowed()
+	return allowedCommand(cmd) && !shadowed(env.pluginRoot())
 }
 
 // allowedCommand matches the raw command exactly: no trimming, since bash does
@@ -75,15 +63,16 @@ func allowedCommand(cmd string) bool {
 // shadowed reports whether "auto-context" on PATH may not be the plugin's own
 // binary, so the approval could run someone else's program. Any empty or
 // relative PATH entry counts: the shell resolves it against its own cwd, which
-// may differ from the hook's. It is a best effort: the hook sees Claude Code's
-// PATH, which is close to the Bash tool's.
-func shadowed() bool {
+// may differ from the hook's. pluginRoot is the plugin's install directory
+// (Env.pluginRoot); without it the found binary cannot be compared. It is a
+// best effort: the hook sees Claude Code's PATH, which is close to the Bash
+// tool's.
+func shadowed(pluginRoot string) bool {
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir == "" || !filepath.IsAbs(dir) {
 			return true
 		}
 	}
-	pluginRoot := os.Getenv("CLAUDE_PLUGIN_ROOT")
 	if pluginRoot == "" {
 		return false
 	}

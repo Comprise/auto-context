@@ -1,11 +1,12 @@
 package hooks
 
 import (
+	"errors"
+	"os"
+
 	"auto-context/internal/logx"
 	"auto-context/internal/project"
 	"auto-context/internal/session"
-	"errors"
-	"os"
 )
 
 // PromptSubmit starts a turn: it drops any leftover journal and stores a fresh
@@ -17,15 +18,15 @@ func PromptSubmit(env Env, in Input) ([]byte, error) {
 	if !project.Active(env.Root) {
 		return nil, nil
 	}
+	root, id := env.Root, in.SessionID
+	if !validSession(root, "prompt-submit", id) {
+		return nil, nil
+	}
 	p, err := load(env)
 	if err != nil {
 		return nil, err
 	}
-	root, id := env.Root, in.SessionID
-	j, jerr := session.LoadJournal(root, id)
-	if jerr != nil {
-		logx.Errorf(root, "prompt-submit: journal unreadable, starting empty: %v", jerr)
-	}
+	j, jerr := loadJournal(root, id, "prompt-submit")
 	save := func() {
 		if err := j.Save(root, id); err != nil {
 			logx.Errorf(root, "prompt-submit: saving the journal: %v", err)
@@ -50,7 +51,7 @@ func PromptSubmit(env Env, in Input) ([]byte, error) {
 		save()
 		return nil, nil
 	}
-	if err := session.Clear(root, id); err != nil {
+	if err := errors.Join(session.Clear(root, id), removeSeenDocs(root, id)); err != nil {
 		// The new snapshot below still replaces the old one.
 		logx.Errorf(root, "prompt-submit: clearing the previous turn: %v", err)
 	}

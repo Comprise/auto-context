@@ -123,8 +123,8 @@ func TestCodexCLIPath(t *testing.T) {
 	if got := StopReason(f); !strings.Contains(got, "`"+root+"/bin/auto-context ack src/auth`") {
 		t.Errorf("absolute path missing: %s", got)
 	}
-	if got := Claude.CLI(); got != "auto-context" {
-		t.Errorf("Claude.CLI = %q", got)
+	if got := (Env{Agent: Claude}).CLI(); got != "auto-context" {
+		t.Errorf("Claude CLI = %q", got)
 	}
 	f.Agent = Claude
 	if got := StopReason(f); !strings.Contains(got, "`auto-context ack src/auth`") {
@@ -189,9 +189,6 @@ func TestCodexCLIFromPluginRoot(t *testing.T) {
 	if got := env.CLI(); got != "/other/bin/auto-context" {
 		t.Errorf("PLUGIN_ROOT: CLI() = %q", got)
 	}
-	if got := Codex.CLI(); got != "/other/bin/auto-context" {
-		t.Errorf("Codex.CLI() = %q", got)
-	}
 	t.Setenv("PLUGIN_ROOT", "")
 	if got := env.CLI(); got != "/claude/bin/auto-context" {
 		t.Errorf("CLAUDE_PLUGIN_ROOT: CLI() = %q", got)
@@ -201,5 +198,15 @@ func TestCodexCLIFromPluginRoot(t *testing.T) {
 	claude.PluginRoot = "/p a'b"
 	if got := claude.CLI(); got != "auto-context" {
 		t.Errorf("Claude: CLI() = %q", got)
+	}
+	// Claude's PATH check uses the same root: Env.PluginRoot, else
+	// CLAUDE_PLUGIN_ROOT; PLUGIN_ROOT is Codex's only.
+	t.Setenv("PLUGIN_ROOT", "/other")
+	if got := claude.pluginRoot(); got != "/p a'b" {
+		t.Errorf("Claude pluginRoot = %q", got)
+	}
+	claude.PluginRoot = ""
+	if got := claude.pluginRoot(); got != "/claude" {
+		t.Errorf("Claude pluginRoot from env = %q", got)
 	}
 }
