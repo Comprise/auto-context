@@ -15,7 +15,7 @@ import (
 	"auto-context/internal/fsutil"
 	"auto-context/internal/textx"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // Meta is the frontmatter written by the binary. Commit (HEAD at ack time) is
