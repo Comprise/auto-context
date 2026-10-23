@@ -1,7 +1,8 @@
 ---
 unit: internal/hooks
-source_hash: sha256:fdac959bd763d4cd4ffaeb979eedacc0f5997d859cf4aaf900901ea4b7748423
-updated: "2026-10-21"
+source_hash: v2:sha256:825cf6291630e7d2290220b70716818daf4ea77c66cc1561325779c698f7cafb
+commit: 6fb2d4f6cc82de2cc73dd305157aa8f84d3ddc59
+updated: "2026-10-23"
 ---
 # internal/hooks
 Обработчики хуков Claude Code и Codex: жизненный цикл хода, обратная связь о доках.
