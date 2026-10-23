@@ -16,7 +16,7 @@ func runChanges(ctx context.Context, args []string, stdout, stderr io.Writer, cw
 	}
 	p, warns, err := loadRepo(ctx, cwd)
 	if err != nil {
-		return openErr(stderr, cwd, err)
+		return openErr(ctx, stderr, cwd, err)
 	}
 	printWarnings(stderr, warns)
 	unit := normUnit(args[0])
@@ -24,13 +24,13 @@ func runChanges(ctx context.Context, args []string, stdout, stderr io.Writer, cw
 	case p.ConfigBroken():
 		fmt.Fprintln(stderr, project.ErrConfigBroken) // the units would be the defaults
 		return exitError
-	case !p.Tree().IsUnit(unit):
+	case !p.IsUnit(unit):
 		fmt.Fprintln(stderr, "unknown unit "+shownName(unit))
 		return exitError
 	}
 	// Git failures are notes in the report; an error here is a failed write.
 	if err := p.WriteChanges(stdout, unit); err != nil {
-		fmt.Fprintf(stderr, "the report could not be written: %s\n", errText(p.Root(), err, "changes"))
+		fmt.Fprintf(stderr, "the report could not be written: %s\n", errText(p, err, "changes"))
 		return exitError
 	}
 	return exitOK

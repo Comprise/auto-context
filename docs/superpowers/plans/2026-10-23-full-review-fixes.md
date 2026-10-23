@@ -420,7 +420,7 @@ ID — из отчётов `docs/superpowers/audits/2026-10-23/raw/`. Префи
 
 **Interfaces:** `type Problem struct{Code ProblemCode; Severity Severity; Unit string; Err error}`; `func (p *Project) Diagnose() []Problem` — все проверки здоровья (конфиг, `DiscoveryReset`, state-dir, кэш, check-ignore, предупреждения discover, индекс, лог); рендереры: `status` (текст и JSON), SessionStart, Stop — таблица `Code → текст`; `errCategory` (hooks), `errKind` (units) и `fsutil.Category` сводятся к одному месту (Q-L3).
 
-- [ ] **Step 1:** тест `TestDiagnoseMatchesStatusAndSessionStart` — для набора поломанных фикстур множество кодов проблем, которое видят `status --json` и SessionStart, совпадает. **Step 2–4:** перенос → PASS, golden-файлы не изменились.
+- [x] **Step 1:** тест `TestDiagnoseMatchesStatusAndSessionStart` — для набора поломанных фикстур множество кодов проблем, которое видят `status --json` и SessionStart, совпадает. **Step 2–4:** перенос → PASS, golden-файлы не изменились.
 
 ### Task T31: модернизация и staticcheck (BP-L1..L3, BP-L7 ST1020)
 

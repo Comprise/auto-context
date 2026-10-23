@@ -97,12 +97,12 @@ type Project struct {
 // Root is the repository root the project was opened at.
 func (p *Project) Root() string { return p.root }
 
+// Context is the context the project was opened with (a hook's budget, an
+// interruptible CLI command).
+func (p *Project) Context() context.Context { return p.ctx }
+
 // Config is the config in effect: the defaults when it is broken.
 func (p *Project) Config() config.Config { return p.cfg }
-
-// Tree is the unit tree Discover built. Only cmd/auto-context's changes.go
-// still uses it (outside T28's files); the narrow queries below replace it.
-func (p *Project) Tree() *units.Tree { return p.tree }
 
 // Units returns all units: _root first, the rest sorted by path.
 func (p *Project) Units() []units.Unit { return p.tree.Units() }
@@ -112,10 +112,6 @@ func (p *Project) IsUnit(dir string) bool { return p.tree.IsUnit(dir) }
 
 // UnitOf returns the nearest ancestor unit of rel's directory, else _root.
 func (p *Project) UnitOf(rel string) string { return p.tree.UnitOf(rel) }
-
-// Classify says what the repo path rel is to the plugin and its unit
-// (units.Tree.Classify).
-func (p *Project) Classify(rel string) (units.Kind, string) { return p.tree.Classify(rel) }
 
 // Classifier returns a classifier for many paths (one glob budget and memo).
 func (p *Project) Classifier() *units.Classifier { return p.tree.Classifier() }

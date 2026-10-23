@@ -216,7 +216,8 @@ func configPaused(env Env, id string) ([]byte, error) {
 	if !first {
 		return nil, nil
 	}
-	return stopFeedback("auto-context: "+config.FileName+" cannot be read or parsed, so docs tracking is paused until it is fixed; run `"+env.CLI()+" status` for the error. Changes made meanwhile are checked once it is fixed.", env.Agent)
+	pr := project.Problem{Code: project.ProblemConfigUnreadable}
+	return stopFeedback("auto-context: "+pr.Text(project.Stop, project.Render{Command: env.CLI()}), env.Agent)
 }
 
 // repoDirStat is the rules.DirStat of the repository at root. Lstat: a
@@ -292,31 +293,11 @@ func autoAck(env Env, p *project.Project, touched []string) (acked []string, fai
 	return acked, failed
 }
 
-// errCategory names why an operation failed with a fixed category: the error
-// text holds repo paths, which must not reach Claude's context. The full
-// error is in the log.
+// errCategory names why an operation failed with a fixed category
+// (project.CauseOf): the error text holds repo paths, which must not reach
+// Claude's context. The full error is in the log.
 func errCategory(err error) string {
-	switch {
-	case errors.Is(err, fsutil.ErrOutside):
-		return "a file links outside the repository"
-	case errors.Is(err, fsutil.ErrNotRegular):
-		return "a source or doc is not a regular file"
-	case errors.Is(err, fsutil.ErrTooLarge):
-		return "the context doc is too large"
-	case errors.Is(err, os.ErrPermission):
-		return "permission denied"
-	case errors.Is(err, os.ErrNotExist):
-		return "a file disappeared"
-	case errors.Is(err, project.ErrConfigBroken):
-		return config.FileName + " cannot be read or parsed; fix it first"
-	case errors.Is(err, project.ErrConfigDegraded):
-		return config.FileName + " has invalid settings that decide the units; fix it first"
-	case errors.Is(err, units.ErrTimeUp):
-		return "the hook's time ran out; the repository may be too large or slow"
-	case errors.Is(err, units.ErrGitTimeout), errors.Is(err, units.ErrListTooLarge):
-		return "git is too slow or lists too many files; add big generated directories to .gitignore"
-	}
-	return "see .auto-context/log"
+	return project.CauseOf(err).Text(project.Stop)
 }
 
 // Feedback groups the units Stop reports.
