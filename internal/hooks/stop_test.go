@@ -468,11 +468,11 @@ func TestStopCorruptJournalOnce(t *testing.T) {
 // A hash cache that cannot be saved is logged; Stop answers as usual (T-L6).
 func TestStopCacheSaveErrorLogged(t *testing.T) {
 	env := turn(t)
-	cache := filepath.Join(env.Root, ".auto-context", "cache.json")
+	cache := filepath.Join(env.Root, ".auto-context", "cache.v5.bin")
 	if err := os.Remove(cache); err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
-	testutil.WriteFile(t, env.Root, ".auto-context/cache.json/x", "")
+	testutil.WriteFile(t, env.Root, ".auto-context/cache.v5.bin/x", "")
 	testutil.WriteFile(t, env.Root, "svc/main.go", "package main\n// changed\n")
 	if r := feedback(t, stop(t, env)); !strings.Contains(r, "code changed in svc ") {
 		t.Errorf("reason = %q", r)

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"auto-context/internal/filelock"
 )
 
 func TestLogRotates(t *testing.T) {
@@ -294,7 +296,7 @@ func TestConcurrentRotationKeepsLog(t *testing.T) {
 }
 
 // A rotation lock held elsewhere (a hung hook) delays a write by at most
-// lockWait: the entry is appended, the rotation is left for later.
+// filelock.Wait: the entry is appended, the rotation is left for later.
 func TestRotationLockHeldDoesNotHang(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".auto-context")
@@ -304,14 +306,14 @@ func TestRotationLockHeldDoesNotHang(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "log"), make([]byte, maxSize+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unlock, ok, err := lock(filepath.Join(dir, "log.lock"))
+	unlock, ok, err := filelock.Lock(filepath.Join(dir, "log.lock"))
 	if err != nil || !ok {
 		t.Fatalf("lock: %v %v", ok, err)
 	}
 	defer unlock()
 	start := time.Now()
 	Errorf(root, "late")
-	if d := time.Since(start); d > lockWait+time.Second {
+	if d := time.Since(start); d > filelock.Wait+time.Second {
 		t.Errorf("Errorf took %v", d)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "log"))
@@ -320,64 +322,40 @@ func TestRotationLockHeldDoesNotHang(t *testing.T) {
 	}
 }
 
-// The O_EXCL fallback lock excludes a second holder, gives up after
-// lockWait, and replaces a stale lock file.
-func TestLockExcl(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "log.lock")
-	unlock, ok, err := lockExcl(p)
+// A symlinked log.lock (committed by a hostile repo) is not used: the
+// rotation is refused instead of locking or deleting the link's target.
+func TestRotationRefusesSymlinkLock(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".auto-context")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "log"), make([]byte, maxSize+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("include: [a]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("config.yaml", filepath.Join(dir, "log.lock")); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	unlock, ok, err := filelock.Lock(cfg)
 	if err != nil || !ok {
-		t.Fatalf("first lock: %v %v", ok, err)
+		t.Fatalf("lock: %v %v", ok, err)
 	}
-	if _, ok, err := lockExcl(p); ok || err != nil {
-		t.Fatalf("second lock taken: %v %v", ok, err)
+	defer unlock()
+	start := time.Now()
+	Errorf(root, "late")
+	if d := time.Since(start); d > filelock.Wait/2 {
+		t.Errorf("Errorf waited %v: it locked through the symlink", d)
 	}
-	unlock()
-	unlock, ok, err = lockExcl(p)
-	if err != nil || !ok {
-		t.Fatalf("relock: %v %v", ok, err)
+	data, _ := os.ReadFile(filepath.Join(dir, "log"))
+	if !strings.HasSuffix(string(data), " late\n") || !strings.Contains(string(data), rotationFailed) {
+		t.Errorf("want the entry and a rotation failure, log tail %q", data[max(len(data)-200, 0):])
 	}
-	_ = unlock // left behind, as by a killed hook
-	old := time.Now().Add(-2 * lockStale)
-	if err := os.Chtimes(p, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, err := lockExcl(p); !ok || err != nil {
-		t.Fatalf("stale lock kept: %v %v", ok, err)
-	}
-}
-
-// A stale lock replaced by a fresh one between the staleness check and the
-// removal must not be removed: the new holder would lose its lock.
-func TestStaleLockNotStolen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "log.lock")
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatal(err)
-	}
-	fired := false
-	beforeRemove = func() {
-		if fired {
-			return
-		}
-		fired = true
-		tmp := path + ".new"
-		if err := os.WriteFile(tmp, nil, 0o644); err != nil {
-			t.Error(err)
-		}
-		if err := os.Rename(tmp, path); err != nil { // fresh lock takes the place
-			t.Error(err)
-		}
-	}
-	defer func() { beforeRemove = nil }()
-	_, ok, err := lockExcl(path)
-	if err != nil || ok {
-		t.Fatalf("ok=%v err=%v, want the fresh lock respected", ok, err)
-	}
-	if st, err := os.Stat(path); err != nil || time.Since(st.ModTime()) > time.Minute {
-		t.Fatalf("fresh lock was removed: %v", err)
+	if data, err := os.ReadFile(cfg); err != nil || string(data) != "include: [a]\n" {
+		t.Errorf("link target changed: %q %v", data, err)
 	}
 }
 

@@ -100,9 +100,9 @@ func TestCacheAvoidsRead(t *testing.T) {
 	if !ok {
 		t.Fatal("cache not populated")
 	}
-	e.Sum = "x"
+	e.Sum = [32]byte{'x'}
 	c.entries["a.go"] = e
-	want := "sha256:" + hex256("a.go"+"\x00"+"x"+"\n")
+	want := "sha256:" + hex256("a.go"+"\x00"+hex.EncodeToString(e.Sum[:])+"\n")
 	if got := mustHash(t, r, []string{"a.go"}, c); got != want {
 		t.Fatalf("got %s want %s", got, want)
 	}
@@ -140,13 +140,16 @@ func TestLoadCacheMissingOrCorrupt(t *testing.T) {
 	if c, err := LoadCache(r); err != nil || len(c.entries) != 0 {
 		t.Fatalf("missing: %v %v", c, err)
 	}
-	testutil.WriteFile(t, r, ".auto-context/cache.json", "{not json")
+	testutil.WriteFile(t, r, ".auto-context/cache.v5.bin", "{not json")
 	c, err := LoadCache(r)
 	if err == nil || len(c.entries) != 0 {
 		t.Fatalf("corrupt: entries=%v err=%v, want empty and an error", c.entries, err)
 	}
 	c.entries["a"] = Entry{} // must be usable
-	// A cache of another version (sums made without CRLF normalization) is dropped.
+	// A cache of another version (sums made without CRLF normalization) is ignored.
+	if err := os.Remove(filepath.Join(r, ".auto-context", "cache.v5.bin")); err != nil {
+		t.Fatal(err)
+	}
 	testutil.WriteFile(t, r, ".auto-context/cache.json", `{"entries":{"a.go":{"sum":"x"}}}`)
 	if c, err := LoadCache(r); err != nil || len(c.entries) != 0 {
 		t.Errorf("old version kept: %v %v", c.entries, err)
@@ -200,7 +203,7 @@ func TestSaveOnlyWhenDirty(t *testing.T) {
 	if err := c.Save(r); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(r, ".auto-context", "cache.json")
+	p := filepath.Join(r, ".auto-context", "cache.v5.bin")
 	past := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(p, past, past); err != nil {
 		t.Fatal(err)
@@ -230,7 +233,7 @@ func TestCorruptCacheIsRewritten(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(r, ".auto-context"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(r, ".auto-context", "cache.json")
+	p := filepath.Join(r, ".auto-context", "cache.v5.bin")
 	if err := os.WriteFile(p, []byte("garbage"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +491,7 @@ func TestHashLargeFileSampled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Sum != want || e.Size != size {
+	if hex.EncodeToString(e.Sum[:]) != want || e.Size != size {
 		t.Errorf("entry = %+v, want sum %s", e, want)
 	}
 
@@ -498,8 +501,8 @@ func TestHashLargeFileSampled(t *testing.T) {
 	}
 	defer rf.Close()
 	cr := &countingReaderAt{r: rf}
-	if sum, err := largeSum(cr, size); err != nil || sum != want {
-		t.Fatalf("largeSum = %q, %v", sum, err)
+	if sum, err := largeSum(cr, size); err != nil || hex.EncodeToString(sum[:]) != want {
+		t.Fatalf("largeSum = %x, %v", sum, err)
 	}
 	if cr.n > 2*mib {
 		t.Errorf("read %d bytes, want at most 2 MiB", cr.n)
@@ -525,12 +528,12 @@ func TestHashFileAtLimitIsFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := hex.EncodeToString(h.Sum(nil)); e.Sum != want {
-		t.Errorf("sum = %s, want full-content %s", e.Sum, want)
+	if want := hex.EncodeToString(h.Sum(nil)); hex.EncodeToString(e.Sum[:]) != want {
+		t.Errorf("sum = %x, want full-content %s", e.Sum, want)
 	}
 }
 
-// A cache of the previous version (full sums of big files) is discarded.
+// A cache of a previous version (full sums of big files) is not read.
 func TestCacheV3Discarded(t *testing.T) {
 	r := t.TempDir()
 	testutil.WriteFile(t, r, ".auto-context/cache.json", `{"version":3,"entries":{"a.go":{"mtime_ns":1,"size":1,"sum":"x"}}}`)
@@ -544,8 +547,8 @@ func TestCacheV3Discarded(t *testing.T) {
 func TestLoadDropsRacyWithoutDirty(t *testing.T) {
 	root := t.TempDir()
 	c := &Cache{entries: map[string]Entry{
-		"a.go": {MtimeNs: 1, Size: 1, Sum: "x", Racy: true},
-		"b.go": {MtimeNs: 1, Size: 1, Sum: "y"},
+		"a.go": {MtimeNs: 1, Size: 1, Sum: [32]byte{'x'}, Racy: true},
+		"b.go": {MtimeNs: 1, Size: 1, Sum: [32]byte{'y'}},
 	}, dirty: true}
 	if err := c.Save(root); err != nil {
 		t.Fatal(err)

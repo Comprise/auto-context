@@ -129,7 +129,7 @@ func TestPrewarmPersists(t *testing.T) {
 	if n := q.Cache().Len(); n != len(files) || q.CacheErr() != nil {
 		t.Errorf("reopened cache has %d entries (err %v), want %d", n, q.CacheErr(), len(files))
 	}
-	data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.json"))
+	data, _ := os.ReadFile(filepath.Join(root, ".auto-context", "cache.v5.bin"))
 	for _, f := range files {
 		if !strings.Contains(string(data), f) {
 			t.Errorf("cache file lacks %s: %s", f, data)
@@ -182,7 +182,7 @@ func TestSaveCacheCreatesGitignore(t *testing.T) {
 	if err := p.SaveCache(); err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{".auto-context/.gitignore", ".auto-context/cache.json"} {
+	for _, rel := range []string{".auto-context/.gitignore", ".auto-context/cache.v5.bin"} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			t.Errorf("%s: %v", rel, err)
 		}
@@ -401,9 +401,9 @@ func TestUpgrade(t *testing.T) {
 func TestPrewarmSkipsWithoutFiles(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		".auto-context/config.yaml": "include: [svc]\n",
-		"svc/a.go":                  "package svc\n",
-		".auto-context/cache.json":  "garbage",
+		".auto-context/config.yaml":  "include: [svc]\n",
+		"svc/a.go":                   "package svc\n",
+		".auto-context/cache.v5.bin": "garbage",
 	})
 	p := open(t, root)
 	p.Prewarm(nil)

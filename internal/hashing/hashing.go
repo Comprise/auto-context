@@ -6,8 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,135 +16,6 @@ import (
 
 	"auto-context/internal/fsutil"
 )
-
-// Entry caches the content hash of one file with the stat data it was taken at.
-// Racy marks a sum taken less than racyMargin after the mtime: a same-size
-// rewrite in the same mtime tick would leave mtime and size as they are (git's
-// "racily clean"), so the entry serves only the process that hashed it.
-type Entry struct {
-	MtimeNs int64  `json:"mtime_ns"`
-	Size    int64  `json:"size"`
-	Sum     string `json:"sum"`
-	Racy    bool   `json:"racy,omitempty"`
-}
-
-// racyMargin covers coarse mtime granularity (2 s on FAT, 1 s on ext3/HFS+)
-// and small clock skew between the file system and us.
-const racyMargin = 2 * time.Second
-
-// Cache maps root-relative slash paths to entries. Its fields are private so
-// that every change marks it dirty.
-type Cache struct {
-	entries map[string]Entry
-	dirty   bool // changed since load: Save has something to write
-	// stat, if set, gives the mtime and size Discover already read, saving
-	// an Lstat per cached file.
-	stat func(rel string) (mtimeNs, size int64, ok bool)
-}
-
-// cacheFile is the on-disk form of a Cache.
-type cacheFile struct {
-	Version int              `json:"version"`
-	Entries map[string]Entry `json:"entries"`
-}
-
-// cacheVersion names the meaning of cached sums (content with CRLF as LF) and
-// entries (3: racy entries are marked; 4: files over MaxHashSize are sampled):
-// a cache file of another version is discarded.
-const cacheVersion = 4
-
-func cachePath(root string) string {
-	return fsutil.StatePath(root, "cache.json")
-}
-
-// NewCache returns an empty cache.
-func NewCache() *Cache { return &Cache{entries: map[string]Entry{}} }
-
-// LoadCache returns the stored cache, or an empty one, without racy entries
-// (their files are hashed again). A missing file is not an error; one that cannot be used (too large, not a regular file, corrupt)
-// gives an empty cache marked for rewriting and the error, so callers can say
-// why hashing is cold. A cache of another version is replaced silently.
-func LoadCache(root string) (*Cache, error) {
-	empty := NewCache()
-	data, err := fsutil.ReadFile(root, cachePath(root), maxCache)
-	if errors.Is(err, os.ErrNotExist) {
-		return empty, nil
-	}
-	empty.dirty = true
-	if err != nil {
-		return empty, fmt.Errorf("hash cache unusable, rehashing everything: %w", err)
-	}
-	var f cacheFile
-	if err := json.Unmarshal(data, &f); err != nil {
-		return empty, fmt.Errorf("hash cache corrupt, rehashing everything: %w", err)
-	}
-	if f.Version != cacheVersion || f.Entries == nil {
-		return empty, nil
-	}
-	c := &Cache{entries: f.Entries}
-	for rel, e := range c.entries {
-		if e.Racy {
-			// Not dirty: dropping a racy entry is not a change worth a
-			// rewrite; the entry is replaced once its file is hashed again.
-			delete(c.entries, rel)
-		}
-	}
-	return c, nil
-}
-
-// maxCache caps the size of the cache file we read (about 1.8M entries).
-const maxCache = 256 << 20
-
-// UseStats makes the cache trust stat for mtime and size (the values Discover
-// read) instead of an Lstat per file. stat must come from the Tree whose
-// files are hashed in this process: older stats would hide later edits.
-func (c *Cache) UseStats(stat func(rel string) (mtimeNs, size int64, ok bool)) { c.stat = stat }
-
-// Len is the number of entries.
-func (c *Cache) Len() int { return len(c.entries) }
-
-// Dirty reports whether the cache changed since it was loaded or saved.
-func (c *Cache) Dirty() bool { return c.dirty }
-
-// Prune drops entries of files not in tracked, so deleted files do not pile up.
-func (c *Cache) Prune(tracked []string) {
-	if len(c.entries) == 0 {
-		return
-	}
-	keep := make(map[string]bool, len(tracked))
-	for _, f := range tracked {
-		keep[f] = true
-	}
-	for k := range c.entries {
-		if !keep[k] {
-			delete(c.entries, k)
-			c.dirty = true
-		}
-	}
-}
-
-// Save writes the cache atomically (without fsync: it can be rebuilt), and
-// only if it changed or does not exist yet.
-func (c *Cache) Save(root string) error {
-	if !c.dirty {
-		if _, err := os.Lstat(cachePath(root)); err == nil {
-			return nil
-		}
-	}
-	f := cacheFile{Version: cacheVersion, Entries: c.entries}
-	if f.Entries == nil {
-		f.Entries = map[string]Entry{}
-	}
-	data, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
-	if err := fsutil.WriteState(root, cachePath(root), data); err != nil {
-		return err
-	}
-	c.dirty = false
-	return nil
-}
 
 // SourceHash returns "sha256:" + hex(sha256(for each sorted file: relpath +
 // "\x00" + hex(sha256(content with CRLF as LF)) (for a file over MaxHashSize
@@ -163,12 +32,16 @@ func SourceHash(ctx context.Context, root string, files, extra []string, c *Cach
 	sorted := append([]string(nil), files...)
 	slices.Sort(sorted)
 	h := sha256.New()
+	var line [2*sha256Size + 2]byte
+	line[len(line)-1] = '\n'
 	for _, f := range sorted {
 		sum, err := fileSum(ctx, root, f, c)
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s\x00%s\n", f, sum)
+		hex.Encode(line[1:len(line)-1], sum[:])
+		io.WriteString(h, f)
+		h.Write(line[:])
 	}
 	ex := append([]string(nil), extra...)
 	slices.Sort(ex)
@@ -178,7 +51,7 @@ func SourceHash(ctx context.Context, root string, files, extra []string, c *Cach
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func fileSum(ctx context.Context, root, rel string, c *Cache) (string, error) {
+func fileSum(ctx context.Context, root, rel string, c *Cache) ([sha256Size]byte, error) {
 	if c.stat != nil {
 		if mt, size, ok := c.stat(rel); ok {
 			if e, ok := c.entries[rel]; ok && e.MtimeNs == mt && e.Size == size {
@@ -194,16 +67,21 @@ func fileSum(ctx context.Context, root, rel string, c *Cache) (string, error) {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return [sha256Size]byte{}, err
 	}
 	e, err := hashFile(ctx, root, rel, nil)
 	if err != nil {
-		return "", err
+		return [sha256Size]byte{}, err
 	}
 	c.entries[rel] = e
 	c.dirty = true
 	return e.Sum, nil
 }
+
+// cacheVersion names the meaning of cached sums (content with CRLF as LF) and
+// entries (3: racy entries are marked; 4: files over MaxHashSize are sampled;
+// 5: the binary file of cache.go). cmd/auto-context prints it in version -v.
+const cacheVersion = 5
 
 // MaxHashSize is the file size above which only a sample is hashed.
 const MaxHashSize = 32 << 20
@@ -215,19 +93,19 @@ const sampleSize = 1 << 20
 // largeSum is the sum of a file larger than MaxHashSize: sha256("large\x00" +
 // decimal size + "\x00" + LF(first 1 MiB) + LF(last 1 MiB)). A change in the
 // middle that keeps size and mtime goes unseen (documented limitation).
-func largeSum(r io.ReaderAt, size int64) (string, error) {
+func largeSum(r io.ReaderAt, size int64) ([sha256Size]byte, error) {
 	h := sha256.New()
 	fmt.Fprintf(h, "large\x00%d\x00", size)
 	for _, off := range []int64{0, size - sampleSize} {
 		lf := &lfWriter{w: h}
 		if _, err := io.Copy(lf, io.NewSectionReader(r, off, sampleSize)); err != nil {
-			return "", err
+			return [sha256Size]byte{}, err
 		}
 		if err := lf.flush(); err != nil {
-			return "", err
+			return [sha256Size]byte{}, err
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return [sha256Size]byte(h.Sum(nil)), nil
 }
 
 // hashFile hashes one regular file (CRLF as LF) and returns its entry: the sum
@@ -252,7 +130,7 @@ func hashFile(ctx context.Context, root, rel string, buf []byte) (Entry, error) 
 		return Entry{}, err
 	}
 	defer f.Close()
-	var sum string
+	var sum [sha256Size]byte
 	if fi.Size() > MaxHashSize {
 		if sum, err = largeSum(ctxReaderAt{ctx, f}, fi.Size()); err != nil {
 			return Entry{}, err
@@ -269,7 +147,7 @@ func hashFile(ctx context.Context, root, rel string, buf []byte) (Entry, error) 
 		if err := lf.flush(); err != nil {
 			return Entry{}, err
 		}
-		sum = hex.EncodeToString(h.Sum(nil))
+		sum = [sha256Size]byte(h.Sum(nil))
 	}
 	return Entry{
 		MtimeNs: fi.ModTime().UnixNano(),

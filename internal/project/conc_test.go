@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,9 +66,9 @@ func TestConcurrentAckTouched(t *testing.T) {
 			t.Errorf("%s: %v", u, err)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(root, ".auto-context", "cache.json"))
-	if err != nil || !json.Valid(data) {
-		t.Errorf("cache.json: %v %q", err, data)
+	data, err := os.ReadFile(filepath.Join(root, ".auto-context", "cache.v5.bin"))
+	if err != nil || !strings.HasPrefix(string(data), "acache 5\n") {
+		t.Errorf("cache.v5.bin: %v %q", err, data)
 	}
 	index, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
 	if n := strings.Count(string(index), "<!-- auto-context:units -->"); n != 1 {

@@ -488,7 +488,7 @@ func TestSessionStartReportsUnreadableLog(t *testing.T) {
 // warning, and rewritten.
 func TestSessionStartCorruptCache(t *testing.T) {
 	env := newRepo(t, false)
-	testutil.WriteFile(t, env.Root, ".auto-context/cache.json", "garbage")
+	testutil.WriteFile(t, env.Root, ".auto-context/cache.v5.bin", "garbage")
 	out, err := SessionStart(env, Input{SessionID: "s"})
 	if err != nil {
 		t.Fatal(err)
@@ -496,7 +496,7 @@ func TestSessionStartCorruptCache(t *testing.T) {
 	if strings.Contains(string(out), "discovery warning") {
 		t.Errorf("out = %s", out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(env.Root, ".auto-context", "cache.json")); string(data) == "garbage" {
+	if data, _ := os.ReadFile(filepath.Join(env.Root, ".auto-context", "cache.v5.bin")); string(data) == "garbage" {
 		t.Error("corrupt cache kept")
 	}
 }

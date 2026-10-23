@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -67,9 +66,9 @@ func TestConcurrentStopHooks(t *testing.T) {
 			t.Errorf("%s not edited by a helper:\n%s", u, data)
 		}
 	}
-	cache, err := os.ReadFile(filepath.Join(env.Root, ".auto-context", "cache.json"))
-	if err != nil || !json.Valid(cache) {
-		t.Errorf("cache.json: %v, valid=%v", err, json.Valid(cache))
+	cache, err := os.ReadFile(filepath.Join(env.Root, ".auto-context", "cache.v5.bin"))
+	if err != nil || !strings.HasPrefix(string(cache), "acache 5\n") {
+		t.Errorf("cache.v5.bin: %v %q", err, cache)
 	}
 	idx, err := os.ReadFile(filepath.Join(env.Root, "CLAUDE.md"))
 	if err != nil || strings.Count(string(idx), "<!-- auto-context:units -->") != 1 || strings.Count(string(idx), "<!-- /auto-context:units -->") != 1 {
