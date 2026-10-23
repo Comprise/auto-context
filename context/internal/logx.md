@@ -1,8 +1,8 @@
 ---
 unit: internal/logx
-source_hash: sha256:5d96dd677f604119326530e50e299cff3ee5948faa026bc2911e3099677ea48b
-commit: 8d0d43e3b49995a76334e594a9e0ed70bfabb584
-updated: "2026-10-21"
+source_hash: v2:sha256:ff9d30535626fd886572f95dd8927d24d13944bd1b0d588278b79ff55b630aba
+commit: 5f376668531441d1e371d3591c3a533fbc709cac
+updated: "2026-10-23"
 ---
 # internal/logx
 Дописывает ошибки хуков в `.auto-context/log`, никогда не падая.
