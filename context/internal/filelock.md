@@ -1,3 +1,9 @@
+---
+unit: internal/filelock
+source_hash: v2:sha256:8353ebf97a281daa0341a7cffbfae91dd0d2af06e08d93fd7db2ed5d6864f0f0
+commit: 5a3491f32ba72da8d5783af53b19c793869926cf
+updated: "2026-10-24"
+---
 # internal/filelock
 Короткие эксклюзивные блокировки файлов для параллельных процессов хуков.
 
