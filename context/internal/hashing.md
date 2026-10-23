@@ -1,8 +1,8 @@
 ---
 unit: internal/hashing
-source_hash: v2:sha256:2320400421ea0c6a74079461037b5744efb260593df129e5dc60d12569624f94
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:54be44f61de7b62f2ff907606e7b7e661e658451970bab094125ebf46d49c103
+commit: 5a3491f32ba72da8d5783af53b19c793869926cf
+updated: "2026-10-24"
 ---
 # internal/hashing
 Считает source_hash юнита по списку файлов с кешем mtime/size.
