@@ -10,8 +10,9 @@
 <!-- auto-context:units -->
 ## Юниты (подробно — context/<unit>.md)
 - `cmd/auto-context` — CLI-бинарь: запуск хуков Claude Code и Codex и команды ack/status/changes/units/version.
-- `internal/config` — Читает, валидирует и правит необязательный `.auto-context/config.yaml`, ищет корень репозитория.
+- `internal/config` — Читает, валидирует и правит необязательный `.auto-context/config.yaml`.
 - `internal/docstate` — Определяет, актуальны ли context-документы юнитов, и фиксирует актуальность.
+- `internal/filestat` — Отпечаток файла для обнаружения изменений (mtime и размер) — общий тип для обнаружения, снимка сессии и хуков.
 - `internal/frontmatter` — Читает и пишет YAML-блок меты в контекстных файлах.
 - `internal/fsutil` — Политика доверия к путям, чтение с лимитом, атомарная запись, `.auto-context/state`.
 - `internal/gitx` — Единый запуск git для плагина с фиксированной защитой.

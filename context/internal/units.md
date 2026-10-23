@@ -1,8 +1,8 @@
 ---
 unit: internal/units
-source_hash: v2:sha256:bb1fbbbed2970dbad84384bf87cc857a49a30fa40716cc8d4c388115dc117297
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:8bda4a628d185eee625c110030e1aaeaf8044b4edf0ddeb18262f3670c753ed0
+commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+updated: "2026-10-24"
 ---
 # internal/units
 Находит юниты документации в репозитории и классифицирует пути.

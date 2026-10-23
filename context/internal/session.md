@@ -1,8 +1,8 @@
 ---
 unit: internal/session
-source_hash: v2:sha256:dd1a4ce57261b5a01ce26bda5c816621ce624eb39dbce9cc0e354f8c8094715b
-commit: 88ca1135820fc05a2e9e2398df7e9876079719ae
-updated: "2026-10-23"
+source_hash: v2:sha256:fc249d0e0bf2269711323ad36b2cfa269e8eb47105520abb82680c53839c7889
+commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+updated: "2026-10-24"
 ---
 # internal/session
 Файлы сессии одного хода: снимок отслеживаемых файлов и журнал Stop.
