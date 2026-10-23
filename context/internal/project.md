@@ -1,8 +1,8 @@
 ---
 unit: internal/project
-source_hash: v2:sha256:c8ad9ab866fd2c81495aaa002af463578d03d75cdbd2b4dc3befaa0e4c7b9711
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:1e09652df1264f9073dec8128776e25cb254a99e9206579d0566024ef543b9fa
+commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+updated: "2026-10-24"
 ---
 # internal/project
 Сервисный слой: открывает репозиторий и даёт хукам и CLI общие операции.

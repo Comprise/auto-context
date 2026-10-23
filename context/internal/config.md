@@ -1,8 +1,8 @@
 ---
 unit: internal/config
-source_hash: v2:sha256:d790fe6ccc5fd3aa37eaa488d93ce88f0b96436ec50f103ea6006d5819c1e4c2
-commit: 19511e26ff09abf55f0e0dfd25708180df415a88
-updated: "2026-10-23"
+source_hash: v2:sha256:716c8bcaef690c7828ac5b4163f1e3f6d30f84dded5bf1c954b5efe54fe814eb
+commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+updated: "2026-10-24"
 ---
 # internal/config
 Читает, валидирует и правит необязательный `.auto-context/config.yaml`.

@@ -1,3 +1,9 @@
+---
+unit: internal/filestat
+source_hash: v2:sha256:cdf7f3c391b33c8900a5960c0f3126fb815bdede7403a40b61073ca4dc6ad1ea
+commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+updated: "2026-10-24"
+---
 # internal/filestat
 Отпечаток файла для обнаружения изменений (mtime и размер) — общий тип для обнаружения, снимка сессии и хуков.
 
