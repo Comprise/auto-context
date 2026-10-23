@@ -1,8 +1,8 @@
 ---
 unit: internal/frontmatter
-source_hash: v2:sha256:697cca0c86dd142c5c5ee8acd0afdf0977ac66f7134fbf2f577045f9f74b840c
-commit: 19511e26ff09abf55f0e0dfd25708180df415a88
-updated: "2026-10-23"
+source_hash: v2:sha256:e99fd10b5e5ab8328c738a27b31c7f1989305b4125aa5ba7030d35fa5b63f1c4
+commit: 3fb9b3fc6523bdc0b72747d317d2141f3e0403e1
+updated: "2026-10-24"
 ---
 # internal/frontmatter
 Читает и пишет YAML-блок меты в контекстных файлах.
