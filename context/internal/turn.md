@@ -1,7 +1,7 @@
 ---
 unit: internal/turn
-source_hash: v2:sha256:cf2d73d38de5ec6d79760314c0f299ad55eb2b218e23cb4ea8adcb7ac8cfea1d
-commit: 0e4d636f85b1363e33f670aeb1fc039758bf541a
+source_hash: v2:sha256:d1e25a2e58118ba9adcc243d6173fd37e9c2711bc8aaa6b9ad75af761df77fef
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
 updated: "2026-10-24"
 ---
 # internal/turn

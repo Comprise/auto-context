@@ -1,8 +1,8 @@
 ---
 unit: internal/docstate
-source_hash: v2:sha256:08511c9b0938d8493dab4106d53ae5ee14f352552c23dc95a986eecff57db51e
-commit: 6c7751524316012c95259dc13b3b61559f256cf3
-updated: "2026-10-23"
+source_hash: v2:sha256:2f1ba260912b3c7d37a413781909f6dbec7b25b6b9e1a9660b2ec3167f6dddef
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
+updated: "2026-10-24"
 ---
 # internal/docstate
 Определяет, актуальны ли context-документы юнитов, и фиксирует актуальность.

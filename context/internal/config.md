@@ -1,7 +1,7 @@
 ---
 unit: internal/config
-source_hash: v2:sha256:716c8bcaef690c7828ac5b4163f1e3f6d30f84dded5bf1c954b5efe54fe814eb
-commit: e937888bfb3fd64cdc9184590b6bdac2450f66e7
+source_hash: v2:sha256:625bb970d517b53e5a89ea7a68d95ec32c2b8e53f693675fa5adb42498d0fcbc
+commit: c1bec2b5cbe35cde1bcf38cbdaecb885b111345f
 updated: "2026-10-24"
 ---
 # internal/config
