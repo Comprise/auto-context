@@ -1,0 +1,10 @@
+# What runs on users' machines or decides what reaches them needs the owner's review.
+/.github/            @Comprise
+/bin/                @Comprise
+/hooks/              @Comprise
+/.claude-plugin/     @Comprise
+/.codex-plugin/      @Comprise
+/.agents/            @Comprise
+/.gitattributes      @Comprise
+/Makefile            @Comprise
+/tools/              @Comprise

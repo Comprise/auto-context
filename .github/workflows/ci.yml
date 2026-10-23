@@ -1,28 +1,31 @@
 name: ci
 
+# No paths-ignore: test, plugin and lint are required checks, and a workflow
+# skipped by paths never reports a status, so a docs-only PR could not merge.
 on:
   push:
     branches: [main]
-    paths-ignore: &docs
-      # Docs only: nothing to build or test. Skills are Markdown too but are
-      # validated by the plugin job, so they are not listed here.
-      - 'context/**'
-      - 'docs/**'
-      - '**/CLAUDE.md'
-      - 'CLAUDE.md'
-      - 'README.md'
-      - 'LICENSE'
   pull_request:
-    paths-ignore: *docs
+  schedule:
+    # Weekly: govulncheck finds new CVEs in a released version without a
+    # commit, and the fuzz job runs. GitHub disables schedules after 60 days
+    # without activity in the repository.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
   workflow_call:
+    inputs:
+      cache:
+        description: Use the setup-go module and build cache (release runs pass false).
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 # A newer push to the same branch or PR cancels the run in progress. Release
-# runs (tags) are never cancelled.
+# runs (tags) are never cancelled; scheduled runs have their own group.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
@@ -39,12 +42,85 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          # inputs.cache is null outside workflow_call, and null != false is
+          # false in expressions (both coerce to 0): compare its JSON instead.
+          cache: ${{ toJSON(inputs.cache) != 'false' }}
+      - name: Versions
+        # The code matches git's messages and behaviour: keep its version in the log.
+        run: |
+          git --version
+          go version
       - run: go mod verify
       - run: go vet ./...
-      - run: go test ./...
+      - name: Test (race, shuffled, no unexpected skips)
+        # One run: -json goes to check-skips.sh, which prints the output of
+        # failures and fails on a skip not in .github/scripts/allowed-skips.txt
+        # (a test that skips because its setup broke checks nothing). bash:
+        # pipefail keeps go test's exit status.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: go test -race -shuffle=on -count=1 -json ./... | sh .github/scripts/check-skips.sh
+      - name: Test
+        if: runner.os != 'Linux'
+        run: go test ./...
       - name: Shim syntax
         shell: bash
         run: sh -n bin/auto-context
+
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+      SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ toJSON(inputs.cache) != 'false' }}
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: gofmt
+        run: |
+          out=$(gofmt -l cmd internal)
+          if [ -n "$out" ]; then echo "::error::gofmt -l lists files:"; echo "$out"; exit 1; fi
+      - run: go mod verify && (cd tools && go mod verify)
+      # The tools are pinned by tools/go.mod and go.sum, not by the runner image.
+      - name: staticcheck
+        run: go tool -modfile=tools/go.mod staticcheck ./...
+      - name: govulncheck
+        run: go tool -modfile=tools/go.mod govulncheck ./...
+      - name: Install shellcheck
+        # A release archive checked against its sha256: the image's shellcheck
+        # changes with the image, and third-party actions are not allowed.
+        run: |
+          dir="$RUNNER_TEMP/shellcheck"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/sc.tar.gz" "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+          echo "${SHELLCHECK_SHA256}  $dir/sc.tar.gz" | sha256sum -c -
+          tar -xzf "$dir/sc.tar.gz" -C "$dir" --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck -s sh -S warning bin/auto-context .github/scripts/*.sh
+      - name: actionlint
+        # Uses the shellcheck above for the run: scripts.
+        run: go tool -modfile=tools/go.mod actionlint
+      - name: Shim under dash and busybox sh
+        # Users' /bin/sh may be dash or busybox: both must parse the shim and
+        # run the binary through it.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dash busybox
+          dash -n bin/auto-context
+          busybox sh -n bin/auto-context
+          make build VERSION=ci
+          test "$(dash bin/auto-context version)" = ci
+          test "$(busybox sh bin/auto-context version)" = ci
 
   plugin:
     runs-on: ubuntu-latest
@@ -54,16 +130,37 @@ jobs:
           persist-credentials: false
       - name: Validate Codex manifests
         run: sh .github/scripts/check-manifests.sh .
+      - name: Install the claude CLI
+        run: sh .github/scripts/install-claude.sh
       - name: Validate plugin and marketplace manifests
-        run: npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate .
+        run: claude plugin validate .
       - name: Validate the shipped tree strictly
         # The repo root warns about its dev CLAUDE.md and the version the release
         # stamps; the tree users get must pass with no warning at all.
         run: |
           tree="$RUNNER_TEMP/tree"
           mkdir -p "$tree"
-          cp -r .claude-plugin .codex-plugin .agents hooks skills bin README.md README.ru.md LICENSE "$tree/"
+          cp -r .claude-plugin .codex-plugin .agents hooks skills bin README.md README.ru.md LICENSE .gitattributes "$tree/"
           jq '.version="0.0.0-ci"' .claude-plugin/plugin.json > "$tree/.claude-plugin/plugin.json"
           jq '.version="0.0.0-ci"' .codex-plugin/plugin.json > "$tree/.codex-plugin/plugin.json"
           sh .github/scripts/check-manifests.sh "$tree" 0.0.0-ci
-          cd "$tree" && npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate --strict .
+          cd "$tree" && claude plugin validate --strict .
+
+  fuzz:
+    # Scheduled (or by hand): 20 s for each Fuzz target.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - run: sh .github/scripts/fuzz.sh 20s
+      - name: Keep failing inputs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-failures
+          path: '**/testdata/fuzz/**'

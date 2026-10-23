@@ -7,7 +7,8 @@ on:
 permissions:
   contents: read
 
-concurrency: release
+# One run per tag: a run of another tag is neither cancelled nor queued behind.
+concurrency: release-${{ github.ref }}
 
 jobs:
   guard:
@@ -24,10 +25,27 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-pre]"; exit 1; }
       - name: Tag commit is on main
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: CHANGELOG has notes for the tag
+        run: sh .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
+      - name: dist tag, if any, is from this tag's run
+        # publish reuses an existing dist/<tag> on a re-run. One made by
+        # rollback.yml (or by a run of another commit) holds another tree:
+        # reusing it would publish new notes over the old code.
+        run: |
+          dist="refs/tags/dist/$GITHUB_REF_NAME"
+          if commit=$(git rev-parse -q --verify "$dist^{commit}"); then
+            if ! git log -1 --format=%B "$commit" | grep -qxF "source: $GITHUB_SHA"; then
+              echo "::error::dist/$GITHUB_REF_NAME already exists and is not this tag's release (a rollback took the version $GITHUB_REF_NAME?). Tag a version above it."
+              exit 1
+            fi
+          fi
 
   test:
     needs: guard
     uses: ./.github/workflows/ci.yml
+    with:
+      # No module or build cache written by main or PR runs in a release.
+      cache: false
 
   build:
     needs: test
@@ -43,32 +61,165 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-          # No module cache from other runs in a release build.
           cache: false
       - run: go mod verify
       - name: Build
+        # The Makefile holds the build flags (one source for local and release builds).
         env:
-          CGO_ENABLED: '0'
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          EXT: ${{ matrix.goos == 'windows' && '.exe' || '' }}
+          PLATFORM: ${{ matrix.goos }}/${{ matrix.goarch }}
         run: |
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o "libexec/auto-context-${GOOS}-${GOARCH}${EXT}" ./cmd/auto-context
+          make dist VERSION="$GITHUB_REF_NAME" PLATFORMS="$PLATFORM"
+          go version -m libexec/*
+          sha256sum libexec/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bin-${{ matrix.goos }}-${{ matrix.goarch }}
           path: libexec/*
+          if-no-files-found: error
 
-  publish:
+  reproduce:
+    # The same commit and toolchain (pinned in go.mod) must give the same bytes
+    # on another runner, so anyone can check a release binary against the source.
     needs: build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bin-linux-amd64
+          path: ${{ runner.temp }}/released
+      - name: Rebuild linux/amd64 and compare
+        run: |
+          make dist VERSION="$GITHUB_REF_NAME" PLATFORMS=linux/amd64
+          a=$(sha256sum < libexec/auto-context-linux-amd64)
+          b=$(sha256sum < "$RUNNER_TEMP/released/auto-context-linux-amd64")
+          echo "rebuilt  $a"
+          echo "released $b"
+          [ "$a" = "$b" ] || { echo "::error::linux/amd64 build is not reproducible"; exit 1; }
+
+  package:
+    # The tree users install, its archive, checksums and the release notes.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: bin-*
+          path: libexec
+          merge-multiple: true
+      - name: Tree, archive and checksums
+        run: |
+          tree="$RUNNER_TEMP/tree"
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$tree" "$out"
+          # .gitattributes keeps the shim LF in a clone with core.autocrlf.
+          cp -r .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE .gitattributes "$tree/"
+          # plugin.json on main has no version; the tag is the single source.
+          for m in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
+            jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' "$m" > "$tree/$m"
+          done
+          chmod +x "$tree"/libexec/* "$tree/bin/auto-context"
+          # In the tree: paths relative to the plugin directory, no archive line,
+          # so `sha256sum -c checksums.txt` works where the plugin is installed.
+          (cd "$tree" && sha256sum libexec/auto-context-*) > "$RUNNER_TEMP/tree-checksums.txt"
+          mv "$RUNNER_TEMP/tree-checksums.txt" "$tree/checksums.txt"
+          sh .github/scripts/check-manifests.sh "$tree" "${GITHUB_REF_NAME#v}" release
+          archive="auto-context-${GITHUB_REF_NAME}.tar.gz"
+          tar -czf "$out/$archive" -C "$tree" .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE .gitattributes checksums.txt
+          # The release asset: flat names, so `sha256sum -c` works in a
+          # directory with the downloaded assets; it also covers the archive.
+          (cd "$tree/libexec" && sha256sum auto-context-*) > "$out/checksums.txt"
+          (cd "$out" && sha256sum "$archive") >> "$out/checksums.txt"
+          cat "$out/checksums.txt"
+          sh .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > "$out/notes.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+
+  validate:
+    # The npm code of the claude CLI runs here, in a job with a read-only token
+    # and no publishing step.
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: ${{ runner.temp }}/out
+      - name: Unpack the tree users install
+        run: |
+          mkdir -p "$RUNNER_TEMP/tree"
+          tar -xzf "$RUNNER_TEMP/out/auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$RUNNER_TEMP/tree"
+          sh .github/scripts/check-manifests.sh "$RUNNER_TEMP/tree" "${GITHUB_REF_NAME#v}" release
+      - name: Install the claude CLI
+        run: sh .github/scripts/install-claude.sh
+      - name: Validate strictly
+        # --strict: warnings (most broken skill frontmatter, an unknown hook
+        # event) fail the release; without it validate exits 0 on them.
+        # TestSkillsFrontmatter covers the YAML the validator lets through.
+        working-directory: ${{ runner.temp }}/tree
+        run: claude plugin validate --strict .
+
+  smoke:
+    # Each binary runs once through the shim from the archive before users get it.
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel: the x86-64 macOS runner (macos-13 is retired).
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: ${{ runner.temp }}/out
+      - name: Version and SessionStart through the shim
+        run: |
+          # Forward slashes: bash and the Windows binary both read D:/a/_temp.
+          tmp=${RUNNER_TEMP//\\//}
+          tree="$tmp/tree"
+          fx="$tmp/fixture"
+          mkdir -p "$tree" "$fx/context"
+          # A relative archive name: GNU tar reads "D:..." as a remote host.
+          (cd "$tmp/out" && tar -xzf "auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$tree")
+          v=$(sh "$tree/bin/auto-context" version)
+          [ "$v" = "$GITHUB_REF_NAME" ] || { echo "::error::version printed '$v', want $GITHUB_REF_NAME"; exit 1; }
+          printf -- '---\nsummary: smoke\n---\n# smoke\n' > "$fx/context/_root.md"
+          git -C "$fx" init -q
+          cd "$fx"
+          echo '{}' | CLAUDE_PROJECT_DIR="$fx" sh "$tree/bin/auto-context" hook session-start > out.json
+          cat out.json
+          jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' out.json
+
+  publish:
+    needs: [package, validate, smoke, reproduce]
+    runs-on: ubuntu-latest
+    # Required reviewers on the environment: nothing gets a write token unapproved.
+    environment: release
     permissions:
       contents: write
       id-token: write
       attestations: write
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -76,73 +227,115 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: libexec
-          merge-multiple: true
+          name: dist
+          path: ${{ runner.temp }}/out
+      - name: Unpack the tree
+        run: |
+          mkdir -p "$RUNNER_TEMP/tree"
+          tar -xzf "$RUNNER_TEMP/out/auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$RUNNER_TEMP/tree"
+          sh .github/scripts/check-manifests.sh "$RUNNER_TEMP/tree" "${GITHUB_REF_NAME#v}" release
       - name: Attest build provenance
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
-          subject-path: 'libexec/*'
-      - name: Stamp plugin version
-        # plugin.json on main has no version; the tag is the single source.
+          subject-path: |
+            ${{ runner.temp }}/tree/libexec/*
+            ${{ runner.temp }}/tree/checksums.txt
+            ${{ runner.temp }}/out/auto-context-*.tar.gz
+            ${{ runner.temp }}/out/checksums.txt
+      - name: Draft GitHub Release
+        # A draft first: users never see a release whose branch push failed.
+        # A re-run of a published tag leaves the release alone.
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' .claude-plugin/plugin.json > plugin.json.tmp && mv plugin.json.tmp .claude-plugin/plugin.json
-          jq --arg v "${GITHUB_REF_NAME#v}" '.version=$v' .codex-plugin/plugin.json > plugin.json.tmp && mv plugin.json.tmp .codex-plugin/plugin.json
-      - name: Archive and checksums
+          out="$RUNNER_TEMP/out"
+          set -- "$out/auto-context-${GITHUB_REF_NAME}.tar.gz" "$out/checksums.txt" "$RUNNER_TEMP"/tree/libexec/*
+          state=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          case $state in
+            false)
+              echo "::notice::release $GITHUB_REF_NAME is already published"
+              echo "published=true" >> "$GITHUB_OUTPUT" ;;
+            true)
+              gh release upload "$GITHUB_REF_NAME" "$@" --clobber
+              gh release edit "$GITHUB_REF_NAME" --notes-file "$out/notes.md" ;;
+            *)
+              pre=""
+              case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+              gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" \
+                --notes-file "$out/notes.md" $pre "$@" ;;
+          esac
+      - name: Update the release branch and the dist tag
+        # Users install from the branch `release`; pre-releases (a hyphen in the
+        # tag) go to `release-next` instead. A branch only moves to a higher
+        # version (an older tag pushed later would roll every user back) and
+        # only fast-forwards (no force-push): each commit holds only the tree
+        # users install and has the previous branch head as its only parent,
+        # so main's history never reaches installs; the message names the
+        # tagged commit. dist/<tag> marks the commit of every version, also of
+        # one the branch did not move to, so users can pin it. A re-run reuses
+        # the commit of an existing dist tag (only if its message names this
+        # tagged commit) and pushes nothing new.
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          chmod +x libexec/* bin/auto-context
-          tar -czf "auto-context-${GITHUB_REF_NAME}.tar.gz" .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE
-          # flat names, so `sha256sum -c` works in a directory with the downloaded assets
-          (cd libexec && sha256sum auto-context-*) > checksums.txt
-          sha256sum "auto-context-${GITHUB_REF_NAME}.tar.gz" >> checksums.txt
-      - name: Validate the tree users install
-        run: |
-          mkdir -p "$RUNNER_TEMP/tree"
-          tar -xzf "auto-context-${GITHUB_REF_NAME}.tar.gz" -C "$RUNNER_TEMP/tree"
-          sh .github/scripts/check-manifests.sh "$RUNNER_TEMP/tree" "${GITHUB_REF_NAME#v}"
-          test "$(ls "$RUNNER_TEMP/tree/libexec" | wc -l)" -eq 6
-          # --strict: warnings (most broken skill frontmatter, an unknown hook
-          # event) fail the release; without it validate exits 0 on them.
-          # TestSkillsFrontmatter covers the YAML the validator lets through.
-          cd "$RUNNER_TEMP/tree" && npx --yes @anthropic-ai/claude-code@2.1.304 plugin validate --strict .
-      - name: Update release branch
-        # Users install from this branch, so pre-releases never reach it, and it
-        # only moves to a higher version (an older tag pushed later would roll
-        # every user back). It holds only what the plugin needs (plugin.json is
-        # already stamped above). Each release is a new commit on top of the
-        # previous one only, so the branch only fast-forwards (no force-push)
-        # without pulling main's history into installs; the message names the
-        # tagged commit. A re-run of the same version pushes nothing. It is
-        # pushed before the GitHub Release, so a release never points at a
-        # stale branch.
-        if: ${{ !contains(github.ref_name, '-') }}
-        run: |
+          tree="$RUNNER_TEMP/tree"
           new="${GITHUB_REF_NAME#v}"
-          if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
-            cur=$(git show refs/remotes/origin/release:.claude-plugin/plugin.json | jq -r '.version // "0.0.0"')
-            if [ "$cur" = "$new" ] || [ "$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)" != "$new" ]; then
-              echo "::notice::release branch is at $cur; $new is not newer, branch left as is"
-              exit 0
+          case $new in *-*) branch=release-next ;; *) branch=release ;; esac
+          dist="refs/tags/dist/$GITHUB_REF_NAME"
+          head="refs/remotes/origin/$branch"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Fresh state: a rollback may have run since the checkout or the guard
+          # (this job waits for the environment approval).
+          git fetch -q "$remote" "+refs/heads/$branch:$head" 2>/dev/null || true
+          if git ls-remote --exit-code -q "$remote" "$dist" >/dev/null; then
+            git fetch -q "$remote" "+$dist:$dist"
+          fi
+          cur=""
+          if git rev-parse -q --verify "$head" >/dev/null; then
+            cur=$(git show "$head:.claude-plugin/plugin.json" | jq -r '.version // "0.0.0"')
+          fi
+          if commit=$(git rev-parse -q --verify "$dist^{commit}"); then
+            # Reuse only this tag's own commit (a re-run); the same check as in guard.
+            if ! git log -1 --format=%B "$commit" | grep -qxF "source: $GITHUB_SHA"; then
+              echo "::error::dist/$GITHUB_REF_NAME already exists and is not this tag's release (a rollback took the version $GITHUB_REF_NAME?). Tag a version above it."
+              exit 1
             fi
+            echo "::notice::dist/$GITHUB_REF_NAME exists: $commit"
+            have_tag=1
+          else
+            have_tag=0
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            # A separate index holds exactly the unpacked tree.
+            export GIT_INDEX_FILE="$RUNNER_TEMP/release.index"
+            git --git-dir="$PWD/.git" --work-tree="$tree" -C "$tree" add -A -f .
+            treeid=$(git write-tree)
+            unset GIT_INDEX_FILE
+            set --
+            if [ -n "$cur" ]; then set -- -p "$head"; fi
+            commit=$(git commit-tree "$treeid" "$@" -m "release ${GITHUB_REF_NAME}" -m "source: ${GITHUB_SHA}")
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git rm -rq --cached .
-          git add -f .claude-plugin .codex-plugin .agents hooks skills bin libexec README.md README.ru.md LICENSE
-          tree=$(git write-tree)
-          parents=""
-          if git rev-parse -q --verify refs/remotes/origin/release >/dev/null; then
-            parents="-p refs/remotes/origin/release"
+          set --
+          if [ -z "$cur" ] || sh .github/scripts/version-gt.sh "$new" "$cur"; then
+            set -- "$commit:refs/heads/$branch"
+            cur=$new
+          else
+            echo "::notice::$branch is at $cur; $new is not newer, the branch stays"
           fi
-          commit=$(git commit-tree "$tree" $parents -m "release ${GITHUB_REF_NAME}" -m "source: ${GITHUB_SHA}")
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$commit:refs/heads/release"
-      - name: GitHub Release
-        # Tags with a hyphen (v0.1.0-rc1) are pre-releases. A re-run of a
-        # published tag leaves the existing release alone.
-        run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "::notice::release $GITHUB_REF_NAME already exists"
-            exit 0
+          if [ "$have_tag" = 0 ]; then set -- "$@" "$commit:$dist"; fi
+          if [ $# -gt 0 ]; then
+            # --atomic: the branch never moves without its dist tag.
+            git push --atomic "$remote" "$@"
           fi
-          prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "auto-context-${GITHUB_REF_NAME}.tar.gz" checksums.txt libexec/* --generate-notes $prerelease
+          # Latest only when the stable branch is at this version now.
+          latest=false
+          if [ "$branch" = release ] && [ "$cur" = "$new" ]; then latest=true; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        if: steps.draft.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.branch.outputs.latest }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest="$LATEST"

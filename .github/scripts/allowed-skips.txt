@@ -1,0 +1,5 @@
+# Tests that may skip in the ubuntu CI job (`go test -json ./... | sh .github/scripts/check-skips.sh`).
+# One "<package> <test>" per line; a subtest is Test/sub. Give the reason in a
+# comment. The job runs as a non-root user with a current git, so no test is
+# expected to skip there; a skip means its setup broke and the test checks
+# nothing (see the testing audit, H-1).
