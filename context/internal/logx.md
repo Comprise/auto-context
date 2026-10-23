@@ -1,7 +1,7 @@
 ---
 unit: internal/logx
 source_hash: v2:sha256:c078f90833dca41b53bc971c167b16a588deed7afd4d39f85dc76657d6609977
-commit: c44126d5f7bca77708b36833c62e2266e53df7a0
+commit: 70dd804e5fe6b387b818953721f7694d5d020cdb
 updated: "2026-10-24"
 ---
 # internal/logx
