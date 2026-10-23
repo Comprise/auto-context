@@ -1,0 +1,8 @@
+{
+  "name": "auto-context-ci-tools",
+  "private": true,
+  "description": "Pinned CLI tools for CI: the claude CLI validates the plugin manifests.",
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.304"
+  }
+}

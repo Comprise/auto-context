@@ -409,6 +409,14 @@ func TestUpdateLFSingleLine(t *testing.T) {
 	}
 }
 
+// limit is a wall-clock limit for a test, ten times longer under -race.
+func limit(d time.Duration) time.Duration {
+	if raceOn {
+		return 10 * d
+	}
+	return d
+}
+
 // Many unclosed fence openers stay linear: no opener scans the rest of the
 // file for its closer (Q-H1).
 func TestUpdateManyUnclosedFencesFast(t *testing.T) {
@@ -421,7 +429,7 @@ func TestUpdateManyUnclosedFencesFast(t *testing.T) {
 		if err := Check(root, "CLAUDE.md"); err != nil {
 			t.Fatal(err)
 		}
-		if d := time.Since(start); d > 200*time.Millisecond {
+		if d := time.Since(start); d > limit(200*time.Millisecond) {
 			t.Errorf("%q x50000: Update+Check took %v", l, d)
 		}
 	}
@@ -484,7 +492,7 @@ func TestRenderLongSummary(t *testing.T) {
 	sum := strings.Repeat("<", k) + strings.Repeat("!--", k)
 	start := time.Now()
 	got := Render([]Entry{{"pkg", sum}})
-	if d := time.Since(start); d > 50*time.Millisecond {
+	if d := time.Since(start); d > limit(50*time.Millisecond) {
 		t.Errorf("Render took %v", d)
 	}
 	line := strings.Split(got, "\n")[2]

@@ -3,3 +3,5 @@
 .mcp.json
 /dist/
 /libexec/
+CLAUDE.local.md
+.github/tools/node_modules/

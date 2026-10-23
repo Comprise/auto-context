@@ -1,6 +1,18 @@
 include:
   - cmd/auto-context
   - internal/*
+# The defaults plus the CI tool modules (tools/go.mod and
+# .github/tools/package.json would make them units). .github/scripts without
+# /** is only not a unit: its scripts stay tracked in _root (see track).
+exclude:
+  - vendor/**
+  - node_modules/**
+  - '**/testdata/**'
+  - dist/**
+  - build/**
+  - tools/**
+  - .github/tools/**
+  - .github/scripts
 # Packaging files are not code by extension but are part of the root unit.
 track:
   - .claude-plugin/*

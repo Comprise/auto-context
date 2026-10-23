@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    # The lint tools (staticcheck, govulncheck, actionlint): one PR for all.
+    directory: /tools
+    schedule:
+      interval: weekly
+    groups:
+      tools:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    # The claude CLI that validates the plugin manifests.
+    directory: /.github/tools
+    schedule:
+      interval: weekly

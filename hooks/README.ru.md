@@ -25,7 +25,6 @@ Codex (`codex.json`):
 | `SessionEnd` | `session-end` | 3 с | удаление снимка и журнала (бюджет git 2 с); при выходе из TUI Codex его не вызывает |
 
 - Хук никогда не блокирует сессию: шим всегда выходит с 0, ошибки идут в `.auto-context/log`.
-- Список событий сверяется с `hookHandlers` в `cmd/auto-context` тестом `TestHooksJSONContract`: новое событие добавляйте в оба места.
+- `TestHooksJSONContract` (`hooks.json`) и `TestCodexHooksManifest` (`codex.json`) сверяют события, подкоманды, таймауты и бюджет git с `hookTable`/`budgetFor` в `cmd/auto-context`: новое событие добавляйте в оба файла и в код.
 - `if` у `PreToolUse` — фильтр Claude Code, чтобы бинарь не запускался на каждый Bash-вызов; само решение принимает бинарь.
 - У Codex нет `if`: фильтр по `matcher: ^Bash$`, а решение принимает бинарь.
-- `TestHooksJSONContract` сверяет `hooks.json` с `hookHandlers`, `TestCodexHooksManifest` — `codex.json`.
