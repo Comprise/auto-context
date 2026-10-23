@@ -1,9 +1,11 @@
 package docstate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +38,7 @@ func TestComputeStates(t *testing.T) {
 	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for _, u := range []string{"ok", "stale"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nSummary of "+u+".\n")
-		if err := Ack(root, tr, c, u, now, nil); err != nil {
+		if _, err := AckIfNeeded(root, tr, c, u, now, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,7 +80,7 @@ func TestComputeNoFrontmatterIsStale(t *testing.T) {
 
 func TestAckMissingDoc(t *testing.T) {
 	root, tr := setup(t)
-	err := Ack(root, tr, cache(root), "svc", time.Now(), nil)
+	_, err := AckIfNeeded(root, tr, cache(root), "svc", time.Now(), nil)
 	if err == nil || !strings.Contains(err.Error(), "ack --exclude svc") {
 		t.Fatalf("err = %v", err)
 	}
@@ -86,8 +88,8 @@ func TestAckMissingDoc(t *testing.T) {
 
 func TestAckUnknownUnit(t *testing.T) {
 	root, tr := setup(t)
-	err := Ack(root, tr, cache(root), "nope", time.Now(), nil)
-	if err == nil || err.Error() != "unknown unit nope" {
+	_, err := AckIfNeeded(root, tr, cache(root), "nope", time.Now(), nil)
+	if err == nil || err.Error() != "unknown unit nope" || !errors.Is(err, units.ErrUnknownUnit) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -136,7 +138,7 @@ func TestComputeUnreadableFileIsPerUnit(t *testing.T) {
 	c := cache(root)
 	for _, u := range []string{"ok", "svc"} {
 		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
-		if err := Ack(root, tr, c, u, time.Now(), nil); err != nil {
+		if _, err := AckIfNeeded(root, tr, c, u, time.Now(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -144,7 +146,7 @@ func TestComputeUnreadableFileIsPerUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chmod(filepath.Join(root, "svc", "a.go"), 0o644)
-	if s := statusOf(t, root, tr, "svc"); s.State != Stale || s.Note != NoteHashError || !strings.Contains(s.Detail, "permission denied") {
+	if s := statusOf(t, root, tr, "svc"); s.State != Stale || s.Note != NoteHashError || s.Detail != "permission denied" {
 		t.Errorf("svc: %+v, want stale with the read error", s)
 	}
 	if s := statusOf(t, root, tr, "ok"); s.State != OK {
@@ -162,7 +164,7 @@ func TestRootHashCoversUnitList(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/_root.md", "# r\n\nR.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, units.RootUnit, time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, units.RootUnit, time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if s := StatusOf(root, tr, c, units.RootUnit); s.State != OK {
@@ -196,12 +198,12 @@ func TestAckIsIdempotent(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
 	before, _ := os.ReadFile(p)
-	if err := Ack(root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), nil); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), nil); err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := os.ReadFile(p); string(after) != string(before) {
@@ -248,7 +250,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	root, tr := setup(t)
 	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
 	c := cache(root)
-	if err := Ack(root, tr, c, "ok", time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(root, "context", "ok.md")
@@ -256,7 +258,7 @@ func TestAckRewritesForeignUnit(t *testing.T) {
 	if err := os.WriteFile(p, []byte(strings.Replace(string(data), "unit: ok", "unit: other", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Ack(root, tr, c, "ok", time.Now(), nil); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(p); !strings.Contains(string(data), "unit: ok") {
@@ -282,10 +284,10 @@ func TestAckRecordsCommit(t *testing.T) {
 	sha := strings.Repeat("1f", 20)
 	calls := 0
 	head := func() string { calls++; return sha }
-	if err := Ack(root, tr, c, "ok", time.Now(), head); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), head); err != nil {
 		t.Fatal(err)
 	}
-	if err := Ack(root, tr, c, "ok", time.Now(), head); err != nil {
+	if _, err := AckIfNeeded(root, tr, c, "ok", time.Now(), head); err != nil {
 		t.Fatal(err)
 	}
 	m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "ok.md"))
@@ -294,5 +296,206 @@ func TestAckRecordsCommit(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("head called %d times, want 1", calls)
+	}
+}
+
+// Ack keeps working as a wrapper until its callers move to AckIfNeeded.
+func TestAckWrapper(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	if err := Ack(root, tr, cache(root), "ok", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if s := StatusOf(root, tr, cache(root), "ok"); s.State != OK || s.Note != "" {
+		t.Errorf("%+v", s)
+	}
+}
+
+// AckIfNeeded tells whether it wrote the doc, and always writes scheme v2.
+func TestAckIfNeededWritten(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nOk.\n")
+	c := cache(root)
+	w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil)
+	if err != nil || !w {
+		t.Fatalf("first: written=%v err=%v", w, err)
+	}
+	m, _, err := frontmatter.Read(root, filepath.Join(root, "context", "ok.md"))
+	if err != nil || !strings.HasPrefix(m.SourceHash, HashPrefix+"sha256:") {
+		t.Fatalf("hash %q err %v, want the v2 prefix", m.SourceHash, err)
+	}
+	if w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil || w {
+		t.Errorf("second: written=%v err=%v", w, err)
+	}
+	testutil.WriteFile(t, root, "ok/a.go", "package x\n// changed\n")
+	if w, err := AckIfNeeded(root, tr, c, "ok", time.Now(), nil); err != nil || !w {
+		t.Errorf("after a change: written=%v err=%v", w, err)
+	}
+}
+
+// writeLegacy records the hash of the old scheme (all files, all units, no
+// prefix) in unit's doc.
+func writeLegacy(t *testing.T, root string, tr *units.Tree, unit string) {
+	t.Helper()
+	var extra []string
+	if unit == units.RootUnit {
+		for _, u := range tr.Units() {
+			if u.Path != units.RootUnit {
+				extra = append(extra, u.Path)
+			}
+		}
+	}
+	h, err := hashing.SourceHash(root, tr.Files(unit), extra, cache(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := frontmatter.SetHash(root, filepath.Join(root, "context", unit+".md"), unit, h, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A doc acked by v1.0.0 (old scheme) is ok with a note while the code did
+// not change; ack moves it to v2.
+func TestLegacyHashIsOKWithNote(t *testing.T) {
+	root, tr := setup(t)
+	for _, u := range []string{"ok", units.RootUnit} {
+		testutil.WriteFile(t, root, "context/"+u+".md", "# "+u+"\n\nS.\n")
+		writeLegacy(t, root, tr, u)
+		s := StatusOf(root, tr, cache(root), u)
+		if s.State != OK || s.Note != NoteOldScheme || !OldScheme(s) || s.Summary != "S." {
+			t.Errorf("%s: %+v, want ok with %q", u, s, NoteOldScheme)
+		}
+	}
+	if w, err := AckIfNeeded(root, tr, cache(root), "ok", time.Now(), nil); err != nil || !w {
+		t.Fatalf("upgrade: written=%v err=%v", w, err)
+	}
+	if s := StatusOf(root, tr, cache(root), "ok"); s.State != OK || s.Note != "" || OldScheme(s) {
+		t.Errorf("after ack: %+v", s)
+	}
+}
+
+func TestLegacyMismatchIsStale(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nS.\n")
+	writeLegacy(t, root, tr, "ok")
+	testutil.WriteFile(t, root, "ok/a.go", "package x\n// changed\n")
+	if s := StatusOf(root, tr, cache(root), "ok"); s.State != Stale || s.Note != "" || OldScheme(s) {
+		t.Errorf("%+v, want plain stale", s)
+	}
+}
+
+// Q-L8: _root cannot be excluded, so the hint does not suggest it.
+func TestAckRootMissingMessage(t *testing.T) {
+	root, tr := setup(t)
+	_, err := AckIfNeeded(root, tr, cache(root), units.RootUnit, time.Now(), nil)
+	if err == nil || err.Error() != "no context/_root.md: create it (the root unit cannot be excluded)" {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestSummaryOf(t *testing.T) {
+	root, tr := setup(t)
+	testutil.WriteFile(t, root, "context/ok.md", "# ok\n\nSummary of ok.\n")
+	if s := SummaryOf(root, "ok"); s != "Summary of ok." {
+		t.Errorf("not acked: %q", s)
+	}
+	if _, err := AckIfNeeded(root, tr, cache(root), "ok", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if s := SummaryOf(root, "ok"); s != "Summary of ok." {
+		t.Errorf("acked: %q", s)
+	}
+	if s := SummaryOf(root, "svc"); s != "" {
+		t.Errorf("missing: %q", s)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "context", "dir.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if s := SummaryOf(root, "dir"); s != "" {
+		t.Errorf("directory: %q", s)
+	}
+}
+
+// A-H1: untracked files do not enter source_hash, so a doc acked with an
+// untracked file in the unit is ok in a clean clone.
+func TestSourceHashIgnoresUntracked(t *testing.T) {
+	testutil.RequireGit(t)
+	src := t.TempDir()
+	testutil.WriteFile(t, src, "svc/a.go", "package x\n")
+	testutil.WriteFile(t, src, "context/svc.md", "# svc\n\nS.\n")
+	testutil.WriteFile(t, src, "context/_root.md", "# r\n\nR.\n")
+	testutil.Git(t, src, "init", "-q")
+	testutil.Git(t, src, "add", "-A")
+	testutil.Git(t, src, "commit", "-q", "-m", "init")
+	testutil.WriteFile(t, src, "svc/scratch.go", "package x\n// local\n")
+	testutil.WriteFile(t, src, "tmp/b.go", "package y\n") // an untracked would-be unit
+	cfg := config.Default()
+	cfg.Include = []string{"svc", "tmp"}
+	discover := func(root string) *units.Tree {
+		tr, err := units.Discover(root, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	tr := discover(src)
+	for _, u := range []string{"svc", units.RootUnit} {
+		if _, err := AckIfNeeded(src, tr, cache(src), u, time.Now(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	testutil.Git(t, src, "add", "context")
+	testutil.Git(t, src, "commit", "-q", "-m", "ack")
+	dst := filepath.Join(t.TempDir(), "clone")
+	testutil.Git(t, src, "clone", "-q", src, dst)
+	ctr := discover(dst)
+	for _, u := range []string{"svc", units.RootUnit} {
+		if s := StatusOf(dst, ctr, cache(dst), u); s.State != OK || s.Note != "" {
+			t.Errorf("clone %s: %+v, want ok", u, s)
+		}
+		if s := StatusOf(src, tr, cache(src), u); s.State != OK || s.Note != "" {
+			t.Errorf("work tree %s: %+v, want ok", u, s)
+		}
+	}
+}
+
+// Golden old-scheme hashes of the tree TestLegacyGoldenGitMode builds: the
+// full view, the untracked svc/scratch.go and the untracked-only unit tmp
+// included. Hardcoded so the test pins v1.0.0's rules, not legacyHash's.
+const (
+	goldenLegacySvc  = "sha256:a4040191816104c65bbbbe3aa8724cb0336d23d890ec082bdf65aec9d629ca44"
+	goldenLegacyRoot = "sha256:55327ffdc1ef8cab18dba1a865ff1c251c3f087ae69f862411f77dedd50ee79c"
+)
+
+// In git mode the old scheme covers untracked files and units; a doc acked by
+// v1.0.0 over such a tree is ok with NoteOldScheme.
+func TestLegacyGoldenGitMode(t *testing.T) {
+	testutil.RequireGit(t)
+	root := t.TempDir()
+	testutil.WriteFile(t, root, "svc/a.go", "package x\n")
+	testutil.Git(t, root, "init", "-q")
+	testutil.Git(t, root, "add", "-A")
+	testutil.Git(t, root, "commit", "-q", "-m", "init")
+	testutil.WriteFile(t, root, "svc/scratch.go", "package x\n// local\n")
+	testutil.WriteFile(t, root, "tmp/b.go", "package y\n")
+	doc := func(unit, hash string) string {
+		return "---\nunit: " + unit + "\nsource_hash: " + hash + "\n---\n# " + unit + "\n\nS.\n"
+	}
+	testutil.WriteFile(t, root, "context/svc.md", doc("svc", goldenLegacySvc))
+	testutil.WriteFile(t, root, "context/_root.md", doc(units.RootUnit, goldenLegacyRoot))
+	cfg := config.Default()
+	cfg.Include = []string{"svc", "tmp"}
+	tr, err := units.Discover(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tr.IsUnit("tmp") || slices.Contains(tr.HashUnits(), "tmp") || slices.Contains(tr.HashFiles("svc"), "svc/scratch.go") {
+		t.Fatalf("fixture is not in git mode: units %v hash units %v", tr.Units(), tr.HashUnits())
+	}
+	for _, u := range []string{"svc", units.RootUnit} {
+		if s := StatusOf(root, tr, cache(root), u); !OldScheme(s) {
+			l, _ := legacyHash(root, tr, cache(root), u)
+			t.Errorf("%s: %+v, want ok with %q (legacyHash now %s)", u, s, NoteOldScheme, l)
+		}
 	}
 }

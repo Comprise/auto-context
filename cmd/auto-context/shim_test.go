@@ -166,3 +166,99 @@ func TestShimPlatformMapping(t *testing.T) {
 		}
 	})
 }
+
+// A relative PATH entry (here the working directory) never supplies the
+// shim's own utilities.
+func TestShimRelativePATHEntry(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "marker")
+	cwd := t.TempDir()
+	testutil.WriteFile(t, cwd, "uname", "#!/bin/sh\necho pwned > '"+marker+"'\necho Linux\n")
+	if err := os.Chmod(filepath.Join(cwd, "uname"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := plugin(t, hostBinary(), "echo ran")
+	cmd := exec.Command("sh", filepath.Join(dir, "bin", "auto-context"), "version")
+	cmd.Dir = cwd
+	cmd.Env = append(os.Environ(), "PATH=."+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "ran" {
+		t.Errorf("err=%v out=%q", err, out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("uname from the working directory was executed")
+	}
+}
+
+// Filtering is not replacement: an absolute PATH entry still supplies the
+// shim's utilities.
+func TestShimUsesAbsolutePATHEntry(t *testing.T) {
+	fake := t.TempDir()
+	testutil.WriteFile(t, fake, "uname", "#!/bin/sh\ncase \"$1\" in -s) echo Darwin ;; -m) echo arm64 ;; esac\n")
+	if err := os.Chmod(filepath.Join(fake, "uname"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := plugin(t, "auto-context-darwin-arm64", "echo ran")
+	if _, out, _ := shim(t, dir, t.TempDir(), "version"); strings.TrimSpace(out) != "ran" {
+		t.Errorf("out = %q, fake uname was not used", out)
+	}
+}
+
+// The binary gets the caller's PATH, not the shim's narrowed one (git may
+// live in /opt/homebrew/bin).
+func TestShimPassesOriginalPATH(t *testing.T) {
+	dir := plugin(t, hostBinary(), `echo "$PATH"`)
+	want := "/opt/fake/bin" + string(os.PathListSeparator) + os.Getenv("PATH")
+	t.Setenv("PATH", want)
+	for _, args := range [][]string{{"version"}, {"hook", "session-start"}, {"hook", "stop"}} {
+		_, out, _ := shim(t, dir, t.TempDir(), args...)
+		if strings.TrimSpace(out) != want {
+			t.Errorf("%v: PATH = %q, want %q", args, strings.TrimSpace(out), want)
+		}
+	}
+}
+
+// HOME with a trailing slash still marks the home directory: a project below
+// it is not rooted at a home that merely contains .git.
+func TestShimHomeTrailingSlash(t *testing.T) {
+	dir := plugin(t, hostBinary(), "")
+	home := t.TempDir()
+	testutil.WriteFile(t, home, ".auto-context/config.yaml", "min_files: 1\n")
+	testutil.WriteFile(t, home, "proj/x.go", "package x\n")
+	if err := os.MkdirAll(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proj := filepath.Join(home, "proj")
+	link := filepath.Join(t.TempDir(), "homelink")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		home, proj string
+		notice     bool
+	}{
+		"trailing slash":  {home + "/", proj, false},
+		"symlinked HOME":  {link, proj, false},
+		"symlinked start": {home, filepath.Join(link, "proj"), false},
+		"unrelated HOME":  {t.TempDir(), proj, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", c.home)
+			_, out, _ := shim(t, dir, c.proj, "hook", "session-start")
+			if got := strings.Contains(out, "docs tracking is off"); got != c.notice {
+				t.Errorf("notice %v, want %v (%q)", got, c.notice, out)
+			}
+		})
+	}
+}
+
+// .gitattributes pins the shim to LF so a CRLF checkout cannot break it.
+func TestShimGitattributesLF(t *testing.T) {
+	out, err := exec.Command("git", "-C", filepath.Join("..", ".."), "check-attr", "eol", "--", "bin/auto-context").Output()
+	if err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	if !strings.Contains(string(out), "eol: lf") {
+		t.Errorf("check-attr = %q, want eol: lf", out)
+	}
+}

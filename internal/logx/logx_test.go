@@ -345,3 +345,48 @@ func TestLockExcl(t *testing.T) {
 		t.Fatalf("stale lock kept: %v %v", ok, err)
 	}
 }
+
+// A stale lock replaced by a fresh one between the staleness check and the
+// removal must not be removed: the new holder would lose its lock.
+func TestStaleLockNotStolen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.lock")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	beforeRemove = func() {
+		if fired {
+			return
+		}
+		fired = true
+		tmp := path + ".new"
+		if err := os.WriteFile(tmp, nil, 0o644); err != nil {
+			t.Error(err)
+		}
+		if err := os.Rename(tmp, path); err != nil { // fresh lock takes the place
+			t.Error(err)
+		}
+	}
+	defer func() { beforeRemove = nil }()
+	_, ok, err := lockExcl(path)
+	if err != nil || ok {
+		t.Fatalf("ok=%v err=%v, want the fresh lock respected", ok, err)
+	}
+	if st, err := os.Stat(path); err != nil || time.Since(st.ModTime()) > time.Minute {
+		t.Fatalf("fresh lock was removed: %v", err)
+	}
+}
+
+// In an active project without .auto-context the first entry creates the
+// state dir together with its .gitignore.
+func TestWriteCreatesStateDirGitignore(t *testing.T) {
+	root := t.TempDir()
+	Errorf(root, "x")
+	if _, err := os.Stat(filepath.Join(root, ".auto-context", ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+}

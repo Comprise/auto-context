@@ -1,1 +1,2 @@
 *.golden.json -text
+bin/auto-context text eol=lf
