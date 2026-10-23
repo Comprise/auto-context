@@ -1,7 +1,7 @@
 ---
 unit: internal/project
-source_hash: v2:sha256:a823ec79ea5bc77adc4a20140e7aec7bdb950d56760ea6a511040febc8524e56
-commit: 0e4d636f85b1363e33f670aeb1fc039758bf541a
+source_hash: v2:sha256:207777cbc4048fe20f59d5781ab0c30abd614c01a6cba09e72865250be4a6f1e
+commit: 970e63dc424eef358ccbff6be95a8fa5076775d3
 updated: "2026-10-24"
 ---
 # internal/project
