@@ -1,18 +1,19 @@
 name: rollback
 
 # Puts an earlier release back on the branch `release` without a force-push: a
-# new commit on top of the branch holds the tree of dist/<to> with the version
+# new commit on top of the branch holds the tree of the release commit of <to>
+# (subject "release <to>" in the history of `release`) with the version
 # <current>+1 patch, so installed plugins update to it (they only move to a
 # higher version). The binaries keep the version they were built with, which
 # `auto-context version` shows. The next real release must be higher than the
-# rollback version: release.yml refuses a tag whose dist tag a rollback made,
-# in guard and again in publish right before it pushes (a rollback may run
-# while the release waits for approval); see docs/RELEASING.md.
+# rollback version: release.yml refuses a version a rollback took, in guard
+# and again in publish right before it pushes (a rollback may run while the
+# release waits for approval); see docs/RELEASING.md.
 on:
   workflow_dispatch:
     inputs:
       to:
-        description: The dist tag of the release to go back to (dist/vX.Y.Z)
+        description: The version to go back to (vX.Y.Z), released on the branch release
         required: true
         type: string
 
@@ -41,18 +42,20 @@ jobs:
           TO: ${{ inputs.to }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "$TO" | grep -Eq '^dist/v[0-9]+\.[0-9]+\.[0-9]+$' || {
-            echo "::error::'$TO' is not a stable dist tag dist/vX.Y.Z"; exit 1; }
-          git rev-parse -q --verify "refs/tags/$TO^{commit}" >/dev/null || {
-            echo "::error::tag $TO does not exist"; exit 1; }
+          echo "$TO" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::'$TO' is not a stable version vX.Y.Z"; exit 1; }
           head=refs/remotes/origin/release
+          # The newest commit of release whose subject is exactly "release $TO".
+          src=$(git log --format='%H %s' "$head" | awk -v s="release $TO" 'substr($0, 42) == s { print $1; exit }')
+          [ -n "$src" ] || {
+            echo "::error::release has no commit of $TO"; exit 1; }
           cur=$(git show "$head:.claude-plugin/plugin.json" | jq -r .version)
           echo "$cur" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
             echo "::error::release is at '$cur', not X.Y.Z"; exit 1; }
           next="${cur%.*}.$(( ${cur##*.} + 1 ))"
           tree="$RUNNER_TEMP/tree"
           mkdir -p "$tree"
-          git archive "$TO" | tar -x -C "$tree"
+          git archive "$src" | tar -x -C "$tree"
           for m in .claude-plugin/plugin.json .codex-plugin/plugin.json; do
             jq --arg v "$next" '.version=$v' "$tree/$m" > "$tree/$m.tmp" && mv "$tree/$m.tmp" "$tree/$m"
           done
@@ -63,8 +66,8 @@ jobs:
           git --git-dir="$PWD/.git" --work-tree="$tree" -C "$tree" add -A -f .
           treeid=$(git write-tree)
           unset GIT_INDEX_FILE
-          commit=$(git commit-tree "$treeid" -p "$head" -m "rollback to ${TO#dist/} as v$next" \
-            -m "tree: $TO ($(git rev-parse "$TO^{commit}")), run by ${GITHUB_ACTOR}")
-          git push --atomic "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "$commit:refs/heads/release" "$commit:refs/tags/dist/v$next"
+          commit=$(git commit-tree "$treeid" -p "$head" -m "rollback to $TO as v$next" \
+            -m "tree: $TO ($src), run by ${GITHUB_ACTOR}")
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$commit:refs/heads/release"
           echo "::notice::release is now v$next with the tree of $TO"

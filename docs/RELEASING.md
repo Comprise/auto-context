@@ -10,16 +10,15 @@ Repository: `Comprise/auto-context`. Users install from the `release` branch; th
 2. Tag a commit of `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`. Tags with a `-` suffix
    (`vX.Y.Z-rc1`) do not touch the `release` branch.
 3. The workflow builds six binaries, provenance and `checksums.txt`, and adds a new commit on top of
-   `release` (no force-push, only to a higher version). It also creates the tag `dist/vX.Y.Z` on that commit.
+   `release` (no force-push, only to a higher version). The commit's subject is `release vX.Y.Z`.
 
-Pre-releases and dist tags:
+Pre-releases:
 
 - A tag with a `-` suffix moves the branch `release-next` instead of `release` (same rules: higher
   version only, no force-push). It can be installed to try a pre-release (`--ref release-next`).
-- `dist/<tag>` is created for every tag, also for a version the branch did not move to (not newer than
-  the branch head) and for pre-releases. Those dist tags point to commits outside `release`; the tag
-  still pins that tree, but the branch does not contain it.
-- If the publish job refuses (for example a dist tag made by a rollback), the draft GitHub Release it
+- A version the branch does not move to (not newer than the branch head) gets only its GitHub
+  Release; no commit of the branch holds its tree.
+- If the publish job refuses (for example a version a rollback took), the draft GitHub Release it
   already created stays. Delete the draft (`gh release delete vX.Y.Z --yes`), fix the cause, tag again.
 
 ## Hotfix
@@ -43,22 +42,17 @@ stop anyone. Instead:
 ## Rollback
 
 Run the workflow `rollback.yml` (Actions tab, "Run workflow", `workflow_dispatch`) with the input
-`to: dist/vX.Y.Z`, the tag of the last good tree. It re-commits that tree on top of `release` with a
-bumped patch version; history is not rewritten and nothing is force-pushed.
+`to: vX.Y.Z`, the last good version. It takes the tree of the commit `release vX.Y.Z` of the
+`release` branch and re-commits it on top of `release` with a bumped patch version; history is not
+rewritten and nothing is force-pushed.
 
 After a rollback:
 
 - The next real release tag must be above the rollback version (the rollback takes the version
-  `current+1`, and with it the tag `dist/v<that version>`). `release.yml` refuses to reuse a rollback's
-  dist tag, in `guard` and again in `publish`; tag a higher version.
+  `current+1`, commit subject `rollback to vA.B.C as v<that version>`). `release.yml` refuses a
+  version a rollback took, in `guard` and again in `publish`; tag a higher version.
 - The rolled-back tree keeps the binaries it was built with, so `auto-context version` still prints
   the old version while the plugin manifests say the rollback version.
-
-## Pinning a version
-
-Users who must stay on a version install by the tag `dist/vX.Y.Z` (it points to the commit of the
-`release` branch holding that version's tree), for example in Codex with `--ref dist/vX.Y.Z`. Pin
-by tag, never by branch.
 
 ## Release branch size
 
@@ -78,7 +72,8 @@ unproven, so `release.yml` (step "Release branch clone size", after the branch i
 bare single-branch clone and emits `::warning::` above 200 MiB. It never fails the release.
 
 Next step for the owner, when the warning appears: make each `release` commit parentless (an orphan
-commit; the history of old binaries stays reachable only through the `dist/*` tags). That needs a
+commit; the old binaries then stay only in the GitHub Releases, and a rollback can no longer find
+the trees of old versions on `release`). That needs a
 force-push to `release`, which conflicts with the ruleset that forbids it; allow it only for the
 release bot through a bypass actor of the ruleset. The no-force-push guarantees of this document
 then apply to `release-next` and rollback only. The alternative (download `libexec` from the

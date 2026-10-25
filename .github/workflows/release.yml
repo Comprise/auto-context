@@ -27,17 +27,13 @@ jobs:
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - name: CHANGELOG has notes for the tag
         run: sh .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
-      - name: dist tag, if any, is from this tag's run
-        # publish reuses an existing dist/<tag> on a re-run. One made by
-        # rollback.yml (or by a run of another commit) holds another tree:
-        # reusing it would publish new notes over the old code.
+      - name: Version not taken by a rollback
+        # rollback.yml puts an old tree on release under a new version; a tag
+        # of that version would publish new notes over the old code.
         run: |
-          dist="refs/tags/dist/$GITHUB_REF_NAME"
-          if commit=$(git rev-parse -q --verify "$dist^{commit}"); then
-            if ! git log -1 --format=%B "$commit" | grep -qxF "source: $GITHUB_SHA"; then
-              echo "::error::dist/$GITHUB_REF_NAME already exists and is not this tag's release (a rollback took the version $GITHUB_REF_NAME?). Tag a version above it."
-              exit 1
-            fi
+          if sh .github/scripts/rollback-took.sh "$GITHUB_REF_NAME" origin/release; then
+            echo "::error::a rollback took the version $GITHUB_REF_NAME. Tag a version above it."
+            exit 1
           fi
 
   test:
@@ -265,17 +261,15 @@ jobs:
               gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" \
                 --notes-file "$out/notes.md" $pre "$@" ;;
           esac
-      - name: Update the release branch and the dist tag
+      - name: Update the release branch
         # Users install from the branch `release`; pre-releases (a hyphen in the
         # tag) go to `release-next` instead. A branch only moves to a higher
         # version (an older tag pushed later would roll every user back) and
         # only fast-forwards (no force-push): each commit holds only the tree
         # users install and has the previous branch head as its only parent,
         # so main's history never reaches installs; the message names the
-        # tagged commit. dist/<tag> marks the commit of every version, also of
-        # one the branch did not move to, so users can pin it. A re-run reuses
-        # the commit of an existing dist tag (only if its message names this
-        # tagged commit) and pushes nothing new.
+        # tagged commit. A re-run finds the branch at this version already and
+        # pushes nothing.
         id: branch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -283,29 +277,21 @@ jobs:
           tree="$RUNNER_TEMP/tree"
           new="${GITHUB_REF_NAME#v}"
           case $new in *-*) branch=release-next ;; *) branch=release ;; esac
-          dist="refs/tags/dist/$GITHUB_REF_NAME"
           head="refs/remotes/origin/$branch"
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Fresh state: a rollback may have run since the checkout or the guard
           # (this job waits for the environment approval).
           git fetch -q "$remote" "+refs/heads/$branch:$head" 2>/dev/null || true
-          if git ls-remote --exit-code -q "$remote" "$dist" >/dev/null; then
-            git fetch -q "$remote" "+$dist:$dist"
+          # The same check as in guard.
+          if sh .github/scripts/rollback-took.sh "$GITHUB_REF_NAME" "$head"; then
+            echo "::error::a rollback took the version $GITHUB_REF_NAME. Tag a version above it."
+            exit 1
           fi
           cur=""
           if git rev-parse -q --verify "$head" >/dev/null; then
             cur=$(git show "$head:.claude-plugin/plugin.json" | jq -r '.version // "0.0.0"')
           fi
-          if commit=$(git rev-parse -q --verify "$dist^{commit}"); then
-            # Reuse only this tag's own commit (a re-run); the same check as in guard.
-            if ! git log -1 --format=%B "$commit" | grep -qxF "source: $GITHUB_SHA"; then
-              echo "::error::dist/$GITHUB_REF_NAME already exists and is not this tag's release (a rollback took the version $GITHUB_REF_NAME?). Tag a version above it."
-              exit 1
-            fi
-            echo "::notice::dist/$GITHUB_REF_NAME exists: $commit"
-            have_tag=1
-          else
-            have_tag=0
+          if [ -z "$cur" ] || sh .github/scripts/version-gt.sh "$new" "$cur"; then
             git config user.name "github-actions[bot]"
             git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
             # A separate index holds exactly the unpacked tree.
@@ -316,18 +302,10 @@ jobs:
             set --
             if [ -n "$cur" ]; then set -- -p "$head"; fi
             commit=$(git commit-tree "$treeid" "$@" -m "release ${GITHUB_REF_NAME}" -m "source: ${GITHUB_SHA}")
-          fi
-          set --
-          if [ -z "$cur" ] || sh .github/scripts/version-gt.sh "$new" "$cur"; then
-            set -- "$commit:refs/heads/$branch"
+            git push "$remote" "$commit:refs/heads/$branch"
             cur=$new
           else
             echo "::notice::$branch is at $cur; $new is not newer, the branch stays"
-          fi
-          if [ "$have_tag" = 0 ]; then set -- "$@" "$commit:$dist"; fi
-          if [ $# -gt 0 ]; then
-            # --atomic: the branch never moves without its dist tag.
-            git push --atomic "$remote" "$@"
           fi
           # Latest only when the stable branch is at this version now.
           latest=false

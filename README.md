@@ -79,14 +79,8 @@ To update, see [Updating](#updating) (auto-update for third-party marketplaces i
   `auto-context ack --upgrade` after the update (see [CI](#ci)).
 - **Upgrade every machine together.** Plugin v1.0.0 does not understand `v2:` hashes and rewrites them back to
   `sha256:` on its own auto-ack, so one teammate still on v1.0.0 undoes the upgrade for everyone.
-- **Pinning a version.** Every release is also tagged `dist/vX.Y.Z` on a commit of the release history. For a stable
-  version the `release` branch moved to, that commit is on `release`; a pre-release's tag is on the `release-next`
-  line, and a stable version released below the branch's current one (a fix for an older line) gets a commit off
-  the branch. For Codex:
-  `codex plugin marketplace add Comprise/auto-context --ref dist/vX.Y.Z`. Whether Claude Code's
-  `/plugin marketplace add` accepts a ref for a GitHub source depends on your Claude Code version; check `/plugin`
-  help, this has not been verified here. The `dist/` tags appear with the first release that publishes them. Pre-release tags move the `release-next`
-  branch instead, which testers can install with `--ref release-next`.
+- **Pre-releases.** Pre-release tags move the `release-next` branch instead of `release`; testers can install it
+  with `--ref release-next`.
 
 ## Uninstalling and disabling
 

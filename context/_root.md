@@ -1,8 +1,8 @@
 ---
 unit: _root
-source_hash: v2:sha256:db02cb5ccba5111b9dd5aee2f1835595517e5de0c6ffcdd72af79acdaebaea5e
-commit: 3fb9b3fc6523bdc0b72747d317d2141f3e0403e1
-updated: "2026-10-24"
+source_hash: v2:sha256:3890c6a8e9bf4fd120fa2e37a935529d41d63edc6e670c92c30b7e72ac6eaf2e
+commit: 635dc2f1fb3651fb6f0124f14c05fe477a2a738c
+updated: "2026-10-25"
 ---
 # _root
 Плагин Claude Code и Codex CLI на Go, который держит индексные файлы юнитов и библиотеку context/ в синхроне с кодом.
@@ -42,7 +42,9 @@ updated: "2026-10-24"
   `release.yml`; обе проверяют манифесты Claude и Codex скриптом `.github/scripts/check-manifests.sh` (в релизе — на собранном дереве, с версией тега), и релиз кладёт `.codex-plugin`, `.agents` и `README.ru.md` в дерево. По тегу `vX.Y.Z[-pre]` с коммита из main: 6 бинарников, provenance, строгая
   проверка дерева плагина, ветка `release` с файлами плагина — новый коммит поверх прежнего, без
   истории main и без force-push, только к более высокой версии; затем GitHub Release; теги с `-`
-  ветку не трогают). Релиз прикладывает шесть бинарников и `checksums.txt` с плоскими именами (`sha256sum -c` работает в каталоге скачанных файлов).
+  двигают ветку `release-next` вместо `release`). Тегов `dist/*` нет: `rollback.yml` берёт дерево
+  из коммита `release vX.Y.Z` ветки `release`, а версию, занятую откатом, `release.yml` отвергает
+  (`.github/scripts/rollback-took.sh`). Релиз прикладывает шесть бинарников и `checksums.txt` с плоскими именами (`sha256sum -c` работает в каталоге скачанных файлов).
 
 ## Инварианты и подводные камни
 - Хуки всегда завершаются с кодом 0 (шим гасит даже фатальный выход Go с кодом 2, который Claude Code
