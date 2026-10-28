@@ -1,8 +1,8 @@
 ---
 unit: _root
-source_hash: v2:sha256:3890c6a8e9bf4fd120fa2e37a935529d41d63edc6e670c92c30b7e72ac6eaf2e
-commit: 635dc2f1fb3651fb6f0124f14c05fe477a2a738c
-updated: "2026-10-25"
+source_hash: v2:sha256:b32df19939368b809c612837fe9d6f9dbe2504e2b65f6a8ce7397bf059dc30fc
+commit: ab6dfcee6d44187b5f2bc29e97492a61fcbb1978
+updated: "2026-10-29"
 ---
 # _root
 Плагин Claude Code и Codex CLI на Go, который держит индексные файлы юнитов и библиотеку context/ в синхроне с кодом.

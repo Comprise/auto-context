@@ -2,6 +2,15 @@
 
 English version: [CHANGELOG.md](CHANGELOG.md). Заметки релиза тега — раздел `## vX.Y.Z` файла CHANGELOG.md.
 
+## v1.1.1
+
+### Breaking
+
+- **Тегов `dist/vX.Y.Z` больше нет.** Релиз больше не помечает свой коммит в ветке `release`, а тег
+  `dist/v1.1.0` удалён. Закрепить версию через `--ref dist/vX.Y.Z` больше нельзя — ставьте из ветки
+  `release`. Для мейнтейнеров: `rollback.yml` теперь принимает `to: vX.Y.Z` и ищет коммит
+  `release vX.Y.Z` в ветке `release`.
+
 ## v1.1.0
 
 ### Breaking
