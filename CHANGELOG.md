@@ -2,6 +2,15 @@
 
 Russian version: [CHANGELOG.ru.md](CHANGELOG.ru.md). Release notes of a tag are the section `## vX.Y.Z` of this file.
 
+## v1.1.1
+
+### Breaking
+
+- **No more `dist/vX.Y.Z` tags.** Releases no longer tag their commit on the `release` branch, and
+  the tag `dist/v1.1.0` is deleted. Pinning a version by `--ref dist/vX.Y.Z` no longer works; install
+  from the `release` branch. For maintainers, `rollback.yml` now takes `to: vX.Y.Z` and finds the
+  commit `release vX.Y.Z` on the `release` branch.
+
 ## v1.1.0
 
 ### Breaking
